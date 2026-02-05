@@ -50,6 +50,7 @@ Task-based cooperative scheduling using TaskScheduler with two scheduler instanc
 | `_tGetInputs` | 500ms | Process queued input pin changes |
 | `tConnectMQQT` | 1s | MQTT reconnection (disables itself on success) |
 | `tWaitOnWiFi` | 1s x60 | WiFi connection wait |
+| `tNtpSync` | 2h | NTP time sync (enabled on WiFi connect) |
 
 ### Memory Management
 
@@ -88,6 +89,10 @@ Multi-output logging (Serial, MQTT topic, SD card with file rotation). Runtime-c
 - Falls back to plain rename (`.txt`) if compression fails
 
 **SdFat/SD library swap**: The project uses SdFat (Adafruit fork) for normal SD card operations, but ESP32-targz requires Arduino's `SD` library (`fs::FS` interface). During log rotation, Logger temporarily calls `_sd->end()`, initializes Arduino `SD` for compression, then restores SdFat via `_sd->begin()`. This swap is isolated to `compressFile()` in `Logger.cpp`.
+
+### NTP Time Sync
+
+RTC time is synchronized from NTP servers (`pool.ntp.org`, `time.nist.gov`) using the ESP32's built-in SNTP client. The `tNtpSync` task is enabled when WiFi connects, syncs immediately, then repeats every 2 hours. Timezone offset is configurable via `_gmtOffset_sec` and `_daylightOffset_sec` variables in `main.cpp`.
 
 ### State Machine
 
