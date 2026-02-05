@@ -82,6 +82,10 @@ JSON config stored on SD card at `/config.txt` (SdFat library, SPI interface). C
 
 Multi-output logging (Serial, MQTT topic, SD card with file rotation). Runtime-configurable level (ERROR/WARN/INFO/DEBUG) and output toggles via HTTP API.
 
+**Log format**: `[YYYY/MM/DD HH:MM:SS] [LEVEL] [TAG] message`
+- Uses RTC time from NTP sync when available
+- Falls back to `----/--/-- --:--:--` before NTP sync completes
+
 **Log rotation** follows a Linux-style scheme using ESP32-targz for compression:
 - `/log.txt` — active log (uncompressed)
 - `/log.1.tar.gz` through `/log.N.tar.gz` — rotated archives (compressed)
