@@ -9,7 +9,8 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **Remote access** — REST API, WebSocket, and MQTT for monitoring and control
 - **OTA updates** — Firmware upload via web interface
 - **SD card configuration** — WiFi, MQTT, and sensor settings stored as JSON on SD card
-- **Multi-output logging** — Serial, MQTT, and SD card with log rotation
+- **Multi-output logging** — Serial, MQTT, and SD card with tar.gz compressed log rotation
+- **NTP time sync** — Automatic time synchronization from NTP servers, refreshes every 2 hours
 - **PSRAM support** — All heap allocations routed through PSRAM when available
 
 ## Hardware
@@ -107,3 +108,4 @@ Managed automatically by PlatformIO. Key libraries:
 - [AsyncMqttClient](https://github.com/marvinroger/async-mqtt-client) — MQTT client
 - [ArduinoJson](https://github.com/bblanchon/ArduinoJson) — JSON parsing/serialization
 - [SdFat](https://github.com/adafruit/SdFat) — SD card filesystem
+- [ESP32-targz](https://github.com/tobozo/ESP32-targz) — tar.gz compression for log rotation
