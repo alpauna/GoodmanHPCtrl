@@ -18,6 +18,8 @@
 #include "CircularBuffer.hpp"
 #include "esp32-hal-psram.h"
 #include "Logger.h"
+#include "OutPin.h"
+#include "InputPin.h"
 bool psramInited = false;
 bool serialInited = false;
 
@@ -136,8 +138,6 @@ FsFile _configFile;
 #endif  // SD_FAT_TYPE
 
 
-class InputPin;
-typedef void (*InputPinCallback)(InputPin *pin);
 std::map<String, InputPin*> _isrEvent;
 
 AsyncWebServer server(80);
@@ -181,303 +181,6 @@ const u_int8_t _oPin = GPIO_NUM_18;
 #endif
 const u_int8_t ONE_WIRE_BUS = GPIO_NUM_21;
 
-class OutPinAl;
-typedef bool (*OutputPinCallback)(OutPinAl *pin, bool on, bool inCallback, float &newPercent, float lastPercent);
-enum class InputResistorType{
-  NONE,
-  IT_PULLUP,
-  IT_PULLDOWN
-};
-enum class InputPinType{
-  IT_DIGITAL,
-  IT_ANALOG
-};
-
-class OutPinAl;
-  class OutPinAl
-  {
-    private:
-      Scheduler *_ts;
-      Task *_tsk;
-      int8_t _pin;
-      String _name;
-      String _boardPin;
-      bool _inverse;
-      bool _openDrain;
-      bool _changed;
-      bool _pwm;
-      float _percentOn;
-      uint32_t _onCount = 0;
-      uint32_t _pwmFreq;
-      uint32_t _changeOnTick;
-      uint32_t _changeOffTick;
-      OutputPinCallback _clbk = nullptr;
-    protected:
-      uint8_t percent_to_byte_float(float percent) {
-        // Ensure the input is within the valid range [0.0, 100.0]
-        if (percent < 0.0) percent = 0.0;
-        if (percent > 100.0) percent = 100.0;
-
-        // Scale the percentage (0-100) to the byte range (0-255)
-        // Formula: (percent / 100.0) * 255.0
-        float value = (percent / 100.0) * 255.0;
-
-        // Cast to unsigned char. The cast truncates the value, 
-        // which is often the desired behavior for color values.
-        return (uint8_t)value;
-      }
-      void turnOnPercent(float percent){
-        float origPercent = _percentOn;
-        _percentOn = percent;
-        if(_clbk != nullptr){
-          if(!_clbk(this, isOn(), true, _percentOn, origPercent)){
-            return;
-          }  
-        }
-        _changeOnTick = millis();
-        
-        if(!_pwm){
-          digitalWrite(_pin, _inverse ? LOW : HIGH);
-        }else{
-          analogWrite(_pin, percent_to_byte_float(percent));
-        }
-      }
-    public:
-      OutPinAl ( Scheduler *ts, uint32_t delay, int8_t pin, String name, String boardPin, OutputPinCallback clbk) {
-        _ts = ts;
-        _pin = pin;
-        _name = name;
-        _boardPin = boardPin;
-        _inverse = false;
-        _openDrain = false;
-        _pwm = false;
-        _pwmFreq = 1000;
-        _clbk = clbk;
-        _percentOn = 0.0;
-        initPin();
-        
-        _tsk = new Task (delay, TASK_ONCE, [this]() {  
-            this->Callback();
-        }, ts, false);
-        
-        //_tsk = new Task (delay, TASK_ONCE, Callback, ts, false);
-      }
-      OutPinAl ( Scheduler *ts, uint32_t delay, int8_t pin, String name, String boardPin, float percentOn, OutputPinCallback clbk){
-        _ts = ts;
-        _pin = pin;
-        _name = name;
-        _boardPin = boardPin;
-        _inverse = false;
-        _openDrain = false;
-        _pwm = false;
-        _pwmFreq = 1000;
-        _clbk = clbk;
-        _percentOn = percentOn;
-        initPin();
-        _tsk = new Task (delay, TASK_ONCE, [this]() {  
-            this->Callback();
-        }, ts, false);
-      }
-      OutPinAl ( Scheduler *ts, uint32_t delay, int8_t pin, String name, String boardPin, bool pwm, OutputPinCallback clbk){
-        _ts = ts;
-        _pin = pin;
-        _name = name;
-        _boardPin = boardPin;
-        _inverse = false;
-        _openDrain = false;
-        _pwm = pwm;
-        _pwmFreq = 1000;
-        _clbk = clbk;
-        _percentOn = 0.0;
-        initPin();
-        _tsk = new Task (delay, TASK_ONCE, [this]() {  
-            this->Callback();
-        }, ts, false);
-      }
-      OutPinAl ( Scheduler *ts, uint32_t delay,  int8_t pin, String name, String boardPin, bool inverse, bool openDrain, bool pwm, float percentOn, uint32_t freq, OutputPinCallback clbk){
-        _ts = ts;
-        _pin = pin;
-        _name = name;
-        _boardPin = boardPin;
-        _inverse = inverse;
-        _openDrain = openDrain;
-        _pwm = pwm;
-        _pwmFreq = freq;
-        _clbk = clbk;
-        _percentOn = percentOn;
-        if(pwm){
-            analogWriteFrequency(_pwmFreq);
-        }
-        initPin();
-        _tsk = new Task (delay, TASK_ONCE, [this]() {  
-            this->Callback();
-        }, ts, false);
-      }
-      void Callback(){
-        _onCount++;
-        Serial.printf("new Percent: %lf,\n", _percentOn); 
-        turnOnPercent(_percentOn); 
-      }
-      String getName() {return _name;}
-      String getBoardPin() {return _boardPin;}
-      int8_t getPin(){ return _pin;}
-      void updateDelay(u_int32_t delay){
-        _tsk->setInterval(delay);
-      }
-      bool getChanged() {return _changed;}
-      bool getPWM() {return _pwm; }
-      void resetChanged() { _changed = false; }
-      uint32_t getOnTick() { return _changeOnTick; }
-      uint32_t getOffTick() { return _changeOffTick; }
-      uint32_t getOnCount() { return _onCount; }
-      void resetOnCount() { _onCount = 0; }
-      float getOnPercent() {return _percentOn;}
-      Task * getTask() {return _tsk;}
-      bool isOn() { return _percentOn > 0.0;}
-      void initPin(){
-        
-        if(!_openDrain){
-          pinMode(_pin, OUTPUT);
-        }else{
-          pinMode(_pin, OUTPUT_OPEN_DRAIN);  
-        }
-        if(!_pwm){   
-          if(_percentOn > 0.0){
-            turnOn();  
-          }else{
-            turnOff();
-          } 
-        }else{
-          turnOnPercent(_percentOn); 
-        } 
-      } 
-      void turnOff(){
-        float origPercent = _percentOn;
-        _percentOn = 0.0;
-        if(_clbk != nullptr){
-          if(_clbk(this, isOn(), false, _percentOn, origPercent)){
-            return;
-          }  
-        }
-        _changeOffTick = millis();
-        _tsk->disable();
-        digitalWrite(_pin, _inverse ? HIGH : LOW);
-      }
-      void turnOn(){
-        float origPercent = _percentOn;
-        _percentOn = 100.0;
-        if(_clbk != nullptr){
-          if(_clbk(this, isOn(), false, _percentOn, origPercent)){
-            return;
-          }  
-        }
-        _tsk->enableIfNot();
-        _tsk->restartDelayed();
-        digitalWrite(_pin, _inverse ? LOW : HIGH);
-        
-      }
-      void turnOn(float percent){
-        float origPercent = _percentOn;
-        _percentOn = percent;
-        if(_clbk != nullptr){
-          if(_clbk(this, isOn(), false, _percentOn, origPercent)){
-            return;
-          }  
-        }
-        _percentOn = percent;
-        _tsk->enableIfNot();
-        _tsk->restartDelayed();
-      }
-      
-  };
-
-class InputPin{
-  private:
-    InputPinType _it;
-    Task *_tsk;
-    int8_t _pin;
-    String _name;
-    String _boardPin;
-    InputResistorType _pullupType;
-    uint16_t _preValue;
-    uint16_t _value;
-    u_int32_t _changedAtTick;
-    u_int32_t _verifiedAtTick;
-    u_int32_t _lastActiveTick;
-    u_int32_t _lastInactiveTick;
-    InputPinCallback _clbk;
-  protected:
-    float mapFloat(float x, float in_min, float in_max, float out_min, float out_max) {
-      return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-    }
-    void Callback(){
-      _verifiedAtTick = millis();
-      if(_clbk){
-        _clbk(this);
-      }
-    }
-  public:
-    InputPin(Scheduler *ts, uint32_t delay, InputResistorType pullup, InputPinType it, int8_t pin, String name, String boardPin, InputPinCallback clbk){
-      _it = it;
-      _pullupType = pullup;
-      _pin = pin;
-      _name = name;
-      _boardPin = boardPin;
-      _clbk = clbk;
-      _tsk = new Task (delay, TASK_ONCE, [this]() {  
-    Callback();
-}, ts, false);
-      initPin();  
-    }
-    void initPin(){
-      switch(_pullupType) {
-        case InputResistorType::IT_PULLUP :
-          pinMode(_pin, INPUT_PULLUP);
-          break;
-        case InputResistorType::IT_PULLDOWN :
-          pinMode(_pin, INPUT_PULLDOWN);
-          break;
-        default:
-          pinMode(_pin, INPUT);
-      }
-      setPrevValue();
-      setValue();
-      changedNow();
-    }
-    uint8_t getPin() { return _pin; }
-    String getName() { return _name; }
-    Task * getTask(){ return _tsk; }
-    float getPinState(float in_min, float in_max, float out_min, float out_max){
-      if(_it == InputPinType::IT_ANALOG){
-        return mapFloat(analogRead(_pin), in_min, in_max, out_min, out_max);
-      }
-      return 0.0;
-    }
-    uint16_t getPinState(){
-      if(_it == InputPinType::IT_ANALOG){
-        return analogRead(_pin);
-      }
-      return digitalRead(_pin);
-    }
-    uint16_t setPrevValue(){ _preValue = getPinState(); return _preValue; }
-    uint16_t syncValue() { _value = _preValue;  return _value; }
-    uint16_t setValue(){ _value = getPinState(); return _value; }
-    uint16_t getPreValue() { return _preValue; }
-    uint16_t getValue() { return _value; }
-    float mapValue(float in_min, float in_max, float out_min, float out_max) { return mapFloat(_value, in_min, in_max, out_min, out_max);}
-    uint32_t changedAtTick() { return _changedAtTick;}
-    uint32_t verifiedAt() { return _verifiedAtTick;} 
-    uint32_t lastActiveAt() { return _lastActiveTick; }
-    uint32_t lastInactiveAt() { return _lastInactiveTick; }
-    bool isActive() { 
-      return setValue() > 0; 
-    }
-    void changedNow() { _changedAtTick = millis(); }
-    void verifiedNow() { _verifiedAtTick = millis(); }
-    void activeNow() {_lastActiveTick = millis(); }
-    void inactiveNow() {_lastInactiveTick = millis();}
-    void fireCallback() {if(_clbk) _clbk(this); }
-};
 struct CurrentTemp;
 typedef void (*CurrentTempCallback)(CurrentTemp *temp);
 typedef std::map<String, CurrentTemp *> TempMap;
@@ -505,12 +208,12 @@ void currentTempChangeCallback(CurrentTemp *temp);
 
 void onInput(InputPin *pin);
 
-bool onOutpin(OutPinAl *pin, bool on, bool inCallback, float &newPercent, float origPercent);
-std::map<String, OutPinAl *> outMap {
-  {"FAN", new OutPinAl (&ts, 0, _fanPin, "FAN", "FAN", onOutpin)},
-  {"CNT", new OutPinAl (&ts, 3000, _CNTPin, "CNT", "CNT", onOutpin)},
-  {"W", new OutPinAl (&ts, 0,_WPin, "W", "W", onOutpin)},
-  {"RV", new OutPinAl (&ts, 0, _RVPin, "RV", "RV", onOutpin)}
+bool onOutpin(OutPin *pin, bool on, bool inCallback, float &newPercent, float origPercent);
+std::map<String, OutPin *> outMap {
+  {"FAN", new OutPin (&ts, 0, _fanPin, "FAN", "FAN", onOutpin)},
+  {"CNT", new OutPin (&ts, 3000, _CNTPin, "CNT", "CNT", onOutpin)},
+  {"W", new OutPin (&ts, 0,_WPin, "W", "W", onOutpin)},
+  {"RV", new OutPin (&ts, 0, _RVPin, "RV", "RV", onOutpin)}
 }; 
 
 //std::map<String, DigitalBoolInputPin> mp {{"Y", {_yPin, "Y", "OT-NO", false, false, false, 0, 0, onOnY, onOffY}}};
@@ -581,7 +284,7 @@ void onInput(InputPin *pin){
   }
 }
 
-bool onOutpin(OutPinAl *pin, bool on, bool inCallback, float &newPercent, float origPercent){
+bool onOutpin(OutPin *pin, bool on, bool inCallback, float &newPercent, float origPercent){
   cout << "Output pin:" << pin->getName() << " On:" << on << endl; 
   return true;
 }

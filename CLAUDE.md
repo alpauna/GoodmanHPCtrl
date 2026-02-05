@@ -47,7 +47,7 @@ Global `operator new`/`delete` are overridden to route all allocations through P
 
 ### I/O Classes (defined in main.cpp)
 
-- **OutPinAl**: Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
+- **OutPin**: Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
 - **InputPin**: Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, debouncing via delayed verification (circular buffer queue checked by `_tGetInputs`), and callback on change.
 - **CurrentTemp**: Temperature sensor data holder with update/change callbacks.
 
