@@ -27,7 +27,17 @@ pio test -e freenove_esp32_s3_wroom
 
 ## Architecture
 
-**Single-file application** (`src/main.cpp`, ~1470 lines) with a separate Logger module (`include/Logger.h`, `src/Logger.cpp`).
+### Source Files
+
+| File | Purpose |
+|------|---------|
+| `src/main.cpp` | Application entry point, setup/loop, tasks, web API, MQTT, SD card config |
+| `src/OutPin.cpp` | Output relay control implementation |
+| `src/InputPin.cpp` | Input pin handling implementation |
+| `src/Logger.cpp` | Multi-output logging with tar.gz rotation |
+| `include/OutPin.h` | OutPin class, OutputPinCallback typedef |
+| `include/InputPin.h` | InputPin class, InputResistorType/InputPinType enums, InputPinCallback typedef |
+| `include/Logger.h` | Logger class |
 
 ### Execution Model
 
@@ -45,11 +55,11 @@ Task-based cooperative scheduling using TaskScheduler with two scheduler instanc
 
 Global `operator new`/`delete` are overridden to route all allocations through PSRAM (`ps_malloc`) when available, falling back to regular `malloc`.
 
-### I/O Classes (defined in main.cpp)
+### I/O Classes
 
-- **OutPin**: Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
-- **InputPin**: Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, debouncing via delayed verification (circular buffer queue checked by `_tGetInputs`), and callback on change.
-- **CurrentTemp**: Temperature sensor data holder with update/change callbacks.
+- **OutPin** (`OutPin.h/cpp`): Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
+- **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, debouncing via delayed verification (circular buffer queue checked by `_tGetInputs`), and callback on change.
+- **CurrentTemp** (defined in `main.cpp`): Temperature sensor data holder with update/change callbacks.
 
 ### GPIO Pin Mapping (ESP32-S3)
 
