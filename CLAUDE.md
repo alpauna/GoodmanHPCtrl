@@ -1,0 +1,90 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+Embedded HVAC controller for Goodman heatpumps (cooling, heating, defrost modes) running on ESP32. Controls 4 relay outputs (FAN, CNT, W, RV) based on 4 input signals (LPS, DFT, Y, O) and 4 OneWire temperature sensors (LINE, SUCTION, AMBIENT, CONDENSER). Provides a REST API, WebSocket, and MQTT interface for remote monitoring and control.
+
+## Build Commands
+
+```bash
+# Build for primary target (Freenove ESP32-S3-WROOM)
+pio run -e freenove_esp32_s3_wroom
+
+# Build for alternative target (ESP32 DevKit)
+pio run -e esp32dev
+
+# Upload firmware (USB on /dev/ttyUSB0)
+pio run -t upload -e freenove_esp32_s3_wroom
+
+# Serial monitor (115200 baud)
+pio run -t monitor -e freenove_esp32_s3_wroom
+
+# Run tests
+pio test -e freenove_esp32_s3_wroom
+```
+
+## Architecture
+
+**Single-file application** (`src/main.cpp`, ~1470 lines) with a separate Logger module (`include/Logger.h`, `src/Logger.cpp`).
+
+### Execution Model
+
+Task-based cooperative scheduling using TaskScheduler with two scheduler instances (`ts` main, `hts` high-priority). The Arduino `loop()` calls `ts.execute()` each iteration. Key scheduled tasks:
+
+| Task | Interval | Purpose |
+|------|----------|---------|
+| `tCheckTemps` | 10s | Read OneWire temperature sensors |
+| `tRuntime` | 1min | Update runtime counter |
+| `_tGetInputs` | 500ms | Process queued input pin changes |
+| `tConnectMQQT` | 1s | MQTT reconnection (disables itself on success) |
+| `tWaitOnWiFi` | 1s x60 | WiFi connection wait |
+
+### Memory Management
+
+Global `operator new`/`delete` are overridden to route all allocations through PSRAM (`ps_malloc`) when available, falling back to regular `malloc`.
+
+### I/O Classes (defined in main.cpp)
+
+- **OutPinAl**: Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
+- **InputPin**: Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, debouncing via delayed verification (circular buffer queue checked by `_tGetInputs`), and callback on change.
+- **CurrentTemp**: Temperature sensor data holder with update/change callbacks.
+
+### GPIO Pin Mapping (ESP32-S3)
+
+Inputs: LPS=GPIO15, DFT=GPIO16, Y=GPIO17, O=GPIO18
+Outputs: FAN=GPIO4, CNT=GPIO5 (3s delay), W=GPIO6, RV=GPIO7
+OneWire bus: GPIO21
+
+### Networking
+
+- **AsyncWebServer** on port 80 with REST endpoints (`/temps`, `/heap`, `/scan`, `/log/level`, `/log/config`, `/update` for OTA)
+- **WebSocket** at `/ws`
+- **MQTT** (AsyncMqttClient) to configurable broker, default `192.168.0.46:1883`
+
+### Configuration
+
+JSON config stored on SD card at `/config.txt` (SdFat library, SPI interface). Contains WiFi credentials, MQTT settings, and temperature sensor address-to-name mappings. Loaded during `setup()`, writable via API.
+
+### Logger
+
+Multi-output logging (Serial, MQTT topic, SD card with file rotation). Runtime-configurable level (ERROR/WARN/INFO/DEBUG) and output toggles via HTTP API.
+
+### State Machine
+
+```
+enum AC_STATE { OFF, COOL, HEAT, DEFROST }
+```
+
+### Control Flow Example
+
+Y input pin ISR fires → change queued in circular buffer → `_tGetInputs` calls `onCheckInputQueue()` → `onInput()` callback → activates/deactivates CNT output relay (with 3s delay on activation).
+
+## Key Build Flags
+
+- `BOARD_ESP32_S3_WROOM` / `BOARD_ESP32_ROVER`: Board-specific conditional compilation
+- `BOARD_HAS_PSRAM`: Enables PSRAM allocation path
+- `_TASK_TIMEOUT`, `_TASK_STD_FUNCTION`, `_TASK_HEADER_AND_CPP`: TaskScheduler features
+- `CIRCULAR_BUFFER_INT_SAFE`: Required; enforced by `#error` directive
+- `SD_FAT_TYPE=3`: Uses SdFs (supports FAT16/FAT32/exFAT)

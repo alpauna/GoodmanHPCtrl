@@ -1,0 +1,27 @@
+[INFO ]      534ms [MAIN] Logger initialized
+[INFO ]      551ms [HTTP] HTTP server started
+[INFO ]      554ms [MAIN] Starting Main Loop
+[WARN ]      626ms [WIFI] WiFi lost connection
+[INFO ]     1668ms [MQTT] Connecting to MQTT...
+[INFO ]     1685ms [MQTT] Connected to MQTT (session present: no)
+[INFO ]     1692ms [MQTT] IP: 192.168.1.135
+[INFO ]      526ms [MAIN] Logger initialized
+[INFO ]      535ms [HTTP] HTTP server started
+[INFO ]      538ms [MAIN] Starting Main Loop
+[INFO ]     1565ms [MQTT] Connecting to MQTT...
+[INFO ]     1582ms [MQTT] Connected to MQTT (session present: no)
+[INFO ]     1589ms [MQTT] IP: 192.168.1.135
+[INFO ]      527ms [MAIN] Logger initialized
+[INFO ]      536ms [HTTP] HTTP server started
+[INFO ]      540ms [MAIN] Starting Main Loop
+[INFO ]     1556ms [MQTT] Connecting to MQTT...
+[INFO ]     1592ms [MQTT] Connected to MQTT (session present: no)
+[INFO ]     1599ms [MQTT] IP: 192.168.1.135
+[INFO ]   190126ms [HTTP] Log level changed to 3
+[INFO ]   198109ms [HTTP] Log level changed to 2
+[INFO ]      528ms [MAIN] Logger initialized
+[INFO ]      537ms [HTTP] HTTP server started
+[INFO ]      541ms [MAIN] Starting Main Loop
+[INFO ]     1563ms [MQTT] Connecting to MQTT...
+[INFO ]     1585ms [MQTT] Connected to MQTT (session present: no)
+[INFO ]     1592ms [MQTT] IP: 192.168.1.135
