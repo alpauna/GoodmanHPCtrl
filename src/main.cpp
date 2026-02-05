@@ -11,6 +11,7 @@
 #include <AsyncTCP.h>
 #include <Update.h>
 #include <WiFi.h>
+#include <time.h>
 #include <AsyncMqttClient.h>
 #include <StringStream.h>
 #include "sdios.h"
@@ -98,6 +99,13 @@ String _MQTT_PASSWORD = "";
 
 String _WIFI_SSID = "";
 String _WIFI_PASSWORD = "";
+
+// NTP Configuration
+const char* _ntpServer1 = "pool.ntp.org";
+const char* _ntpServer2 = "time.nist.gov";
+const long _gmtOffset_sec = 0;        // UTC offset in seconds (adjust for your timezone)
+const int _daylightOffset_sec = 0;    // Daylight saving offset in seconds
+bool _ntpSynced = false;
 
 
 
@@ -314,6 +322,37 @@ Task tConnectMQQT(TASK_SECOND, TASK_FOREVER, [](){
   }
 }, &ts, false, onMqttWaitEnable, onMqttDisable);
 
+// NTP Time Sync Task - runs every 2 hours once enabled
+void syncNtpTime();
+Task tNtpSync(2 * TASK_HOUR, TASK_FOREVER, &syncNtpTime, &ts, false);
+
+void syncNtpTime() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Log.warn("NTP", "WiFi not connected, skipping NTP sync");
+    return;
+  }
+
+  Log.info("NTP", "Syncing time from NTP servers...");
+  configTime(_gmtOffset_sec, _daylightOffset_sec, _ntpServer1, _ntpServer2);
+
+  // Wait for time to be set (max 10 seconds)
+  struct tm timeinfo;
+  int retry = 0;
+  while (!getLocalTime(&timeinfo) && retry < 10) {
+    delay(1000);
+    retry++;
+  }
+
+  if (retry < 10) {
+    _ntpSynced = true;
+    char timeStr[64];
+    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
+    Log.info("NTP", "Time synced: %s", timeStr);
+  } else {
+    Log.error("NTP", "Failed to sync time from NTP");
+  }
+}
+
 /**
  * NOTE: ISR logic should be kept simple for both timings and prevent strange core panics.
  * Love this ESP32 ISR as it supports arguments. This allowed me to pass a pointer to
@@ -469,6 +508,11 @@ void onEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventTyp
 void wifiConnected(){
   cout << "WiFi Connected within " << millis() - _wifiStartMillis << " ms." << endl;
   tConnectMQQT.enableDelayed();
+  // Start NTP sync - run immediately then every 2 hours
+  if (!tNtpSync.isEnabled()) {
+    tNtpSync.enable();
+    syncNtpTime();  // Sync immediately on first connect
+  }
 }
 
 void onWiFiEvent(arduino_event_id_t event, arduino_event_info_t info){
