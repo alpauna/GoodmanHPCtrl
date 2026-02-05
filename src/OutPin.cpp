@@ -151,7 +151,7 @@ void OutPin::turnOff(){
   float origPercent = _percentOn;
   _percentOn = 0.0;
   if(_clbk != nullptr){
-    if(_clbk(this, isOn(), false, _percentOn, origPercent)){
+    if(!_clbk(this, isOn(), false, _percentOn, origPercent)){
       return;
     }
   }
@@ -164,25 +164,23 @@ void OutPin::turnOn(){
   float origPercent = _percentOn;
   _percentOn = 100.0;
   if(_clbk != nullptr){
-    if(_clbk(this, isOn(), false, _percentOn, origPercent)){
+    if(!_clbk(this, isOn(), false, _percentOn, origPercent)){
       return;
     }
   }
   _tsk->enableIfNot();
   _tsk->restartDelayed();
   digitalWrite(_pin, _inverse ? LOW : HIGH);
-
 }
 
 void OutPin::turnOn(float percent){
   float origPercent = _percentOn;
   _percentOn = percent;
   if(_clbk != nullptr){
-    if(_clbk(this, isOn(), false, _percentOn, origPercent)){
+    if(!_clbk(this, isOn(), false, _percentOn, origPercent)){
       return;
     }
   }
-  _percentOn = percent;
   _tsk->enableIfNot();
   _tsk->restartDelayed();
 }
