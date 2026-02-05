@@ -21,6 +21,7 @@
 #include "Logger.h"
 #include "OutPin.h"
 #include "InputPin.h"
+#include "GoodmanHP.h"
 bool psramInited = false;
 bool serialInited = false;
 
@@ -233,7 +234,10 @@ std::map<String, InputPin* > mp {
 //std::map<String, InputPin* > mp;
 //std::map<String, OutputPin*> outMap;
 // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
-std::map<String, InputPin* > activePins; 
+std::map<String, InputPin* > activePins;
+
+// GoodmanHP controller instance
+GoodmanHP *hpController = nullptr; 
 
 OneWire oneWire(ONE_WIRE_BUS);
 
@@ -795,7 +799,11 @@ void setup() {
   Log.info("MAIN", "Logger initialized");
 
   setupInputs();
- 
+
+  // Initialize GoodmanHP controller
+  hpController = new GoodmanHP(&ts, mp["LPS"], mp["DFT"], mp["Y"], mp["O"], outMap["CNT"]);
+  hpController->begin();
+
   //setInputPinsMode();
   //setOutPinMode();
   
