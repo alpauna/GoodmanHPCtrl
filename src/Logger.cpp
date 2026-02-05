@@ -16,6 +16,7 @@ Logger::Logger()
     , _logFilename("/log.txt")
     , _maxFileSize(DEFAULT_MAX_FILE_SIZE)
     , _maxRotatedFiles(DEFAULT_MAX_ROTATED_FILES)
+    , _compressionAvailable(true)
 {
 }
 
@@ -161,13 +162,33 @@ void Logger::writeToSdCard(const char* msg) {
 }
 
 String Logger::getRotatedFilename(uint8_t index) {
-    // Extract base name without extension
     int dotIndex = _logFilename.lastIndexOf('.');
     String baseName = (dotIndex > 0) ? _logFilename.substring(0, dotIndex) : _logFilename;
-    String ext = (dotIndex > 0) ? _logFilename.substring(dotIndex) : ".txt";
 
-    // Return format: /log.1.txt, /log.2.txt, etc.
-    return baseName + "." + String(index) + ext;
+    // Rotated files use .tar.gz extension: /log.1.tar.gz, /log.2.tar.gz, etc.
+    return baseName + "." + String(index) + ".tar.gz";
+}
+
+bool Logger::initArduinoSD() {
+    if (!SD.begin(SS)) {
+        Serial.println("[Logger] Failed to initialize Arduino SD for compression");
+        _compressionAvailable = false;
+        return false;
+    }
+    return true;
+}
+
+void Logger::deinitArduinoSD() {
+    SD.end();
+}
+
+bool Logger::reinitSdFat() {
+    if (!_sd->begin(SS, SD_SCK_MHZ(SD_SPI_SPEED))) {
+        Serial.println("[Logger] CRITICAL: Failed to re-initialize SdFat after compression");
+        _sdCardEnabled = false;
+        return false;
+    }
+    return true;
 }
 
 void Logger::rotateLogFiles() {
@@ -184,7 +205,7 @@ void Logger::rotateLogFiles() {
         Serial.printf("[Logger] Deleted oldest: %s\n", oldestFile.c_str());
     }
 
-    // Shift existing rotated files: log.9.txt -> log.10.txt, log.8.txt -> log.9.txt, etc.
+    // Shift existing rotated files: log.9.tar.gz -> log.10.tar.gz, etc.
     for (int i = _maxRotatedFiles - 1; i >= 1; i--) {
         String oldName = getRotatedFilename(i);
         String newName = getRotatedFilename(i + 1);
@@ -195,22 +216,102 @@ void Logger::rotateLogFiles() {
         }
     }
 
-    // Rename current log file to log.1.txt
-    String rotatedName = getRotatedFilename(1);
-    if (_sd->rename(_logFilename.c_str(), rotatedName.c_str())) {
-        Serial.printf("[Logger] Rotated %s -> %s\n", _logFilename.c_str(), rotatedName.c_str());
+    // Compress current log file to log.1.tar.gz
+    String compressedName = getRotatedFilename(1);
+
+    if (_compressionAvailable && compressFile(_logFilename.c_str(), compressedName.c_str())) {
+        Serial.printf("[Logger] Compressed %s -> %s\n",
+                      _logFilename.c_str(), compressedName.c_str());
     } else {
-        Serial.printf("[Logger] Failed to rotate %s\n", _logFilename.c_str());
+        // Compression failed or unavailable — fall back to plain rename
+        Serial.println("[Logger] Compression failed, falling back to rename");
+        int dotIdx = _logFilename.lastIndexOf('.');
+        String baseName = (dotIdx > 0) ? _logFilename.substring(0, dotIdx) : _logFilename;
+        String fallbackName = baseName + ".1.txt";
+
+        if (_sd->rename(_logFilename.c_str(), fallbackName.c_str())) {
+            Serial.printf("[Logger] Fallback renamed %s -> %s\n",
+                          _logFilename.c_str(), fallbackName.c_str());
+        } else {
+            Serial.printf("[Logger] CRITICAL: Failed to rotate %s\n", _logFilename.c_str());
+        }
     }
 
     Serial.println("[Logger] Log rotation complete");
 }
 
 bool Logger::compressFile(const char* srcPath, const char* destPath) {
-    // Compression not implemented - placeholder for future gzip support
-    // For now, just rename the file
-    if (_sd == nullptr) {
+    if (_sd == nullptr || !_compressionAvailable) {
         return false;
     }
-    return _sd->rename(srcPath, destPath);
+
+    Serial.printf("[Logger] Compressing %s -> %s\n", srcPath, destPath);
+
+    // Release SdFat's hold on the SD card
+    _sd->end();
+
+    // Initialize Arduino SD library for ESP32-targz compatibility
+    if (!initArduinoSD()) {
+        reinitSdFat();
+        return false;
+    }
+
+    // Verify source file exists and get its size via Arduino SD
+    fs::File srcFile = SD.open(srcPath, FILE_READ);
+    if (!srcFile) {
+        Serial.printf("[Logger] Cannot open %s via Arduino SD\n", srcPath);
+        deinitArduinoSD();
+        reinitSdFat();
+        return false;
+    }
+    srcFile.close();
+
+    // Create tar.gz containing the single log file
+    // Put source in a temp directory so TarGzPacker compresses just this file
+    String tmpDir = "/_log_rotate";
+    String tmpPath = tmpDir + "/" + String(srcPath);
+
+    SD.mkdir(tmpDir.c_str());
+    SD.rename(srcPath, tmpPath.c_str());
+
+    fs::File outFile = SD.open(destPath, FILE_WRITE);
+    if (!outFile) {
+        Serial.printf("[Logger] Cannot create output %s\n", destPath);
+        // Move file back
+        SD.rename(tmpPath.c_str(), srcPath);
+        SD.rmdir(tmpDir.c_str());
+        deinitArduinoSD();
+        reinitSdFat();
+        return false;
+    }
+
+    size_t result = TarGzPacker::compress(&SD, tmpDir.c_str(), &outFile);
+    outFile.close();
+
+    bool success = (result > 0);
+    if (success) {
+        Serial.printf("[Logger] Compression successful (%d bytes)\n", result);
+        // Remove the original uncompressed file
+        SD.remove(tmpPath.c_str());
+    } else {
+        Serial.printf("[Logger] Compression FAILED (result: %d)\n", result);
+        // Move original file back and delete partial output
+        SD.rename(tmpPath.c_str(), srcPath);
+        if (SD.exists(destPath)) {
+            SD.remove(destPath);
+        }
+    }
+
+    // Clean up temp directory
+    SD.rmdir(tmpDir.c_str());
+
+    // Release Arduino SD and restore SdFat
+    deinitArduinoSD();
+
+    if (!reinitSdFat()) {
+        Serial.println("[Logger] CRITICAL: SdFat re-initialization failed");
+        return false;
+    }
+
+    return success;
 }

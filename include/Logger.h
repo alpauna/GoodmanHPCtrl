@@ -4,6 +4,8 @@
 #include <Arduino.h>
 #include <AsyncMqttClient.h>
 #include "SdFat.h"
+#include <SD.h>
+#include <ESP32-targz.h>
 
 class Logger {
 public:
@@ -44,6 +46,9 @@ private:
     void rotateLogFiles();
     bool compressFile(const char* srcPath, const char* destPath);
     String getRotatedFilename(uint8_t index);
+    bool initArduinoSD();
+    void deinitArduinoSD();
+    bool reinitSdFat();
 
     Level _level;
     bool _serialEnabled;
@@ -57,6 +62,7 @@ private:
     String _logFilename;
     uint32_t _maxFileSize;
     uint8_t _maxRotatedFiles;
+    bool _compressionAvailable;
 
     char _buffer[512];
 };
