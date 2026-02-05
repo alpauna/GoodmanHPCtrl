@@ -71,6 +71,14 @@ JSON config stored on SD card at `/config.txt` (SdFat library, SPI interface). C
 
 Multi-output logging (Serial, MQTT topic, SD card with file rotation). Runtime-configurable level (ERROR/WARN/INFO/DEBUG) and output toggles via HTTP API.
 
+**Log rotation** follows a Linux-style scheme using ESP32-targz for compression:
+- `/log.txt` — active log (uncompressed)
+- `/log.1.tar.gz` through `/log.N.tar.gz` — rotated archives (compressed)
+- Rotation triggers when log file exceeds 50MB (configurable)
+- Falls back to plain rename (`.txt`) if compression fails
+
+**SdFat/SD library swap**: The project uses SdFat (Adafruit fork) for normal SD card operations, but ESP32-targz requires Arduino's `SD` library (`fs::FS` interface). During log rotation, Logger temporarily calls `_sd->end()`, initializes Arduino `SD` for compression, then restores SdFat via `_sd->begin()`. This swap is isolated to `compressFile()` in `Logger.cpp`.
+
 ### State Machine
 
 ```
@@ -88,3 +96,4 @@ Y input pin ISR fires → change queued in circular buffer → `_tGetInputs` cal
 - `_TASK_TIMEOUT`, `_TASK_STD_FUNCTION`, `_TASK_HEADER_AND_CPP`: TaskScheduler features
 - `CIRCULAR_BUFFER_INT_SAFE`: Required; enforced by `#error` directive
 - `SD_FAT_TYPE=3`: Uses SdFs (supports FAT16/FAT32/exFAT)
+- `DEST_FS_USES_SD`: Required by ESP32-targz to use Arduino SD filesystem
