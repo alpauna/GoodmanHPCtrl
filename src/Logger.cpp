@@ -1,5 +1,6 @@
 #include "Logger.h"
 #include <stdarg.h>
+#include <time.h>
 
 Logger Log;
 
@@ -113,9 +114,15 @@ void Logger::log(Level level, const char* tag, const char* format, va_list args)
     char msgBuffer[384];
     vsnprintf(msgBuffer, sizeof(msgBuffer), format, args);
 
-    unsigned long ms = millis();
-    snprintf(_buffer, sizeof(_buffer), "[%s] %8lums [%s] %s",
-             getLevelName(level), ms, tag, msgBuffer);
+    // Get current time
+    struct tm timeinfo;
+    char timeStr[20] = "----/--/-- --:--:--";
+    if (getLocalTime(&timeinfo)) {
+        strftime(timeStr, sizeof(timeStr), "%Y/%m/%d %H:%M:%S", &timeinfo);
+    }
+
+    snprintf(_buffer, sizeof(_buffer), "[%s] [%s] [%s] %s",
+             timeStr, getLevelName(level), tag, msgBuffer);
 
     if (_serialEnabled) {
         writeToSerial(_buffer);
