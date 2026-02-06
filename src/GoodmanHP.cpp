@@ -1,13 +1,8 @@
 #include "GoodmanHP.h"
 #include "Logger.h"
 
-GoodmanHP::GoodmanHP(Scheduler *ts, InputPin *lps, InputPin *dft, InputPin *y, InputPin *o, OutPin *cnt)
+GoodmanHP::GoodmanHP(Scheduler *ts)
     : _ts(ts)
-    , _lps(lps)
-    , _dft(dft)
-    , _y(y)
-    , _o(o)
-    , _cnt(cnt)
     , _state(State::OFF)
     , _yActiveStartTick(0)
     , _yWasActive(false)
@@ -23,13 +18,52 @@ void GoodmanHP::begin() {
     Log.info("HP", "GoodmanHP controller started");
 }
 
+void GoodmanHP::addInput(const String& name, InputPin* pin) {
+    _inputMap[name] = pin;
+}
+
+void GoodmanHP::addOutput(const String& name, OutPin* pin) {
+    _outputMap[name] = pin;
+}
+
+InputPin* GoodmanHP::getInput(const String& name) {
+    auto it = _inputMap.find(name);
+    if (it != _inputMap.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+OutPin* GoodmanHP::getOutput(const String& name) {
+    auto it = _outputMap.find(name);
+    if (it != _outputMap.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+std::map<String, InputPin*>& GoodmanHP::getInputMap() {
+    return _inputMap;
+}
+
+std::map<String, OutPin*>& GoodmanHP::getOutputMap() {
+    return _outputMap;
+}
+
 void GoodmanHP::update() {
     checkYAndActivateCNT();
     updateState();
 }
 
 void GoodmanHP::checkYAndActivateCNT() {
-    bool yActive = _y->isActive();
+    InputPin* y = getInput("Y");
+    OutPin* cnt = getOutput("CNT");
+
+    if (y == nullptr || cnt == nullptr) {
+        return;
+    }
+
+    bool yActive = y->isActive();
 
     if (yActive && !_yWasActive) {
         // Y just became active - record start time
@@ -41,7 +75,7 @@ void GoodmanHP::checkYAndActivateCNT() {
         _yWasActive = false;
         _yActiveStartTick = 0;
         if (_cntActivated) {
-            _cnt->turnOff();
+            cnt->turnOff();
             _cntActivated = false;
             Log.info("HP", "Y input deactivated, CNT turned off");
         }
@@ -49,7 +83,7 @@ void GoodmanHP::checkYAndActivateCNT() {
         // Y still active - check if 30 seconds have passed
         uint32_t elapsed = millis() - _yActiveStartTick;
         if (elapsed >= Y_DELAY_MS) {
-            _cnt->turnOn();
+            cnt->turnOn();
             _cntActivated = true;
             Log.info("HP", "Y active for 30s, CNT activated");
         }
@@ -57,13 +91,21 @@ void GoodmanHP::checkYAndActivateCNT() {
 }
 
 void GoodmanHP::updateState() {
+    InputPin* dft = getInput("DFT");
+    InputPin* y = getInput("Y");
+    InputPin* o = getInput("O");
+
+    if (dft == nullptr || y == nullptr || o == nullptr) {
+        return;
+    }
+
     State newState = State::OFF;
 
-    if (_dft->isActive()) {
+    if (dft->isActive()) {
         newState = State::DEFROST;
-    } else if (_y->isActive() && _o->isActive()) {
+    } else if (y->isActive() && o->isActive()) {
         newState = State::HEAT;
-    } else if (_y->isActive()) {
+    } else if (y->isActive()) {
         newState = State::COOL;
     }
 
@@ -91,19 +133,23 @@ const char* GoodmanHP::getStateString() {
 }
 
 bool GoodmanHP::isYActive() {
-    return _y->isActive();
+    InputPin* y = getInput("Y");
+    return y != nullptr && y->isActive();
 }
 
 bool GoodmanHP::isOActive() {
-    return _o->isActive();
+    InputPin* o = getInput("O");
+    return o != nullptr && o->isActive();
 }
 
 bool GoodmanHP::isLPSActive() {
-    return _lps->isActive();
+    InputPin* lps = getInput("LPS");
+    return lps != nullptr && lps->isActive();
 }
 
 bool GoodmanHP::isDFTActive() {
-    return _dft->isActive();
+    InputPin* dft = getInput("DFT");
+    return dft != nullptr && dft->isActive();
 }
 
 uint32_t GoodmanHP::getYActiveTime() {

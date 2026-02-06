@@ -2,6 +2,7 @@
 #define GOODMANHP_H
 
 #include <Arduino.h>
+#include <map>
 #include <TaskSchedulerDeclarations.h>
 #include "InputPin.h"
 #include "OutPin.h"
@@ -10,10 +11,18 @@ class GoodmanHP {
   public:
     enum class State { OFF, COOL, HEAT, DEFROST };
 
-    GoodmanHP(Scheduler *ts, InputPin *lps, InputPin *dft, InputPin *y, InputPin *o, OutPin *cnt);
+    GoodmanHP(Scheduler *ts);
 
     void begin();
     void update();
+
+    // Pin map management
+    void addInput(const String& name, InputPin* pin);
+    void addOutput(const String& name, OutPin* pin);
+    InputPin* getInput(const String& name);
+    OutPin* getOutput(const String& name);
+    std::map<String, InputPin*>& getInputMap();
+    std::map<String, OutPin*>& getOutputMap();
 
     State getState();
     const char* getStateString();
@@ -29,12 +38,8 @@ class GoodmanHP {
     Scheduler *_ts;
     Task *_tskUpdate;
 
-    InputPin *_lps;
-    InputPin *_dft;
-    InputPin *_y;
-    InputPin *_o;
-
-    OutPin *_cnt;
+    std::map<String, InputPin*> _inputMap;
+    std::map<String, OutPin*> _outputMap;
 
     State _state;
     uint32_t _yActiveStartTick;

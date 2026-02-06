@@ -216,28 +216,13 @@ void currentTempChangeCallback(CurrentTemp *temp);
 
 
 void onInput(InputPin *pin);
-
 bool onOutpin(OutPin *pin, bool on, bool inCallback, float &newPercent, float origPercent);
-std::map<String, OutPin *> outMap {
-  {"FAN", new OutPin (&ts, 0, _fanPin, "FAN", "FAN", onOutpin)},
-  {"CNT", new OutPin (&ts, 3000, _CNTPin, "CNT", "CNT", onOutpin)},
-  {"W", new OutPin (&ts, 0,_WPin, "W", "W", onOutpin)},
-  {"RV", new OutPin (&ts, 0, _RVPin, "RV", "RV", onOutpin)}
-}; 
 
-//std::map<String, DigitalBoolInputPin> mp {{"Y", {_yPin, "Y", "OT-NO", false, false, false, 0, 0, onOnY, onOffY}}};
-std::map<String, InputPin* > mp {
-  {"LPS", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _lpsPin, "LPS", "LPS", onInput) }, 
-  {"DFT", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _dftPin, "DFT", "DFT", onInput)},  
-  {"Y", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _yPin, "Y", "OT-NO", onInput)}, 
-  {"O", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _oPin, "O", "OT-NC", onInput)}};
-//std::map<String, InputPin* > mp;
-//std::map<String, OutputPin*> outMap;
 // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
 std::map<String, InputPin* > activePins;
 
-// GoodmanHP controller instance
-GoodmanHP *hpController = nullptr; 
+// GoodmanHP controller instance - contains input and output pin maps
+GoodmanHP hpController(&ts); 
 
 OneWire oneWire(ONE_WIRE_BUS);
 
@@ -277,22 +262,20 @@ bool CheckTickTime(InputPin *pin);
 void onCheckInputQueue();
 
 void onInput(InputPin *pin){
-  
+
   cout << "Input Pin name:" << pin->getName() << " Value:" << pin->getValue() << endl;
-   
-  if(  pin->getName() == "Y"){
-    auto itm = outMap.find("CNT");
-    if( itm != outMap.end()){
-      auto outPin = outMap["CNT"];
+
+  if(pin->getName() == "Y"){
+    OutPin* outPin = hpController.getOutput("CNT");
+    if(outPin != nullptr){
       if(pin->isActive()){
-        cout << "Activating output: " << outPin->getName() << endl; 
+        cout << "Activating output: " << outPin->getName() << endl;
         outPin->turnOn();
       }else{
-        cout << "Deactivating output: " << outPin->getName() << endl; 
+        cout << "Deactivating output: " << outPin->getName() << endl;
         outPin->turnOff();
       }
     }
-    
   }
 }
 
@@ -733,7 +716,7 @@ void onCheckInputQueue(){
 }
 
 void setupInputs(){
-  for (auto& m : mp) {
+  for (auto& m : hpController.getInputMap()) {
     cout << "Setting up input " << m.second->getName() << endl;
     m.second->initPin();
     attachInterruptArg(m.second->getPin(), inputISRChange, m.second, CHANGE);
@@ -801,11 +784,22 @@ void setup() {
   Log.setLogFile(&sd, "/log.txt");
   Log.info("MAIN", "Logger initialized");
 
+  // Add input pins to GoodmanHP controller
+  hpController.addInput("LPS", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _lpsPin, "LPS", "LPS", onInput));
+  hpController.addInput("DFT", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _dftPin, "DFT", "DFT", onInput));
+  hpController.addInput("Y", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _yPin, "Y", "OT-NO", onInput));
+  hpController.addInput("O", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _oPin, "O", "OT-NC", onInput));
+
+  // Add output pins to GoodmanHP controller
+  hpController.addOutput("FAN", new OutPin(&ts, 0, _fanPin, "FAN", "FAN", onOutpin));
+  hpController.addOutput("CNT", new OutPin(&ts, 3000, _CNTPin, "CNT", "CNT", onOutpin));
+  hpController.addOutput("W", new OutPin(&ts, 0, _WPin, "W", "W", onOutpin));
+  hpController.addOutput("RV", new OutPin(&ts, 0, _RVPin, "RV", "RV", onOutpin));
+
   setupInputs();
 
-  // Initialize GoodmanHP controller
-  hpController = new GoodmanHP(&ts, mp["LPS"], mp["DFT"], mp["Y"], mp["O"], outMap["CNT"]);
-  hpController->begin();
+  // Start GoodmanHP controller
+  hpController.begin();
 
   //setInputPinsMode();
   //setOutPinMode();
@@ -1182,9 +1176,9 @@ void printIdleStatus() {
   if (millis() <= _nextIdlePrintTime) {
     return;
   }
-  // Stats for outpin activation. 
-  for (auto& mp : outMap) {
-    cout << "Out Pin: " << mp.first << " On Count: " << mp.second->getOnCount() << endl;
+  // Stats for outpin activation.
+  for (auto& out : hpController.getOutputMap()) {
+    cout << "Out Pin: " << out.first << " On Count: " << out.second->getOnCount() << endl;
   }
   digitalWrite(_WPin, HIGH);
   _nextIdlePrintTime = millis() + 10000;
