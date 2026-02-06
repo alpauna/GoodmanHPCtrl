@@ -507,14 +507,6 @@ void onCheckInputQueue(){
   }  
 }
 
-void setupInputs(){
-  for (auto& m : hpController.getInputMap()) {
-    cout << "Setting up input " << m.second->getName() << endl;
-    m.second->initPin();
-    attachInterruptArg(m.second->getPin(), inputISRChange, m.second, CHANGE);
-  }
-}
-
 void SetupWebServer()
 {
   // Start NTP sync - run immediately then every 2 hours
@@ -546,12 +538,6 @@ void setup() {
       Serial.println("PSRAM Failed!!!"); 
     }
   }
-
-  cout << "Flash Size:" << ESP.getFlashChipSize() * MB_MULTIPLIER << " MB" << endl;
-  cout << "Flash Speed:" << ESP.getFlashChipSpeed() / (1000 * 1000) << " MHz" << endl;
-  cout << "Flash Chip Mode:" << ESP.getFlashChipMode() << endl;
-  cout << "PSRAM Size:" << ESP.getPsramSize() * MB_MULTIPLIER << " MB" << endl;
-
   
   acc_data_all = (unsigned char *) ps_malloc (n_elements * sizeof (unsigned char));
   sprintf((char *)acc_data_all, "Test %d", millis());
@@ -601,36 +587,15 @@ void setup() {
   hpController.addOutput("W", new OutPin(&ts, 0, _WPin, "W", "W", onOutpin));
   hpController.addOutput("RV", new OutPin(&ts, 0, _RVPin, "RV", "RV", onOutpin));
 
-  setupInputs();
 
   // Start GoodmanHP controller
   hpController.setDallasTemperature(&sensors);
   hpController.begin();
 
-  //setInputPinsMode();
-  //setOutPinMode();
-  
-  //tReadWAgainIn4Sec.enable();
    // Define route for the root URL
   webAsyncFunctions();
-  pinMode(_fanPin, OUTPUT);
-  pinMode(_CNTPin, OUTPUT);
-  pinMode(_WPin, OUTPUT);
-  digitalWrite(_fanPin, HIGH);
-  digitalWrite(_CNTPin, HIGH);
-  digitalWrite(_WPin, HIGH);
 
 
-
-  // Catch-All Handlers
-  // Any request that can not find a Handler that canHandle it
-  // ends in the callbacks below.
-  
-
-
-  
-
-  //tReadInputs.enable();
   tRuntime.enable();
   _tGetInputs.enable();
 
