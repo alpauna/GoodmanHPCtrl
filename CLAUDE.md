@@ -32,9 +32,11 @@ pio test -e freenove_esp32_s3_wroom
 | File | Purpose |
 |------|---------|
 | `src/main.cpp` | Application entry point, setup/loop, tasks, web API, MQTT, SD card config |
+| `src/GoodmanHP.cpp` | Heat pump controller with pin management and state machine |
 | `src/OutPin.cpp` | Output relay control implementation |
 | `src/InputPin.cpp` | Input pin handling implementation |
 | `src/Logger.cpp` | Multi-output logging with tar.gz rotation |
+| `include/GoodmanHP.h` | GoodmanHP class with input/output pin maps |
 | `include/OutPin.h` | OutPin class, OutputPinCallback typedef |
 | `include/InputPin.h` | InputPin class, InputResistorType/InputPinType enums, InputPinCallback typedef |
 | `include/Logger.h` | Logger class |
@@ -58,6 +60,12 @@ Global `operator new`/`delete` are overridden to route all allocations through P
 
 ### I/O Classes
 
+- **GoodmanHP** (`GoodmanHP.h/cpp`): Central controller managing input/output pin maps and heat pump state machine. Contains:
+  - `std::map<String, InputPin*>` for input pins (LPS, DFT, Y, O)
+  - `std::map<String, OutPin*>` for output pins (FAN, CNT, W, RV)
+  - Methods: `addInput()`, `addOutput()`, `getInput()`, `getOutput()`, `getInputMap()`, `getOutputMap()`
+  - State machine: OFF, COOL, HEAT, DEFROST
+  - Auto-activates CNT relay after Y input is active for 30 seconds
 - **OutPin** (`OutPin.h/cpp`): Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
 - **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, debouncing via delayed verification (circular buffer queue checked by `_tGetInputs`), and callback on change.
 - **CurrentTemp** (defined in `main.cpp`): Temperature sensor data holder with update/change callbacks.
@@ -106,7 +114,25 @@ enum AC_STATE { OFF, COOL, HEAT, DEFROST }
 
 ### Control Flow Example
 
-Y input pin ISR fires → change queued in circular buffer → `_tGetInputs` calls `onCheckInputQueue()` → `onInput()` callback → activates/deactivates CNT output relay (with 3s delay on activation).
+Y input pin ISR fires → change queued in circular buffer → `_tGetInputs` calls `onCheckInputQueue()` → `onInput()` callback → uses `hpController.getOutput("CNT")` to activate/deactivate CNT output relay (with 3s delay on activation).
+
+### GoodmanHP Initialization
+
+```cpp
+// Global instance with scheduler
+GoodmanHP hpController(&ts);
+
+// In setup():
+hpController.addInput("LPS", new InputPin(...));
+hpController.addInput("DFT", new InputPin(...));
+hpController.addInput("Y", new InputPin(...));
+hpController.addInput("O", new InputPin(...));
+hpController.addOutput("FAN", new OutPin(...));
+hpController.addOutput("CNT", new OutPin(...));
+hpController.addOutput("W", new OutPin(...));
+hpController.addOutput("RV", new OutPin(...));
+hpController.begin();
+```
 
 ## Key Build Flags
 
