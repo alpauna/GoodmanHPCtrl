@@ -14,6 +14,34 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **PSRAM support** — All heap allocations routed through PSRAM when available
 - **FreeRTOS compatible** — Uses `vTaskDelay()` instead of `delay()` for proper RTOS task yielding
 
+## Architecture
+
+### GoodmanHP Controller
+
+The `GoodmanHP` class is the central controller that manages all I/O pins and the heat pump state machine:
+
+- **Pin Management** — Maintains `std::map` collections for input and output pins
+  - `addInput(name, pin)` / `addOutput(name, pin)` — Register pins
+  - `getInput(name)` / `getOutput(name)` — Access individual pins
+  - `getInputMap()` / `getOutputMap()` — Access full pin collections
+
+- **State Machine** — Tracks heat pump operating mode:
+  - `OFF` — No active request
+  - `COOL` — Y input active (cooling mode)
+  - `HEAT` — Y and O inputs active (heating mode)
+  - `DEFROST` — DFT input active (defrost cycle)
+
+- **Automatic Control** — CNT (contactor) relay activates automatically after Y input has been active for 30 seconds
+
+### Class Structure
+
+| Class | Purpose |
+|-------|---------|
+| `GoodmanHP` | Central controller with pin maps and state machine |
+| `InputPin` | Digital/analog input with ISR, debouncing, callbacks |
+| `OutPin` | Output relay with delay, PWM support, state tracking |
+| `Logger` | Multi-output logging with tar.gz rotation |
+
 ## Hardware
 
 **Supported boards:**
