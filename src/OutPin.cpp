@@ -42,7 +42,7 @@ OutPin::OutPin(Scheduler *ts, uint32_t delay, int8_t pin, String name, String bo
   _pwmFreq = 1000;
   _clbk = clbk;
   _percentOn = 0.0;
-  initPin();
+  //initPin();
 
   _tsk = new Task (delay, TASK_ONCE, [this]() {
       this->Callback();
@@ -62,7 +62,7 @@ OutPin::OutPin(Scheduler *ts, uint32_t delay, int8_t pin, String name, String bo
   _pwmFreq = 1000;
   _clbk = clbk;
   _percentOn = percentOn;
-  initPin();
+  //initPin();
   _tsk = new Task (delay, TASK_ONCE, [this]() {
       this->Callback();
   }, ts, false);
@@ -79,7 +79,7 @@ OutPin::OutPin(Scheduler *ts, uint32_t delay, int8_t pin, String name, String bo
   _pwmFreq = 1000;
   _clbk = clbk;
   _percentOn = 0.0;
-  initPin();
+  //initPin();
   _tsk = new Task (delay, TASK_ONCE, [this]() {
       this->Callback();
   }, ts, false);
@@ -99,7 +99,7 @@ OutPin::OutPin(Scheduler *ts, uint32_t delay, int8_t pin, String name, String bo
   if(pwm){
       analogWriteFrequency(_pwmFreq);
   }
-  initPin();
+  //initPin();
   _tsk = new Task (delay, TASK_ONCE, [this]() {
       this->Callback();
   }, ts, false);

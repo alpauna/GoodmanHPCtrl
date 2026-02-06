@@ -1,6 +1,7 @@
 #include "Logger.h"
 #include <stdarg.h>
 #include <time.h>
+#include <WiFi.h>
 
 Logger Log;
 
@@ -117,10 +118,11 @@ void Logger::log(Level level, const char* tag, const char* format, va_list args)
     // Get current time
     struct tm timeinfo;
     char timeStr[20] = "----/--/-- --:--:--";
-    if (getLocalTime(&timeinfo)) {
-        strftime(timeStr, sizeof(timeStr), "%Y/%m/%d %H:%M:%S", &timeinfo);
+    if(WiFi.isConnected()){
+        if (getLocalTime(&timeinfo)) {
+            strftime(timeStr, sizeof(timeStr), "%Y/%m/%d %H:%M:%S", &timeinfo);
+        }
     }
-
     snprintf(_buffer, sizeof(_buffer), "[%s] [%s] [%s] %s",
              timeStr, getLevelName(level), tag, msgBuffer);
 

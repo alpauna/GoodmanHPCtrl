@@ -297,7 +297,7 @@ void onInput(InputPin *pin){
 }
 
 bool onOutpin(OutPin *pin, bool on, bool inCallback, float &newPercent, float origPercent){
-  cout << "Output pin:" << pin->getName() << " On:" << on << endl; 
+  //cout << "Output pin:" << pin->getName() << " On:" << on << endl; 
   return true;
 }
 
@@ -318,17 +318,24 @@ Task tRuntime(TASK_MINUTE, TASK_FOREVER, &OnRunTimeUpdate, &ts, false);
 
 Task _tGetInputs(500 * TASK_MILLISECOND, TASK_FOREVER, &onCheckInputQueue, &ts, false);
 
+// NTP Time Sync Task - runs every 2 hours once enabled
+void syncNtpTime();
+Task tNtpSync(2 * TASK_HOUR, TASK_FOREVER, &syncNtpTime, &ts, false);
+
 Task tConnectMQQT(TASK_SECOND, TASK_FOREVER, [](){
   connectToMqtt();
+  while(!_mqttClient.connected()){
+    yield();
+    vTaskDelay(pdMS_TO_TICKS(500));
+  }
   cout << "Mqtt connected:" << _mqttClient.connected() << endl;
   if(_mqttClient.connected()){
     tConnectMQQT.disable();
   }
+  
 }, &ts, false, onMqttWaitEnable, onMqttDisable);
 
-// NTP Time Sync Task - runs every 2 hours once enabled
-void syncNtpTime();
-Task tNtpSync(2 * TASK_HOUR, TASK_FOREVER, &syncNtpTime, &ts, false);
+
 
 void syncNtpTime() {
   if (WiFi.status() != WL_CONNECTED) {
@@ -343,7 +350,8 @@ void syncNtpTime() {
   struct tm timeinfo;
   int retry = 0;
   while (!getLocalTime(&timeinfo) && retry < 10) {
-    delay(1000);
+    yield();
+    vTaskDelay(pdMS_TO_TICKS(1000));
     retry++;
   }
 
@@ -362,27 +370,6 @@ void syncNtpTime() {
  * Love this ESP32 ISR as it supports arguments. This allowed me to pass a pointer to
  * ISR function with my input pin structure to help track pin state. 
  */
-/*
-void IRAM_ATTR inputISRChange(void *arg) {
-  if(InISR) return;
-  InISR = true;
-  InputPin* pinInfo = static_cast<InputPin*>(arg);
-  if(pinInfo == nullptr) {
-    InISR = false;
-    return;
-  }
-  pinInfo->setPrevValue();
-  if(CheckTickTime(pinInfo)) {
-    pinInfo->changedNow();
-    pinInfo->syncValue();
-    if( _isrEvent.find(pinInfo->getName()) == _isrEvent.end())
-    {
-      _isrEvent[pinInfo->getName()] = pinInfo;
-    }
-  }
-  InISR = false;
-}
-*/
 void IRAM_ATTR inputISRChange(void *arg) {
   InputPin* pinInfo = static_cast<InputPin*>(arg);
   if(pinInfo == nullptr) {
@@ -427,7 +414,7 @@ bool onMqttWaitEnable(){
   return true;
 }
 void onMqttDisable(){
-  cout << "MQTT connected and disable MQTT start." << endl;
+  cout << "MQTT connected and disabled MQTT start." << endl;
 }
 void connectToMqtt() {
   Log.info("MQTT", "Connecting to MQTT...");
@@ -512,11 +499,7 @@ void onEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventTyp
 void wifiConnected(){
   cout << "WiFi Connected within " << millis() - _wifiStartMillis << " ms." << endl;
   tConnectMQQT.enableDelayed();
-  // Start NTP sync - run immediately then every 2 hours
-  if (!tNtpSync.isEnabled()) {
-    tNtpSync.enable();
-    syncNtpTime();  // Sync immediately on first connect
-  }
+  
 }
 
 void onWiFiEvent(arduino_event_id_t event, arduino_event_info_t info){
@@ -727,7 +710,7 @@ bool saveConfiguration(const char* filename, TempMap& config, ProjectInfo& proj)
 void onCheckInputQueue(){
   for(auto& m : _isrEvent){
     while(InISR){
-      delay(1);
+      vTaskDelay(pdMS_TO_TICKS(1));
       yield();
     }
     InputPin * pin = m.second;
@@ -752,9 +735,26 @@ void onCheckInputQueue(){
 void setupInputs(){
   for (auto& m : mp) {
     cout << "Setting up input " << m.second->getName() << endl;
-    //m.second->initPin();
+    m.second->initPin();
     attachInterruptArg(m.second->getPin(), inputISRChange, m.second, CHANGE);
   }
+}
+
+void SetupWebServer()
+{
+  // Start NTP sync - run immediately then every 2 hours
+  syncNtpTime();
+  tNtpSync.enable();
+
+  server.onNotFound(onRequest);
+  server.onFileUpload(onUpload);
+  server.onRequestBody(onBody);
+
+  wes.onEvent(onWsEvent);
+  server.addHandler(&wes);
+  // Start the Web server
+  server.begin();
+  Log.info("HTTP", "HTTP server started");
 }
 
 unsigned char * acc_data_all;
@@ -790,6 +790,9 @@ void setup() {
   cout << "SD Card is read." << endl;
   WiFi.onEvent(onWiFiEvent);
   connectToWifi();
+  
+  SetupWebServer();
+
   setupMQTT();
 
   // Initialize Logger
@@ -822,30 +825,16 @@ void setup() {
   // Catch-All Handlers
   // Any request that can not find a Handler that canHandle it
   // ends in the callbacks below.
-  server.onNotFound(onRequest);
-  server.onFileUpload(onUpload);
-  server.onRequestBody(onBody);
-
-  wes.onEvent(onWsEvent);
-  server.addHandler(&wes);
-
   
 
 
-  // Start the server
-  server.begin();
-  Log.info("HTTP", "HTTP server started");
+  
 
   //tReadInputs.enable();
   tRuntime.enable();
   tCheckTemps.enable();
   _tGetInputs.enable();
-  /*
-  for(auto& m : outMap){
-    m.second->initPin();
-    cout << "outPins: " << m.second->getPin() << endl;
-  }
-  */
+
   Log.info("MAIN", "Starting Main Loop");
 }
 
@@ -1189,37 +1178,44 @@ int getSignalQuality() {
   return (rssi + 100) * 100 / 70;
 }
 
+void printIdleStatus() {
+  if (millis() <= _nextIdlePrintTime) {
+    return;
+  }
+
+  /* for (auto& mp : outMap) {
+    cout << "Out Pin: " << mp.first << " On Count: " << mp.second->getOnCount() << endl;
+  } */
+  digitalWrite(_WPin, HIGH);
+  _nextIdlePrintTime = millis() + 10000;
+  Serial.print(": Idle count:");
+  Serial.print(_idleLoopCount);
+  Serial.print("\tWC: ");
+  Serial.println(_workLoopCount);
+
+  if (!WiFi.isConnected()) {
+    int retry = 0;
+    while (!WiFi.reconnect() && (retry++) < 10) {
+      Serial.printf(": Reconnect failed: %d\r\n", retry);
+      yield();
+      vTaskDelay(pdMS_TO_TICKS(100));
+    }
+  } else {
+    Serial.printf("WIFI Signal: %d (%d DBm) Memory %lf\r\n ", getSignalQuality(), (int32_t)WiFi.RSSI(), ESP.getFreePsram() * MB_MULTIPLIER);
+  }
+}
+
 void loop() {
-  if(_shouldReboot){
+  if (_shouldReboot) {
     Serial.println("Rebooting...");
-    delay(100);
+    vTaskDelay(pdMS_TO_TICKS(100));
     ESP.restart();
   }
+
   bool bIdle = ts.execute();
-  if(bIdle){
+  if (bIdle) {
     _idleLoopCount++;
-    if( millis() > _nextIdlePrintTime ){
-      for(auto& mp : outMap){
-        cout << "Out Pin: "<< mp.first <<   " On Count: " << mp.second->getOnCount() << endl;
-      }
-      digitalWrite(_WPin, HIGH);
-      _nextIdlePrintTime = millis() + 10000;
-      Serial.print(": Idle count:");
-      Serial.print(_idleLoopCount);
-      Serial.print("\tWC: ");
-      Serial.println(_workLoopCount);
-      if(!WiFi.isConnected()){
-        int retry = 0;
-        while(!WiFi.reconnect() && (retry++) < 10){
-          Serial.printf(": Reconnect failed: %d\r\n", retry);
-          yield();
-          delay(100);   
-        }
-      }else{
-        Serial.printf("WIFI Signal: %d (%d DBm) Memory %lf\r\n ", getSignalQuality(), (int32_t)WiFi.RSSI(), ESP.getFreePsram() * MB_MULTIPLIER );
-        // 
-      }
-    }
+    printIdleStatus();
   } else {
     _workLoopCount++;
   }

@@ -21,7 +21,7 @@ InputPin::InputPin(Scheduler *ts, uint32_t delay, InputResistorType pullup, Inpu
   _tsk = new Task (delay, TASK_ONCE, [this]() {
     Callback();
   }, ts, false);
-  initPin();
+  //initPin();
 }
 
 void InputPin::initPin(){
