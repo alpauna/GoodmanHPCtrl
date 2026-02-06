@@ -790,7 +790,7 @@ void setup() {
   cout << "SD Card is read." << endl;
   WiFi.onEvent(onWiFiEvent);
   connectToWifi();
-  
+
   SetupWebServer();
 
   setupMQTT();
@@ -1182,10 +1182,10 @@ void printIdleStatus() {
   if (millis() <= _nextIdlePrintTime) {
     return;
   }
-
-  /* for (auto& mp : outMap) {
+  // Stats for outpin activation. 
+  for (auto& mp : outMap) {
     cout << "Out Pin: " << mp.first << " On Count: " << mp.second->getOnCount() << endl;
-  } */
+  }
   digitalWrite(_WPin, HIGH);
   _nextIdlePrintTime = millis() + 10000;
   Serial.print(": Idle count:");
