@@ -37,10 +37,12 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 
 | Class | Purpose |
 |-------|---------|
-| `GoodmanHP` | Central controller with pin maps and state machine |
+| `GoodmanHP` | Central controller with pin maps, temp sensors, and state machine |
 | `InputPin` | Digital/analog input with ISR, debouncing, callbacks |
 | `OutPin` | Output relay with delay, PWM support, state tracking |
-| `Logger` | Multi-output logging with tar.gz rotation |
+| `TempSensor` | OneWire temperature sensor with callbacks and static discovery |
+| `Config` | SD card and JSON configuration management |
+| `Logger` | Multi-output logging with configurable tar.gz rotation |
 
 ## Hardware
 
@@ -89,6 +91,8 @@ Place a `config.txt` file on the SD card with the following format:
 ```json
 {
   "project": "Goodman",
+  "created": "Feb 06 2026",
+  "description": "Goodman heatpump controller",
   "wifi": {
     "ssid": "your-ssid",
     "password": "your-password"
@@ -98,6 +102,10 @@ Place a `config.txt` file on the SD card with the following format:
     "password": "mqtt-password",
     "host": "192.168.0.46",
     "port": 1883
+  },
+  "logging": {
+    "maxLogSize": 52428800,
+    "maxOldLogCount": 10
   },
   "sensors": {
     "temp": {
@@ -109,6 +117,10 @@ Place a `config.txt` file on the SD card with the following format:
   }
 }
 ```
+
+**Configuration options:**
+- `logging.maxLogSize` — Maximum log file size in bytes before rotation (default: 50MB)
+- `logging.maxOldLogCount` — Number of rotated log files to keep (default: 10)
 
 Sensor addresses are discovered automatically on startup and can be mapped to names via this config.
 
