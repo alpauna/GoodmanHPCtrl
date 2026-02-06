@@ -24,10 +24,12 @@ void GoodmanHP::begin() {
 
 void GoodmanHP::addInput(const String& name, InputPin* pin) {
     _inputMap[name] = pin;
+    pin->initPin();
 }
 
 void GoodmanHP::addOutput(const String& name, OutPin* pin) {
     _outputMap[name] = pin;
+    pin->initPin();
     // Set runtime callback so GoodmanHP can respond to OutPin events
     pin->setRuntimeCallback(outPinRuntimeCallback);
 }
