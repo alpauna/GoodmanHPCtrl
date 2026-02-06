@@ -37,11 +37,13 @@ pio test -e freenove_esp32_s3_wroom
 | `src/InputPin.cpp` | Input pin handling implementation |
 | `src/Logger.cpp` | Multi-output logging with tar.gz rotation |
 | `src/Config.cpp` | SD card and configuration management implementation |
+| `src/TempSensor.cpp` | Temperature sensor class implementation |
 | `include/GoodmanHP.h` | GoodmanHP class with input/output pin maps |
 | `include/OutPin.h` | OutPin class, OutputPinCallback typedef |
 | `include/InputPin.h` | InputPin class, InputResistorType/InputPinType enums, InputPinCallback typedef |
 | `include/Logger.h` | Logger class |
 | `include/Config.h` | Config class for SD card and JSON configuration |
+| `include/TempSensor.h` | TempSensor class for OneWire temperature sensors |
 
 ### Execution Model
 
@@ -62,15 +64,21 @@ Global `operator new`/`delete` are overridden to route all allocations through P
 
 ### I/O Classes
 
-- **GoodmanHP** (`GoodmanHP.h/cpp`): Central controller managing input/output pin maps and heat pump state machine. Contains:
+- **GoodmanHP** (`GoodmanHP.h/cpp`): Central controller managing input/output pin maps, temperature sensors, and heat pump state machine. Contains:
   - `std::map<String, InputPin*>` for input pins (LPS, DFT, Y, O)
   - `std::map<String, OutPin*>` for output pins (FAN, CNT, W, RV)
-  - Methods: `addInput()`, `addOutput()`, `getInput()`, `getOutput()`, `getInputMap()`, `getOutputMap()`
+  - `TempSensorMap` for temperature sensors (LINE, SUCTION, AMBIENT, CONDENSER)
+  - Pin methods: `addInput()`, `addOutput()`, `getInput()`, `getOutput()`, `getInputMap()`, `getOutputMap()`
+  - Temp methods: `addTempSensor()`, `getTempSensor()`, `getTempSensorMap()`, `clearTempSensors()`
   - State machine: OFF, COOL, HEAT, DEFROST
   - Auto-activates CNT relay after Y input is active for 30 seconds
 - **OutPin** (`OutPin.h/cpp`): Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
 - **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, debouncing via delayed verification (circular buffer queue checked by `_tGetInputs`), and callback on change.
-- **CurrentTemp** (defined in `main.cpp`): Temperature sensor data holder with update/change callbacks.
+- **TempSensor** (`TempSensor.h/cpp`): OneWire temperature sensor wrapper with encapsulated state and callbacks:
+  - Properties: `description`, `deviceAddress`, `value`, `previous`, `valid`
+  - Callbacks: `setUpdateCallback()`, `setChangeCallback()`
+  - Methods: `update(DallasTemperature*, threshold)` reads sensor and fires change callback if delta exceeds threshold
+  - Static helpers: `addressToString()`, `stringToAddress()` for DeviceAddress conversion
 
 ### GPIO Pin Mapping (ESP32-S3)
 
@@ -91,9 +99,9 @@ The **Config** class (`Config.h/cpp`) manages SD card operations and JSON config
 **SD Card Methods:**
 - `initSDCard()` — Initialize SdFat filesystem
 - `openConfigFile(filename, config, proj)` — Open or create config file
-- `loadTempConfig(filename, config)` — Load JSON config into TempMap
+- `loadTempConfig(filename, config)` — Load JSON config into TempSensorMap
 - `saveConfiguration(filename, config, proj)` — Write config to SD card
-- `clearConfig(config)` — Free memory and clear TempMap
+- `clearConfig(config)` — Free memory and clear TempSensorMap
 
 **Config Getters/Setters:**
 - WiFi: `getWifiSSID()`, `getWifiPassword()`, `setWifiSSID()`, `setWifiPassword()`
@@ -103,10 +111,11 @@ The **Config** class (`Config.h/cpp`) manages SD card operations and JSON config
 **Usage:**
 ```cpp
 Config config;
-config.setTempSensorDiscoveryCallback([](TempMap& tempMap) { getTempSensors(tempMap); });
+config.setTempSensorDiscoveryCallback([](TempSensorMap& tempMap) { getTempSensors(tempMap); });
 if (config.initSDCard()) {
-    if (config.openConfigFile("/config.txt", _tempSens, proj)) {
-        config.loadTempConfig("/config.txt", _tempSens);
+    TempSensorMap& tempSensors = hpController.getTempSensorMap();
+    if (config.openConfigFile("/config.txt", tempSensors, proj)) {
+        config.loadTempConfig("/config.txt", tempSensors);
         _WIFI_SSID = config.getWifiSSID();
         _MQTT_HOST = config.getMqttHost();
     }
