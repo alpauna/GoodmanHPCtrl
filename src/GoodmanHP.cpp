@@ -58,6 +58,31 @@ std::map<String, OutPin*>& GoodmanHP::getOutputMap() {
     return _outputMap;
 }
 
+void GoodmanHP::addTempSensor(const String& name, TempSensor* sensor) {
+    _tempSensorMap[name] = sensor;
+}
+
+TempSensor* GoodmanHP::getTempSensor(const String& name) {
+    auto it = _tempSensorMap.find(name);
+    if (it != _tempSensorMap.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+TempSensorMap& GoodmanHP::getTempSensorMap() {
+    return _tempSensorMap;
+}
+
+void GoodmanHP::clearTempSensors() {
+    for (auto& pair : _tempSensorMap) {
+        if (pair.second != nullptr) {
+            delete pair.second;
+        }
+    }
+    _tempSensorMap.clear();
+}
+
 void GoodmanHP::update() {
     checkYAndActivateCNT();
     updateState();

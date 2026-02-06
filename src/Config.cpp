@@ -1,29 +1,12 @@
 #include "Config.h"
 #include "sdios.h"
-#include <DallasTemperature.h>
 
 // External references needed for config loading
 extern ArduinoOutStream cout;
 
-// Forward declaration of helper functions used during config load
-extern String getStrDeviceAddress(uint8_t* temp);
-extern void getDeviceAddress(uint8_t* devAddr, String temp);
-extern void currentTempCallback(CurrentTemp* temp);
-extern void currentTempChangeCallback(CurrentTemp* temp);
-
-// CurrentTemp and ProjectInfo structs (must match main.cpp definitions)
-struct CurrentTemp;
-typedef void (*CurrentTempCallback_t)(CurrentTemp* temp);
-
-struct CurrentTemp {
-    String description;
-    uint8_t* deviceAddress;
-    float Value;
-    float Previous;
-    bool Valid;
-    CurrentTempCallback_t onCurrTempUpdate;
-    CurrentTempCallback_t onCurrTempChanged;
-};
+// External callbacks for temp sensors
+extern void tempSensorUpdateCallback(TempSensor* sensor);
+extern void tempSensorChangeCallback(TempSensor* sensor);
 
 struct ProjectInfo {
     String name;
@@ -83,7 +66,7 @@ bool Config::initSDCard() {
     return true;
 }
 
-bool Config::openConfigFile(const char* filename, TempMap& config, ProjectInfo& proj) {
+bool Config::openConfigFile(const char* filename, TempSensorMap& config, ProjectInfo& proj) {
     if (!_sd.exists(filename) || (_configFile.open(filename, O_RDONLY) && _configFile.size() == 0)) {
         _configFile.close();
         return saveConfiguration(filename, config, proj);
@@ -93,7 +76,7 @@ bool Config::openConfigFile(const char* filename, TempMap& config, ProjectInfo& 
     return _configFile.open(filename, O_RDONLY);
 }
 
-bool Config::loadTempConfig(const char* filename, TempMap& config) {
+bool Config::loadTempConfig(const char* filename, TempSensorMap& config) {
     if (!_configFile.isOpen()) {
         return false;
     }
@@ -139,37 +122,38 @@ bool Config::loadTempConfig(const char* filename, TempMap& config) {
         cout << "Description:" << desc << "\t";
         cout << "Last Value:" << last_value << endl;
         cout << "Name: " << name << endl;
-        CurrentTemp* tmp = new CurrentTemp();
-        uint8_t* devAddr = new uint8_t[sizeof(DeviceAddress)];
-        config[name] = tmp;
-        tmp->deviceAddress = devAddr;
-        tmp->description = String(desc);
+
+        TempSensor* sensor = new TempSensor(String(desc));
+        config[name] = sensor;
+
         String devaddrStr = String(key);
         cout << "Devstr:" << devaddrStr << endl;
-        getDeviceAddress(devAddr, devaddrStr);
-        tmp->Value = last_value;
-        tmp->Previous = tmp->Value;
-        tmp->Valid = true;
-        tmp->onCurrTempChanged = currentTempChangeCallback;
-        tmp->onCurrTempUpdate = currentTempCallback;
-        cout << "JSON description: " << tmp->description << "\tID:" << getStrDeviceAddress(devAddr) << "\t Value:" << tmp->Value << endl;
+        TempSensor::stringToAddress(devaddrStr, sensor->getDeviceAddress());
+
+        sensor->setValue(last_value);
+        sensor->setPrevious(sensor->getValue());
+        sensor->setValid(true);
+        sensor->setChangeCallback(tempSensorChangeCallback);
+        sensor->setUpdateCallback(tempSensorUpdateCallback);
+
+        cout << "JSON description: " << sensor->getDescription()
+             << "\tID:" << TempSensor::addressToString(sensor->getDeviceAddress())
+             << "\t Value:" << sensor->getValue() << endl;
     }
     _configFile.close();
     return true;
 }
 
-void Config::clearConfig(TempMap& config) {
-    for (auto k : config) {
-        if (k.second == nullptr)
-            continue;
-        if (k.second->deviceAddress != nullptr)
-            delete k.second->deviceAddress;
-        delete k.second;
+void Config::clearConfig(TempSensorMap& config) {
+    for (auto& pair : config) {
+        if (pair.second != nullptr) {
+            delete pair.second;
+        }
     }
     config.clear();
 }
 
-bool Config::saveConfiguration(const char* filename, TempMap& config, ProjectInfo& proj) {
+bool Config::saveConfiguration(const char* filename, TempSensorMap& config, ProjectInfo& proj) {
     if (_sd.exists(filename) && _configFile.open(filename, O_RDONLY) && _configFile.size() > 0) {
         _configFile.close();
         return false;
@@ -204,10 +188,10 @@ bool Config::saveConfiguration(const char* filename, TempMap& config, ProjectInf
     }
 
     for (auto& mp : config) {
-        String id = getStrDeviceAddress(mp.second->deviceAddress);
+        String id = TempSensor::addressToString(mp.second->getDeviceAddress());
         JsonObject temp = sensors_temp[id].to<JsonObject>();
-        temp["description"] = mp.second->description;
-        temp["last-value"] = mp.second->Value;
+        temp["description"] = mp.second->getDescription();
+        temp["last-value"] = mp.second->getValue();
         temp["name"] = mp.first;
     }
     String output;

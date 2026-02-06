@@ -6,6 +6,7 @@
 #include <TaskSchedulerDeclarations.h>
 #include "InputPin.h"
 #include "OutPin.h"
+#include "TempSensor.h"
 
 class GoodmanHP {
   public:
@@ -24,6 +25,12 @@ class GoodmanHP {
     std::map<String, InputPin*>& getInputMap();
     std::map<String, OutPin*>& getOutputMap();
 
+    // Temperature sensor management
+    void addTempSensor(const String& name, TempSensor* sensor);
+    TempSensor* getTempSensor(const String& name);
+    TempSensorMap& getTempSensorMap();
+    void clearTempSensors();
+
     State getState();
     const char* getStateString();
 
@@ -40,6 +47,7 @@ class GoodmanHP {
 
     std::map<String, InputPin*> _inputMap;
     std::map<String, OutPin*> _outputMap;
+    TempSensorMap _tempSensorMap;
 
     State _state;
     uint32_t _yActiveStartTick;

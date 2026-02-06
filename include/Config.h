@@ -5,12 +5,10 @@
 #include <map>
 #include "SdFat.h"
 #include "ArduinoJson.h"
+#include "TempSensor.h"
 
 // Forward declarations
-struct CurrentTemp;
 struct ProjectInfo;
-
-typedef std::map<String, CurrentTemp*> TempMap;
 
 class Config {
   public:
@@ -18,10 +16,10 @@ class Config {
 
     // SD Card operations
     bool initSDCard();
-    bool openConfigFile(const char* filename, TempMap& config, ProjectInfo& proj);
-    bool loadTempConfig(const char* filename, TempMap& config);
-    bool saveConfiguration(const char* filename, TempMap& config, ProjectInfo& proj);
-    void clearConfig(TempMap& config);
+    bool openConfigFile(const char* filename, TempSensorMap& config, ProjectInfo& proj);
+    bool loadTempConfig(const char* filename, TempSensorMap& config);
+    bool saveConfiguration(const char* filename, TempSensorMap& config, ProjectInfo& proj);
+    void clearConfig(TempSensorMap& config);
 
     // Getters for loaded config values
     String getWifiSSID() const { return _wifiSSID; }
@@ -44,7 +42,7 @@ class Config {
     bool isSDCardInitialized() const { return _sdInitialized; }
 
     // Callback setter for temp sensor discovery
-    typedef void (*TempSensorDiscoveryCallback)(TempMap& config);
+    typedef void (*TempSensorDiscoveryCallback)(TempSensorMap& config);
     void setTempSensorDiscoveryCallback(TempSensorDiscoveryCallback cb) { _tempDiscoveryCb = cb; }
 
   private:

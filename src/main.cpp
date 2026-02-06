@@ -176,19 +176,6 @@ const u_int8_t _oPin = GPIO_NUM_18;
 #endif
 const u_int8_t ONE_WIRE_BUS = GPIO_NUM_21;
 
-struct CurrentTemp;
-typedef void (*CurrentTempCallback)(CurrentTemp *temp);
-typedef std::map<String, CurrentTemp *> TempMap;
-TempMap _tempSens;
-struct CurrentTemp{
-  String description;
-  uint8_t *deviceAddress;
-  float Value; 
-  float Previous;
-  bool Valid;
-  CurrentTempCallback onCurrTempUpdate;
-  CurrentTempCallback onCurrTempChanged;
-};
 struct ProjectInfo{
   String name;
   String createdOnDate;
@@ -197,8 +184,8 @@ struct ProjectInfo{
   bool encrpytped;
 };
 
-void currentTempCallback(CurrentTemp *temp);
-void currentTempChangeCallback(CurrentTemp *temp);
+void tempSensorUpdateCallback(TempSensor *sensor);
+void tempSensorChangeCallback(TempSensor *sensor);
 
 
 void onInput(InputPin *pin);
@@ -232,11 +219,9 @@ void OnReadInputsDisable();
 bool OnInputChangeEnable();
 void OnInputChangeDisable();
 void OnRunTimeUpdate();
-void getDeviceAddress(uint8_t *devAddr, String  temp);
-String getStrDeviceAddress(DeviceAddress temp);
 void webAsyncFunctions();
 void getTempSensors();
-void getTempSensors(TempMap& tempMap);
+void getTempSensors(TempSensorMap& tempMap);
 void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len);
 void connectToMqtt();
 bool onWifiWaitEnable();
@@ -270,11 +255,11 @@ bool onOutpin(OutPin *pin, bool on, bool inCallback, float &newPercent, float or
 }
 
 Task tCheckTemps(10 * TASK_SECOND, TASK_FOREVER, [](){
-  sensors.requestTemperatures(); 
-  for(auto& mp : _tempSens){
-    if(mp.second->onCurrTempUpdate == nullptr) continue;
-    mp.second->onCurrTempUpdate(mp.second);   
-  } 
+  sensors.requestTemperatures();
+  for(auto& mp : hpController.getTempSensorMap()){
+    if(mp.second == nullptr) continue;
+    mp.second->update(&sensors);
+  }
 }, &ts, false);
 
 Task tWaitOnWiFi(TASK_SECOND, 60, [](){
@@ -579,13 +564,14 @@ void setup() {
   sensors.begin();
 
   // Initialize config and load from SD card
-  config.setTempSensorDiscoveryCallback([](TempMap& tempMap) {
+  config.setTempSensorDiscoveryCallback([](TempSensorMap& tempMap) {
     getTempSensors(tempMap);
   });
 
   if(config.initSDCard()){
-    if(config.openConfigFile(_filename, _tempSens, proj)){
-      config.loadTempConfig(_filename, _tempSens);
+    TempSensorMap& tempSensors = hpController.getTempSensorMap();
+    if(config.openConfigFile(_filename, tempSensors, proj)){
+      config.loadTempConfig(_filename, tempSensors);
       // Update global variables from config
       _WIFI_SSID = config.getWifiSSID();
       _WIFI_PASSWORD = config.getWifiPassword();
@@ -733,15 +719,15 @@ void webAsyncFunctions()
             {
   String json = "[";
   bool firstTime = true;
-  for (const auto& m: _tempSens){
-      if(m.first != nullptr && m.second != nullptr && m.first.length() > 0){ 
+  for (const auto& m: hpController.getTempSensorMap()){
+      if(m.first.length() > 0 && m.second != nullptr){
         if(!firstTime) json += ",";
         json += "{";
-        json += "\"description\":\""+ m.second->description+"\"";
-        json += ",\"devid\":\""+getStrDeviceAddress(m.second->deviceAddress)+"\"";
-        json += ",\"value\":"+String(m.second->Value);
-        json += ",\"previous\":"+String(m.second->Previous);
-        json += ",\"valid\":\""+String(m.second->Valid ? "true" : "false" )+"\"";
+        json += "\"description\":\"" + m.second->getDescription() + "\"";
+        json += ",\"devid\":\"" + TempSensor::addressToString(m.second->getDeviceAddress()) + "\"";
+        json += ",\"value\":" + String(m.second->getValue());
+        json += ",\"previous\":" + String(m.second->getPrevious());
+        json += ",\"valid\":\"" + String(m.second->isValid() ? "true" : "false") + "\"";
         json += "}";
       }
       firstTime = false;
@@ -857,28 +843,21 @@ void webAsyncFunctions()
   });
 }
 
-void currentTempCallback(CurrentTemp *temp){
-  float tmp = DallasTemperature::rawToFahrenheit(sensors.getTemp(temp->deviceAddress));
-  float delta = abs(temp->Previous - tmp);
-  if(delta > 0.33f){ 
-    temp->Previous = temp->Value;
-    temp->Value = tmp;
-    temp->Value == DEVICE_DISCONNECTED_F ? temp->Valid = false : temp->Valid = true;
-    if(temp->onCurrTempChanged != nullptr) temp->onCurrTempChanged(temp); 
-  }
+void tempSensorUpdateCallback(TempSensor *sensor){
+  sensor->update(&sensors);
 }
-void currentTempChangeCallback(CurrentTemp *temp){
-  Serial.print(temp->description);
 
-  temp->Valid ? Serial.print(" Temp Updated: ") : Serial.print(" Temp Invalid: ");
+void tempSensorChangeCallback(TempSensor *sensor){
+  Serial.print(sensor->getDescription());
+  sensor->isValid() ? Serial.print(" Temp Updated: ") : Serial.print(" Temp Invalid: ");
   Serial.print("Temp: ");
-  Serial.print(temp->Value);
+  Serial.print(sensor->getValue());
   Serial.print("F Previous Temp: ");
-  Serial.print(temp->Previous);
+  Serial.print(sensor->getPrevious());
   Serial.println("F");
 }
 
-void getTempSensors(TempMap& tempMap)
+void getTempSensors(TempSensorMap& tempMap)
 {
   Serial.print("Locating devices...");
   sensors.begin();
@@ -887,72 +866,49 @@ void getTempSensors(TempMap& tempMap)
   Serial.print(oneWCount, DEC);
   Serial.println(" devices.");
   // If ever ran twice this will clean up things.
-  config.clearConfig(tempMap);
+  hpController.clearTempSensors();
   for(u_int8_t i = 0; i < oneWCount; i++){
-    uint8_t *devAddr = new uint8_t[sizeof(DeviceAddress)];
-    CurrentTemp *tmp = new CurrentTemp();
-    tmp->deviceAddress = devAddr;
-    tmp->Previous = 0.0f;
-    tmp->Valid = false;
-    tmp->Value = 0.0f;
-    tmp->onCurrTempChanged = currentTempChangeCallback;
-    tmp->onCurrTempUpdate = currentTempCallback;
+    String description;
     switch (i){
       case 0:
-         tmp->description = "LINE_TEMP";
+        description = "LINE_TEMP";
         break;
       case 1:
-        tmp->description = "SUCTION_TEMP";
+        description = "SUCTION_TEMP";
         break;
       case 2:
-        tmp->description = "AMBIENT_TEMP";
+        description = "AMBIENT_TEMP";
         break;
       case 3:
-        tmp->description = "CONDENSER_TEMP";
+        description = "CONDENSER_TEMP";
         break;
       default:
-        tmp->description = "UNKOWN_TEMP";
+        description = "UNKNOWN_TEMP";
     }
-    if(tempMap.count(tmp->description) == 0) tempMap[tmp->description] = tmp;
-    if (!sensors.getAddress(tempMap[tmp->description]->deviceAddress, i))
-      Serial.println("Unable to find address for Device 0");
+
+    TempSensor *sensor = new TempSensor(description);
+    sensor->setChangeCallback(tempSensorChangeCallback);
+    sensor->setUpdateCallback(tempSensorUpdateCallback);
+
+    if(tempMap.count(description) == 0) {
+      tempMap[description] = sensor;
+    }
+
+    if (!sensors.getAddress(sensor->getDeviceAddress(), i)) {
+      Serial.println("Unable to find address for Device");
+    }
+
     Serial.print("Device ");
     Serial.print(i);
-    Serial.print (" Address: ");
-
-    Serial.printf("Current Temp Description: %s ", tempMap[tmp->description]->description);
-    Serial.println(getStrDeviceAddress(devAddr));
+    Serial.print(" Address: ");
+    Serial.printf("Temp Sensor Description: %s ", sensor->getDescription().c_str());
+    Serial.println(TempSensor::addressToString(sensor->getDeviceAddress()));
   }
 }
 
 void getTempSensors()
 {
-  getTempSensors(_tempSens);
-}
-
-String getStrDeviceAddress(DeviceAddress temp)
-{
-  String tmp;
-  char hexChar[6];
-  
-  for (uint8_t i = 0; i < 8; i++)
-  {
-    //if (temp[i] < 16) tmp+="0";
-    sprintf(hexChar, "%02X", temp[i]);
-    tmp+=hexChar;
-  }
-  return tmp; 
-}
-void getDeviceAddress(uint8_t *devAddr, String  temp){
-  char* endptr;
-  for(uint8_t i = 0; i < 8; i++){
-    uint8_t x = i*2;
-    String rs = String(temp[x]) + String(temp[x+1]);
-    u_int32_t val = strtol(rs.c_str(), &endptr, 16);
-    //cout << rs;
-    devAddr[i] = val < 256 ? val : 0;  
-  }
-  
+  getTempSensors(hpController.getTempSensorMap());
 }
 
 void printAddress(DeviceAddress temp)
