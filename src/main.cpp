@@ -859,66 +859,14 @@ void tempSensorChangeCallback(TempSensor *sensor){
 
 void getTempSensors(TempSensorMap& tempMap)
 {
-  Serial.print("Locating devices...");
-  sensors.begin();
-  Serial.print("Found ");
-  u_int8_t oneWCount = sensors.getDeviceCount();
-  Serial.print(oneWCount, DEC);
-  Serial.println(" devices.");
-  // If ever ran twice this will clean up things.
+  // Clear existing sensors if running twice
   hpController.clearTempSensors();
-  for(u_int8_t i = 0; i < oneWCount; i++){
-    String description;
-    switch (i){
-      case 0:
-        description = "LINE_TEMP";
-        break;
-      case 1:
-        description = "SUCTION_TEMP";
-        break;
-      case 2:
-        description = "AMBIENT_TEMP";
-        break;
-      case 3:
-        description = "CONDENSER_TEMP";
-        break;
-      default:
-        description = "UNKNOWN_TEMP";
-    }
-
-    TempSensor *sensor = new TempSensor(description);
-    sensor->setChangeCallback(tempSensorChangeCallback);
-    sensor->setUpdateCallback(tempSensorUpdateCallback);
-
-    if(tempMap.count(description) == 0) {
-      tempMap[description] = sensor;
-    }
-
-    if (!sensors.getAddress(sensor->getDeviceAddress(), i)) {
-      Serial.println("Unable to find address for Device");
-    }
-
-    Serial.print("Device ");
-    Serial.print(i);
-    Serial.print(" Address: ");
-    Serial.printf("Temp Sensor Description: %s ", sensor->getDescription().c_str());
-    Serial.println(TempSensor::addressToString(sensor->getDeviceAddress()));
-  }
+  TempSensor::discoverSensors(&sensors, tempMap, tempSensorUpdateCallback, tempSensorChangeCallback);
 }
 
 void getTempSensors()
 {
   getTempSensors(hpController.getTempSensorMap());
-}
-
-void printAddress(DeviceAddress temp)
-{
-  Serial.print(" ID: ");
-  for (uint8_t i = 0; i < 8; i++)
-  {
-    if (temp[i] < 16) Serial.print("0");
-    Serial.print(temp[i], HEX);
-  }
 }
 
 

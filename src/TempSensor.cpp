@@ -96,3 +96,62 @@ void TempSensor::stringToAddress(const String& str, uint8_t* address) {
         address[i] = val < 256 ? val : 0;
     }
 }
+
+void TempSensor::printAddress(uint8_t* address) {
+    Serial.print(" ID: ");
+    for (uint8_t i = 0; i < 8; i++) {
+        if (address[i] < 16) Serial.print("0");
+        Serial.print(address[i], HEX);
+    }
+}
+
+String TempSensor::getDefaultDescription(uint8_t index) {
+    switch (index) {
+        case 0: return "LINE_TEMP";
+        case 1: return "SUCTION_TEMP";
+        case 2: return "AMBIENT_TEMP";
+        case 3: return "CONDENSER_TEMP";
+        default: return "UNKNOWN_TEMP";
+    }
+}
+
+void TempSensor::discoverSensors(DallasTemperature* sensors, TempSensorMap& tempMap,
+                                  TempSensorCallback updateCallback,
+                                  TempSensorCallback changeCallback) {
+    if (sensors == nullptr) {
+        return;
+    }
+
+    Serial.print("Locating devices...");
+    sensors->begin();
+    Serial.print("Found ");
+    uint8_t oneWCount = sensors->getDeviceCount();
+    Serial.print(oneWCount, DEC);
+    Serial.println(" devices.");
+
+    for (uint8_t i = 0; i < oneWCount; i++) {
+        String description = getDefaultDescription(i);
+
+        TempSensor* sensor = new TempSensor(description);
+        if (changeCallback != nullptr) {
+            sensor->setChangeCallback(changeCallback);
+        }
+        if (updateCallback != nullptr) {
+            sensor->setUpdateCallback(updateCallback);
+        }
+
+        if (tempMap.count(description) == 0) {
+            tempMap[description] = sensor;
+        }
+
+        if (!sensors->getAddress(sensor->getDeviceAddress(), i)) {
+            Serial.println("Unable to find address for Device");
+        }
+
+        Serial.print("Device ");
+        Serial.print(i);
+        Serial.print(" Address: ");
+        Serial.printf("Temp Sensor Description: %s ", sensor->getDescription().c_str());
+        Serial.println(addressToString(sensor->getDeviceAddress()));
+    }
+}

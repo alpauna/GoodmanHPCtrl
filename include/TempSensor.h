@@ -43,6 +43,13 @@ class TempSensor {
     // Static helper for device address string conversion
     static String addressToString(uint8_t* address);
     static void stringToAddress(const String& str, uint8_t* address);
+    static void printAddress(uint8_t* address);
+
+    // Static sensor discovery
+    static void discoverSensors(DallasTemperature* sensors, TempSensorMap& tempMap,
+                                TempSensorCallback updateCallback = nullptr,
+                                TempSensorCallback changeCallback = nullptr);
+    static String getDefaultDescription(uint8_t index);
 
   private:
     String _description;
