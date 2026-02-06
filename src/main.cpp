@@ -234,25 +234,11 @@ bool CheckTickTime(InputPin *pin);
 void onCheckInputQueue();
 
 void onInput(InputPin *pin){
-
   cout << "Input Pin name:" << pin->getName() << " Value:" << pin->getValue() << endl;
-
-  if(pin->getName() == "Y"){
-    OutPin* outPin = hpController.getOutput("CNT");
-    if(outPin != nullptr){
-      if(pin->isActive()){
-        cout << "Activating output: " << outPin->getName() << endl;
-        outPin->turnOn();
-      }else{
-        cout << "Deactivating output: " << outPin->getName() << endl;
-        outPin->turnOff();
-      }
-    }
-  }
 }
 
 bool onOutpin(OutPin *pin, bool on, bool inCallback, float &newPercent, float origPercent){
-  //cout << "Output pin:" << pin->getName() << " On:" << on << endl; 
+  cout << "Output pin:" << pin->getName() << " On:" << on << endl; 
   return true;
 }
 
