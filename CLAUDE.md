@@ -31,15 +31,17 @@ pio test -e freenove_esp32_s3_wroom
 
 | File | Purpose |
 |------|---------|
-| `src/main.cpp` | Application entry point, setup/loop, tasks, web API, MQTT, SD card config |
+| `src/main.cpp` | Application entry point, setup/loop, tasks, web API, MQTT |
 | `src/GoodmanHP.cpp` | Heat pump controller with pin management and state machine |
 | `src/OutPin.cpp` | Output relay control implementation |
 | `src/InputPin.cpp` | Input pin handling implementation |
 | `src/Logger.cpp` | Multi-output logging with tar.gz rotation |
+| `src/Config.cpp` | SD card and configuration management implementation |
 | `include/GoodmanHP.h` | GoodmanHP class with input/output pin maps |
 | `include/OutPin.h` | OutPin class, OutputPinCallback typedef |
 | `include/InputPin.h` | InputPin class, InputResistorType/InputPinType enums, InputPinCallback typedef |
 | `include/Logger.h` | Logger class |
+| `include/Config.h` | Config class for SD card and JSON configuration |
 
 ### Execution Model
 
@@ -83,6 +85,34 @@ OneWire bus: GPIO21
 - **MQTT** (AsyncMqttClient) to configurable broker, default `192.168.0.46:1883`
 
 ### Configuration
+
+The **Config** class (`Config.h/cpp`) manages SD card operations and JSON configuration:
+
+**SD Card Methods:**
+- `initSDCard()` — Initialize SdFat filesystem
+- `openConfigFile(filename, config, proj)` — Open or create config file
+- `loadTempConfig(filename, config)` — Load JSON config into TempMap
+- `saveConfiguration(filename, config, proj)` — Write config to SD card
+- `clearConfig(config)` — Free memory and clear TempMap
+
+**Config Getters/Setters:**
+- WiFi: `getWifiSSID()`, `getWifiPassword()`, `setWifiSSID()`, `setWifiPassword()`
+- MQTT: `getMqttHost()`, `getMqttPort()`, `getMqttUser()`, `getMqttPassword()` (and setters)
+- SD access: `getSd()` returns `SdFs*` for Logger and other components
+
+**Usage:**
+```cpp
+Config config;
+config.setTempSensorDiscoveryCallback([](TempMap& tempMap) { getTempSensors(tempMap); });
+if (config.initSDCard()) {
+    if (config.openConfigFile("/config.txt", _tempSens, proj)) {
+        config.loadTempConfig("/config.txt", _tempSens);
+        _WIFI_SSID = config.getWifiSSID();
+        _MQTT_HOST = config.getMqttHost();
+    }
+}
+Log.setLogFile(config.getSd(), "/log.txt");
+```
 
 JSON config stored on SD card at `/config.txt` (SdFat library, SPI interface). Contains WiFi credentials, MQTT settings, and temperature sensor address-to-name mappings. Loaded during `setup()`, writable via API.
 
