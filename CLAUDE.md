@@ -99,12 +99,25 @@ OneWire bus: GPIO21
 
 ### Configuration
 
-The **Config** class (`Config.h/cpp`) manages SD card operations and JSON configuration:
+The **Config** class (`Config.h/cpp`) manages SD card operations and JSON configuration.
+
+**ProjectInfo struct** (defined in `Config.h`):
+```cpp
+struct ProjectInfo {
+    String name;           // Project name
+    String createdOnDate;  // Creation date
+    String description;    // Project description
+    String encrypt;        // Encryption key (unused)
+    bool encrypted;        // Encryption flag (unused)
+    uint32_t maxLogSize;   // Max log file size in bytes before rotation
+    uint8_t maxOldLogCount; // Number of rotated log files to keep
+};
+```
 
 **SD Card Methods:**
 - `initSDCard()` — Initialize SdFat filesystem
 - `openConfigFile(filename, config, proj)` — Open or create config file
-- `loadTempConfig(filename, config)` — Load JSON config into TempSensorMap
+- `loadTempConfig(filename, config, proj)` — Load JSON config into TempSensorMap and ProjectInfo
 - `saveConfiguration(filename, config, proj)` — Write config to SD card
 - `clearConfig(config)` — Free memory and clear TempSensorMap
 
@@ -115,20 +128,34 @@ The **Config** class (`Config.h/cpp`) manages SD card operations and JSON config
 
 **Usage:**
 ```cpp
+ProjectInfo proj = {"Project Name", __DATE__, "Description", "", false, 50*1024*1024, 10};
 Config config;
 config.setTempSensorDiscoveryCallback([](TempSensorMap& tempMap) { getTempSensors(tempMap); });
 if (config.initSDCard()) {
     TempSensorMap& tempSensors = hpController.getTempSensorMap();
     if (config.openConfigFile("/config.txt", tempSensors, proj)) {
-        config.loadTempConfig("/config.txt", tempSensors);
+        config.loadTempConfig("/config.txt", tempSensors, proj);
         _WIFI_SSID = config.getWifiSSID();
         _MQTT_HOST = config.getMqttHost();
     }
 }
-Log.setLogFile(config.getSd(), "/log.txt");
+Log.setLogFile(config.getSd(), "/log.txt", proj.maxLogSize, proj.maxOldLogCount);
 ```
 
-JSON config stored on SD card at `/config.txt` (SdFat library, SPI interface). Contains WiFi credentials, MQTT settings, and temperature sensor address-to-name mappings. Loaded during `setup()`, writable via API.
+JSON config stored on SD card at `/config.txt` (SdFat library, SPI interface). Contains WiFi credentials, MQTT settings, log rotation settings, and temperature sensor address-to-name mappings. Loaded during `setup()`, writable via API.
+
+**JSON structure:**
+```json
+{
+  "project": "...",
+  "created": "...",
+  "description": "...",
+  "wifi": { "ssid": "...", "password": "..." },
+  "mqtt": { "user": "...", "password": "...", "host": "...", "port": 1883 },
+  "logging": { "maxLogSize": 52428800, "maxOldLogCount": 10 },
+  "sensors": { "temp": { ... } }
+}
+```
 
 ### Logger
 
@@ -141,7 +168,8 @@ Multi-output logging (Serial, MQTT topic, SD card with file rotation). Runtime-c
 **Log rotation** follows a Linux-style scheme using ESP32-targz for compression:
 - `/log.txt` — active log (uncompressed)
 - `/log.1.tar.gz` through `/log.N.tar.gz` — rotated archives (compressed)
-- Rotation triggers when log file exceeds 50MB (configurable)
+- Rotation triggers when log file exceeds `maxLogSize` (default 50MB, configurable via ProjectInfo)
+- Number of old logs kept is `maxOldLogCount` (default 10, configurable via ProjectInfo)
 - Falls back to plain rename (`.txt`) if compression fails
 
 **SdFat/SD library swap**: The project uses SdFat (Adafruit fork) for normal SD card operations, but ESP32-targz requires Arduino's `SD` library (`fs::FS` interface). During log rotation, Logger temporarily calls `_sd->end()`, initializes Arduino `SD` for compression, then restores SdFat via `_sd->begin()`. This swap is isolated to `compressFile()` in `Logger.cpp`.
