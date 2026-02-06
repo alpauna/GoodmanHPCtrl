@@ -7,8 +7,15 @@
 #include "ArduinoJson.h"
 #include "TempSensor.h"
 
-// Forward declarations
-struct ProjectInfo;
+struct ProjectInfo {
+    String name;
+    String createdOnDate;
+    String description;
+    String encrypt;
+    bool encrypted;
+    uint32_t maxLogSize;      // Max log file size in bytes before rotation
+    uint8_t maxOldLogCount;   // Number of rotated log files to keep
+};
 
 class Config {
   public:
@@ -17,7 +24,7 @@ class Config {
     // SD Card operations
     bool initSDCard();
     bool openConfigFile(const char* filename, TempSensorMap& config, ProjectInfo& proj);
-    bool loadTempConfig(const char* filename, TempSensorMap& config);
+    bool loadTempConfig(const char* filename, TempSensorMap& config, ProjectInfo& proj);
     bool saveConfiguration(const char* filename, TempSensorMap& config, ProjectInfo& proj);
     void clearConfig(TempSensorMap& config);
 

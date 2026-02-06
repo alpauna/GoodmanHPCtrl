@@ -176,13 +176,7 @@ const u_int8_t _oPin = GPIO_NUM_18;
 #endif
 const u_int8_t ONE_WIRE_BUS = GPIO_NUM_21;
 
-struct ProjectInfo{
-  String name;
-  String createdOnDate;
-  String description;
-  String encrypt;
-  bool encrpytped;
-};
+// ProjectInfo is defined in Config.h
 
 void tempSensorUpdateCallback(TempSensor *sensor);
 void tempSensorChangeCallback(TempSensor *sensor);
@@ -210,7 +204,15 @@ typedef enum AC_STATE { OFF, COOL, HEAT, DEFROST } ACState;
 static String AC_STATE_STR[] = {"OFF", "COOL", "HEAT", "DEFROST"};
 static String BOOL_STR[] = {"TRUE", "FALSE"};
 
-ProjectInfo proj = {"Goodman Heatpump Control", compile_date, "Control Goodman heatpump including defrost mode.", "", false };
+ProjectInfo proj = {
+  "Goodman Heatpump Control",
+  compile_date,
+  "Control Goodman heatpump including defrost mode.",
+  "",
+  false,
+  50 * 1024 * 1024,  // maxLogSize: 50MB default
+  10                  // maxOldLogCount: 10 files default
+};
 
 
 ACState _acState = OFF;
@@ -571,7 +573,7 @@ void setup() {
   if(config.initSDCard()){
     TempSensorMap& tempSensors = hpController.getTempSensorMap();
     if(config.openConfigFile(_filename, tempSensors, proj)){
-      config.loadTempConfig(_filename, tempSensors);
+      config.loadTempConfig(_filename, tempSensors, proj);
       // Update global variables from config
       _WIFI_SSID = config.getWifiSSID();
       _WIFI_PASSWORD = config.getWifiPassword();
@@ -592,7 +594,7 @@ void setup() {
   // Initialize Logger
   Log.setLevel(Logger::LOG_INFO);
   Log.setMqttClient(&_mqttClient, "goodman/log");
-  Log.setLogFile(config.getSd(), "/log.txt");
+  Log.setLogFile(config.getSd(), "/log.txt", proj.maxLogSize, proj.maxOldLogCount);
   Log.info("MAIN", "Logger initialized");
 
   // Add input pins to GoodmanHP controller

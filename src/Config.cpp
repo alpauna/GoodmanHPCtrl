@@ -8,14 +8,6 @@ extern ArduinoOutStream cout;
 extern void tempSensorUpdateCallback(TempSensor* sensor);
 extern void tempSensorChangeCallback(TempSensor* sensor);
 
-struct ProjectInfo {
-    String name;
-    String createdOnDate;
-    String description;
-    String encrypt;
-    bool encrpytped;
-};
-
 #define SPI_SPEED SD_SCK_MHZ(SD_SPI_SPEED)
 
 Config::Config()
@@ -76,7 +68,7 @@ bool Config::openConfigFile(const char* filename, TempSensorMap& config, Project
     return _configFile.open(filename, O_RDONLY);
 }
 
-bool Config::loadTempConfig(const char* filename, TempSensorMap& config) {
+bool Config::loadTempConfig(const char* filename, TempSensorMap& config, ProjectInfo& proj) {
     if (!_configFile.isOpen()) {
         return false;
     }
@@ -94,6 +86,9 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config) {
     const char* project = doc["project"];
     const char* created = doc["created"];
     const char* description = doc["description"];
+    proj.name = project != nullptr ? project : "";
+    proj.createdOnDate = created != nullptr ? created : "";
+    proj.description = description != nullptr ? description : "";
 
     const char* wifi_ssid = doc["wifi"]["ssid"];
     const char* wifi_password = doc["wifi"]["password"];
@@ -111,6 +106,13 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config) {
     _mqttPassword = mqtt_password != nullptr ? mqtt_password : "";
     _mqttHost.fromString(mqtt_host != nullptr ? mqtt_host : "192.168.1.2");
     cout << "Read mqtt Host:" << _mqttHost << endl;
+
+    // Load log rotation settings
+    JsonObject logging = doc["logging"];
+    proj.maxLogSize = logging["maxLogSize"] | (50 * 1024 * 1024);  // Default 50MB
+    proj.maxOldLogCount = logging["maxOldLogCount"] | 10;          // Default 10 files
+    cout << "Read log settings: maxSize=" << proj.maxLogSize
+         << " maxOldCount=" << (int)proj.maxOldLogCount << endl;
 
     clearConfig(config);
     for (JsonPair sensors_temp_item : doc["sensors"]["temp"].as<JsonObject>()) {
@@ -178,6 +180,10 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     mqtt["password"] = "";
     mqtt["host"] = "192.168.1.1";
     mqtt["port"] = 1883;
+
+    JsonObject logging = doc["logging"].to<JsonObject>();
+    logging["maxLogSize"] = proj.maxLogSize;
+    logging["maxOldLogCount"] = proj.maxOldLogCount;
 
     JsonObject sensors = doc["sensors"].to<JsonObject>();
     JsonObject sensors_temp = sensors["temp"].to<JsonObject>();
