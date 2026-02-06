@@ -78,7 +78,12 @@ Global `operator new`/`delete` are overridden to route all allocations through P
   - Properties: `description`, `deviceAddress`, `value`, `previous`, `valid`
   - Callbacks: `setUpdateCallback()`, `setChangeCallback()`
   - Methods: `update(DallasTemperature*, threshold)` reads sensor and fires change callback if delta exceeds threshold
-  - Static helpers: `addressToString()`, `stringToAddress()` for DeviceAddress conversion
+  - Static helpers:
+    - `addressToString(uint8_t*)` — Convert DeviceAddress to hex string
+    - `stringToAddress(String&, uint8_t*)` — Parse hex string to DeviceAddress
+    - `printAddress(uint8_t*)` — Print address to Serial in hex format
+    - `discoverSensors(DallasTemperature*, TempSensorMap&, updateCb, changeCb)` — Enumerate OneWire bus and populate TempSensorMap
+    - `getDefaultDescription(uint8_t index)` — Returns sensor name by index (LINE_TEMP, SUCTION_TEMP, AMBIENT_TEMP, CONDENSER_TEMP)
 
 ### GPIO Pin Mapping (ESP32-S3)
 
