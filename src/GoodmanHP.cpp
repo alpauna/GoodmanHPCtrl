@@ -6,6 +6,7 @@ GoodmanHP* GoodmanHP::_instance = nullptr;
 
 GoodmanHP::GoodmanHP(Scheduler *ts)
     : _ts(ts)
+    , _sensors(nullptr)
     , _state(State::OFF)
     , _yActiveStartTick(0)
     , _yWasActive(false)
@@ -15,10 +16,23 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     _tskUpdate = new Task(500, TASK_FOREVER, [this]() {
         this->update();
     }, ts, false);
+    _tskCheckTemps = new Task(10 * TASK_SECOND, TASK_FOREVER, [this]() {
+        if (_sensors == nullptr) return;
+        _sensors->requestTemperatures();
+        for (auto& mp : _tempSensorMap) {
+            if (mp.second == nullptr) continue;
+            mp.second->update(_sensors);
+        }
+    }, ts, false);
+}
+
+void GoodmanHP::setDallasTemperature(DallasTemperature *sensors) {
+    _sensors = sensors;
 }
 
 void GoodmanHP::begin() {
     _tskUpdate->enable();
+    _tskCheckTemps->enable();
     Log.info("HP", "GoodmanHP controller started");
 }
 

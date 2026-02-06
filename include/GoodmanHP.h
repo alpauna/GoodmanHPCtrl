@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <map>
+#include <DallasTemperature.h>
 #include <TaskSchedulerDeclarations.h>
 #include "InputPin.h"
 #include "OutPin.h"
@@ -14,6 +15,7 @@ class GoodmanHP {
 
     GoodmanHP(Scheduler *ts);
 
+    void setDallasTemperature(DallasTemperature *sensors);
     void begin();
     void update();
 
@@ -44,6 +46,8 @@ class GoodmanHP {
   private:
     Scheduler *_ts;
     Task *_tskUpdate;
+    Task *_tskCheckTemps;
+    DallasTemperature *_sensors;
 
     std::map<String, InputPin*> _inputMap;
     std::map<String, OutPin*> _outputMap;

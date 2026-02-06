@@ -256,14 +256,6 @@ bool onOutpin(OutPin *pin, bool on, bool inCallback, float &newPercent, float or
   return true;
 }
 
-Task tCheckTemps(10 * TASK_SECOND, TASK_FOREVER, [](){
-  sensors.requestTemperatures();
-  for(auto& mp : hpController.getTempSensorMap()){
-    if(mp.second == nullptr) continue;
-    mp.second->update(&sensors);
-  }
-}, &ts, false);
-
 Task tWaitOnWiFi(TASK_SECOND, 60, [](){
   cout << ".";
 }, &ts, false, onWifiWaitEnable, onWifiWaitDisable);
@@ -612,6 +604,7 @@ void setup() {
   setupInputs();
 
   // Start GoodmanHP controller
+  hpController.setDallasTemperature(&sensors);
   hpController.begin();
 
   //setInputPinsMode();
@@ -639,7 +632,6 @@ void setup() {
 
   //tReadInputs.enable();
   tRuntime.enable();
-  tCheckTemps.enable();
   _tGetInputs.enable();
 
   Log.info("MAIN", "Starting Main Loop");
