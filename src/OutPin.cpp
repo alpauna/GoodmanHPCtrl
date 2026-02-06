@@ -42,13 +42,14 @@ OutPin::OutPin(Scheduler *ts, uint32_t delay, int8_t pin, String name, String bo
   _pwmFreq = 1000;
   _clbk = clbk;
   _percentOn = 0.0;
-  //initPin();
 
-  _tsk = new Task (delay, TASK_ONCE, [this]() {
+  _tsk = new Task(delay, TASK_ONCE, [this]() {
       this->Callback();
   }, ts, false);
 
-  //_tsk = new Task (delay, TASK_ONCE, Callback, ts, false);
+  _tskRuntime = new Task(_runtimeInterval, TASK_FOREVER, [this]() {
+      this->runtimeCallback();
+  }, ts, false);
 }
 
 OutPin::OutPin(Scheduler *ts, uint32_t delay, int8_t pin, String name, String boardPin, float percentOn, OutputPinCallback clbk){
@@ -62,9 +63,13 @@ OutPin::OutPin(Scheduler *ts, uint32_t delay, int8_t pin, String name, String bo
   _pwmFreq = 1000;
   _clbk = clbk;
   _percentOn = percentOn;
-  //initPin();
-  _tsk = new Task (delay, TASK_ONCE, [this]() {
+
+  _tsk = new Task(delay, TASK_ONCE, [this]() {
       this->Callback();
+  }, ts, false);
+
+  _tskRuntime = new Task(_runtimeInterval, TASK_FOREVER, [this]() {
+      this->runtimeCallback();
   }, ts, false);
 }
 
@@ -79,9 +84,13 @@ OutPin::OutPin(Scheduler *ts, uint32_t delay, int8_t pin, String name, String bo
   _pwmFreq = 1000;
   _clbk = clbk;
   _percentOn = 0.0;
-  //initPin();
-  _tsk = new Task (delay, TASK_ONCE, [this]() {
+
+  _tsk = new Task(delay, TASK_ONCE, [this]() {
       this->Callback();
+  }, ts, false);
+
+  _tskRuntime = new Task(_runtimeInterval, TASK_FOREVER, [this]() {
+      this->runtimeCallback();
   }, ts, false);
 }
 
@@ -99,9 +108,13 @@ OutPin::OutPin(Scheduler *ts, uint32_t delay, int8_t pin, String name, String bo
   if(pwm){
       analogWriteFrequency(_pwmFreq);
   }
-  //initPin();
-  _tsk = new Task (delay, TASK_ONCE, [this]() {
+
+  _tsk = new Task(delay, TASK_ONCE, [this]() {
       this->Callback();
+  }, ts, false);
+
+  _tskRuntime = new Task(_runtimeInterval, TASK_FOREVER, [this]() {
+      this->runtimeCallback();
   }, ts, false);
 }
 
@@ -157,6 +170,7 @@ void OutPin::turnOff(){
   }
   _changeOffTick = millis();
   _tsk->disable();
+  _tskRuntime->disable();
   digitalWrite(_pin, _inverse ? HIGH : LOW);
 }
 
@@ -170,6 +184,10 @@ void OutPin::turnOn(){
   }
   _tsk->enableIfNot();
   _tsk->restartDelayed();
+  if(_runtimeClbk != nullptr){
+    _tskRuntime->enableIfNot();
+    _tskRuntime->restartDelayed();
+  }
   digitalWrite(_pin, _inverse ? LOW : HIGH);
 }
 
@@ -183,4 +201,26 @@ void OutPin::turnOn(float percent){
   }
   _tsk->enableIfNot();
   _tsk->restartDelayed();
+  if(_runtimeClbk != nullptr){
+    _tskRuntime->enableIfNot();
+    _tskRuntime->restartDelayed();
+  }
+}
+
+void OutPin::setRuntimeCallback(RuntimeCallback clbk, uint32_t intervalMs){
+  _runtimeClbk = clbk;
+  _runtimeInterval = intervalMs;
+  _tskRuntime->setInterval(_runtimeInterval);
+}
+
+void OutPin::runtimeCallback(){
+  if(_runtimeClbk == nullptr || !isOn()){
+    _tskRuntime->disable();
+    return;
+  }
+  uint32_t onDuration = millis() - _changeOnTick;
+  bool shouldContinue = _runtimeClbk(this, onDuration);
+  if(!shouldContinue){
+    _tskRuntime->disable();
+  }
 }

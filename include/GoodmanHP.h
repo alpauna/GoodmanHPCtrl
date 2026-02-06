@@ -50,6 +50,11 @@ class GoodmanHP {
 
     void checkYAndActivateCNT();
     void updateState();
+
+    // Runtime callback for OutPins
+    static GoodmanHP* _instance;
+    static bool outPinRuntimeCallback(OutPin* pin, uint32_t onDuration);
+    bool handleOutPinRuntime(OutPin* pin, uint32_t onDuration);
 };
 
 #endif

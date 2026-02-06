@@ -1,6 +1,9 @@
 #include "GoodmanHP.h"
 #include "Logger.h"
 
+// Static instance pointer for runtime callback
+GoodmanHP* GoodmanHP::_instance = nullptr;
+
 GoodmanHP::GoodmanHP(Scheduler *ts)
     : _ts(ts)
     , _state(State::OFF)
@@ -8,6 +11,7 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _yWasActive(false)
     , _cntActivated(false)
 {
+    _instance = this;
     _tskUpdate = new Task(500, TASK_FOREVER, [this]() {
         this->update();
     }, ts, false);
@@ -24,6 +28,8 @@ void GoodmanHP::addInput(const String& name, InputPin* pin) {
 
 void GoodmanHP::addOutput(const String& name, OutPin* pin) {
     _outputMap[name] = pin;
+    // Set runtime callback so GoodmanHP can respond to OutPin events
+    pin->setRuntimeCallback(outPinRuntimeCallback);
 }
 
 InputPin* GoodmanHP::getInput(const String& name) {
@@ -157,4 +163,43 @@ uint32_t GoodmanHP::getYActiveTime() {
         return millis() - _yActiveStartTick;
     }
     return 0;
+}
+
+// Static callback delegates to instance method
+bool GoodmanHP::outPinRuntimeCallback(OutPin* pin, uint32_t onDuration) {
+    if (_instance != nullptr) {
+        return _instance->handleOutPinRuntime(pin, onDuration);
+    }
+    return false;  // No instance, stop the callback
+}
+
+// Instance method handles specific OutPin runtime events
+bool GoodmanHP::handleOutPinRuntime(OutPin* pin, uint32_t onDuration) {
+    if (pin == nullptr) {
+        return false;
+    }
+
+    String pinName = pin->getName();
+
+    // Handle specific OutPins based on their name
+    if (pinName == "CNT") {
+        // Contactor runtime monitoring
+        Log.debug("HP", "CNT runtime: %lu ms", onDuration);
+        return true;  // Continue monitoring
+    } else if (pinName == "FAN") {
+        // Fan runtime monitoring
+        Log.debug("HP", "FAN runtime: %lu ms", onDuration);
+        return true;  // Continue monitoring
+    } else if (pinName == "W") {
+        // Heating relay runtime monitoring
+        Log.debug("HP", "W runtime: %lu ms", onDuration);
+        return true;  // Continue monitoring
+    } else if (pinName == "RV") {
+        // Reversing valve runtime monitoring
+        Log.debug("HP", "RV runtime: %lu ms", onDuration);
+        return true;  // Continue monitoring
+    }
+
+    // Unknown pin, continue callback by default
+    return true;
 }

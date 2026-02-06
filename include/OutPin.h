@@ -6,12 +6,14 @@
 
 class OutPin;
 typedef bool (*OutputPinCallback)(OutPin *pin, bool on, bool inCallback, float &newPercent, float lastPercent);
+typedef bool (*RuntimeCallback)(OutPin *pin, uint32_t onDuration);
 
 class OutPin
 {
   private:
     Scheduler *_ts;
     Task *_tsk;
+    Task *_tskRuntime;
     int8_t _pin;
     String _name;
     String _boardPin;
@@ -25,6 +27,8 @@ class OutPin
     uint32_t _changeOnTick;
     uint32_t _changeOffTick;
     OutputPinCallback _clbk = nullptr;
+    RuntimeCallback _runtimeClbk = nullptr;
+    uint32_t _runtimeInterval = 1000;
   protected:
     uint8_t percent_to_byte_float(float percent);
     void turnOnPercent(float percent);
@@ -52,6 +56,8 @@ class OutPin
     void turnOff();
     void turnOn();
     void turnOn(float percent);
+    void setRuntimeCallback(RuntimeCallback clbk, uint32_t intervalMs = 1000);
+    void runtimeCallback();
 };
 
 #endif
