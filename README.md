@@ -119,8 +119,15 @@ Place a `config.txt` file on the SD card with the following format:
 ```
 
 **Configuration options:**
-- `logging.maxLogSize` — Maximum log file size in bytes before rotation (default: 50MB)
+- `logging.maxLogSize` — Maximum log file size in bytes before rotation (default: 52428800 = 50MB)
 - `logging.maxOldLogCount` — Number of rotated log files to keep (default: 10)
+
+**Log file rotation:**
+- Active log: `/log.txt` (uncompressed)
+- Rotated logs: `/log.1.tar.gz`, `/log.2.tar.gz`, ... `/log.N.tar.gz` (compressed)
+- When `/log.txt` exceeds `maxLogSize`, it is compressed and rotated
+- Oldest log is deleted when count exceeds `maxOldLogCount`
+- Falls back to `.txt` extension if compression fails
 
 Sensor addresses are discovered automatically on startup and can be mapped to names via this config.
 
