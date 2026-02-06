@@ -12,6 +12,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **Multi-output logging** — Serial, MQTT, and SD card with tar.gz compressed log rotation
 - **NTP time sync** — Automatic time synchronization from NTP servers, refreshes every 2 hours
 - **PSRAM support** — All heap allocations routed through PSRAM when available
+- **FreeRTOS compatible** — Uses `vTaskDelay()` instead of `delay()` for proper RTOS task yielding
 
 ## Hardware
 
