@@ -22,6 +22,7 @@
 #include "OutPin.h"
 #include "InputPin.h"
 #include "GoodmanHP.h"
+#include "Config.h"
 bool psramInited = false;
 bool serialInited = false;
 
@@ -128,23 +129,8 @@ int freeMemory() { return 0;}
 
 //#define _TASK_MICRO_RES
 
-#define SPI_SPEED SD_SCK_MHZ(SD_SPI_SPEED)
-//------------------------------------------------------------------------------
-#if SD_FAT_TYPE == 0
-SdFat sd;
-File file;
-#elif SD_FAT_TYPE == 1
-SdFat32 sd;
-File32 file;
-#elif SD_FAT_TYPE == 2
-SdExFat sd;
-ExFile file;
-#elif SD_FAT_TYPE == 3
-SdFs sd;
-FsFile _configFile;
-#else  // SD_FAT_TYPE
-#error Invalid SD_FAT_TYPE
-#endif  // SD_FAT_TYPE
+// Config instance for SD card and configuration management
+Config config;
 
 
 std::map<String, InputPin*> _isrEvent;
@@ -250,14 +236,13 @@ void getDeviceAddress(uint8_t *devAddr, String  temp);
 String getStrDeviceAddress(DeviceAddress temp);
 void webAsyncFunctions();
 void getTempSensors();
+void getTempSensors(TempMap& tempMap);
 void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len);
 void connectToMqtt();
 bool onWifiWaitEnable();
 void onWifiWaitDisable();
 bool onMqttWaitEnable();
 void onMqttDisable();
-bool saveConfiguration(const char* filename, TempMap& config, ProjectInfo& proj);
-void clearConfig(TempMap &config);
 bool CheckTickTime(InputPin *pin);
 void onCheckInputQueue();
 
@@ -517,178 +502,6 @@ void setupMQTT(){
   _mqttClient.setCredentials(_MQTT_USER.c_str(), _MQTT_PASSWORD.c_str());
 }
 
-bool initSDCard(){
-  if (!sd.begin(SS, SPI_SPEED)) {
-    if (sd.card()->errorCode()) {
-      cout << 
-          "\nSD initialization failed.\n"
-          "Do not reformat the card!\n"
-          "Is the card correctly inserted?\n"
-          "Is chipSelect set to the correct value?\n"
-          "Does another SPI device need to be disabled?\n"
-          "Is there a wiring/soldering problem?\n";
-      cout << "\nerrorCode: " << hex << showbase;
-      cout << int(sd.card()->errorCode());
-      cout << ", errorData: " << int(sd.card()->errorData());
-      cout << dec << noshowbase << endl;
-      return false;
-    }
-    cout << "\nCard successfully initialized.\n";
-    if (sd.vol()->fatType() == 0) {
-      cout << "Can't find a valid FAT16/FAT32/exFAT partition.\n";
-      return false;
-    }
-    cout << "Can't determine error type\n";
-    return false;
-  }
-  cout << "\nCard successfully initialized.\n";
-  cout << endl;
-
-  uint32_t size = sd.card()->sectorCount();
-  if (size == 0) {
-    cout << "Can't determine the card size.\n";
-    return false;
-  }
-  return true;
-}
-
-bool openConfigFile(const char *filename, TempMap &config){
-  if (!sd.exists(filename) || (_configFile.open(filename, O_RDONLY) && _configFile.size() == 0)) {
-    _configFile.close();
-    return saveConfiguration(filename, config, proj);
-  }
-  _configFile.close();
-  
-  return _configFile.open(filename, O_RDONLY);
-}
-bool loadTempConfig(const char *filename, TempMap &config)
-{
-  if(!_configFile.isOpen()){ return false; }
-  _configFile.rewind();
-  // Allocate a temporary JsonDocument
-  // Stream& input;
-
-  JsonDocument doc;
-
-  DeserializationError error = deserializeJson(doc, _configFile);
-
-  if (error) {
-    Serial.print("deserializeJson() failed: ");
-    Serial.println(error.c_str());
-    return false;
-  }
-
-  const char* project = doc["project"]; // "Goodman"
-  const char* created = doc["created"]; // nullptr
-  const char* description = doc["description"]; // nullptr
-
-  const char* wifi_ssid = doc["wifi"]["ssid"]; // "MEGA"
-  const char* wifi_password = doc["wifi"]["password"]; // nullptr
-  _WIFI_SSID = wifi_ssid != nullptr ? wifi_ssid : "";
-  _WIFI_PASSWORD = wifi_password != nullptr ? wifi_password : "";
-  cout << "Read WiFi SSID:" << wifi_ssid << endl;
-
-  JsonObject mqtt = doc["mqtt"];
-  const char* mqtt_user = mqtt["user"]; // "debian"
-  const char* mqtt_password = mqtt["password"]; // nullptr
-  const char* mqtt_host = mqtt["host"]; // "192.168.1.1"
-  int mqtt_port = mqtt["port"]; // 1883
-  _MQTT_PORT = mqtt_port;
-  _MQTT_USER = mqtt_user != nullptr ? mqtt_user : "";
-  _MQTT_PASSWORD = mqtt_password != nullptr ? mqtt_password : "";
-  _MQTT_HOST.fromString(mqtt_host != nullptr ? mqtt_host : "192.168.1.2");
-  cout << "Read mqtt SSID:" << _MQTT_HOST << endl;
-
-  clearConfig(config);
-  for (JsonPair sensors_temp_item : doc["sensors"]["temp"].as<JsonObject>()) {
-    const char* key = sensors_temp_item.key().c_str(); // "288514B2000000EA", ...
-    const char* description = sensors_temp_item.value()["description"];
-    int last_value = sensors_temp_item.value()["last-value"]; // 0, 0, 0, 0
-    const char* name = sensors_temp_item.value()["name"]; // "AMBIENT_TEMP", ...
-    cout << "Key:" << key << "\t";
-    cout << "Description:" << description << "\t";
-    cout << "Last Value:" << last_value << endl;
-    cout << "Name: " << name << endl;
-    CurrentTemp *tmp = new CurrentTemp();
-    uint8_t *devAddr = new uint8_t[sizeof(DeviceAddress)];
-    config[name] = tmp;
-    tmp->deviceAddress = devAddr;
-    tmp->description = String(description);
-    String devaddrStr = String(key);
-    cout << "Devstr:" << devaddrStr  << endl;
-    getDeviceAddress(devAddr, devaddrStr);
-    tmp->Value = last_value;
-    tmp->Previous = tmp->Value;
-    tmp->Valid = true; 
-    tmp->onCurrTempChanged = currentTempChangeCallback;
-    tmp->onCurrTempUpdate = currentTempCallback;
-    cout << "JSON description: " << tmp->description << "\tID:" << getStrDeviceAddress(devAddr)  << "\t Value:" << tmp->Value << endl;
-  }
-  // // Close the file (Curiously, File's destructor doesn't close the file)
-  // file.close();
-  _configFile.close();
-  return true;
-}
-void clearConfig(TempMap &config)
-{
-  for (auto k : config)
-  {
-    if (k.second == nullptr)
-      continue;
-    if (k.second->deviceAddress != nullptr)
-      delete k.second->deviceAddress;
-    delete k.second;
-  }
-  config.clear();
-}
-
-bool saveConfiguration(const char* filename, TempMap& config, ProjectInfo& proj){
-  if (sd.exists(filename) && _configFile.open(filename, O_RDONLY) && _configFile.size() > 0) {
-    _configFile.close();
-    return false;
-  }
-  _configFile.close();
-  if (!_configFile.open(filename, O_RDWR | O_TRUNC | O_CREAT)) {
-    cout << "open failed: " << "\"" << filename << "\"" << endl;
-    return false;
-  }
-  JsonDocument doc;
-
-  doc["project"] = "Goodman";
-  doc["created"] = compile_date;
-  doc["description"] = "Goodmand heatpump control board";
-
-  JsonObject wifi = doc["wifi"].to<JsonObject>();
-  wifi["ssid"] = "MEGA";
-  wifi["password"] = "";
-
-  JsonObject mqtt = doc["mqtt"].to<JsonObject>();
-  mqtt["user"] = "debian";
-  mqtt["password"] = "";
-  mqtt["host"] = "192.168.1.1";
-  mqtt["port"] = 1883;
-
-  JsonObject sensors = doc["sensors"].to<JsonObject>();
-
-  JsonObject sensors_temp = sensors["temp"].to<JsonObject>();
-  if(_tempSens.size() == 0){
-    getTempSensors();
-  }
-  for (auto& mp : _tempSens){
-    String id = getStrDeviceAddress(mp.second->deviceAddress);
-    JsonObject temp = sensors_temp[id].to<JsonObject>();
-    temp["description"] = mp.second->description;
-    temp["last-value"] = mp.second->Value;
-    temp["name"] = mp.first;
-  }
-  String output;
-  serializeJson(doc, _configFile);
-  serializeJsonPretty(doc, output);
-  cout << "Temp sensor as json..." << endl;
-  cout << output << endl;
-  _configFile.close();
-  return true;
-}
 
 void onCheckInputQueue(){
   for(auto& m : _isrEvent){
@@ -761,14 +574,26 @@ void setup() {
   cout << "PSRAM Size:" << ESP.getPsramSize() * MB_MULTIPLIER << " MB" << endl;
 
   
-  acc_data_all = (unsigned char *) ps_malloc (n_elements * sizeof (unsigned char));  
+  acc_data_all = (unsigned char *) ps_malloc (n_elements * sizeof (unsigned char));
   sprintf((char *)acc_data_all, "Test %d", millis());
   sensors.begin();
-  if(initSDCard()){
-    if(openConfigFile(_filename, _tempSens)){
-      loadTempConfig(_filename, _tempSens);
+
+  // Initialize config and load from SD card
+  config.setTempSensorDiscoveryCallback([](TempMap& tempMap) {
+    getTempSensors(tempMap);
+  });
+
+  if(config.initSDCard()){
+    if(config.openConfigFile(_filename, _tempSens, proj)){
+      config.loadTempConfig(_filename, _tempSens);
+      // Update global variables from config
+      _WIFI_SSID = config.getWifiSSID();
+      _WIFI_PASSWORD = config.getWifiPassword();
+      _MQTT_HOST = config.getMqttHost();
+      _MQTT_PORT = config.getMqttPort();
+      _MQTT_USER = config.getMqttUser();
+      _MQTT_PASSWORD = config.getMqttPassword();
     }
-    
   }
   cout << "SD Card is read." << endl;
   WiFi.onEvent(onWiFiEvent);
@@ -781,7 +606,7 @@ void setup() {
   // Initialize Logger
   Log.setLevel(Logger::LOG_INFO);
   Log.setMqttClient(&_mqttClient, "goodman/log");
-  Log.setLogFile(&sd, "/log.txt");
+  Log.setLogFile(config.getSd(), "/log.txt");
   Log.info("MAIN", "Logger initialized");
 
   // Add input pins to GoodmanHP controller
@@ -1053,7 +878,7 @@ void currentTempChangeCallback(CurrentTemp *temp){
   Serial.println("F");
 }
 
-void getTempSensors()
+void getTempSensors(TempMap& tempMap)
 {
   Serial.print("Locating devices...");
   sensors.begin();
@@ -1062,7 +887,7 @@ void getTempSensors()
   Serial.print(oneWCount, DEC);
   Serial.println(" devices.");
   // If ever ran twice this will clean up things.
-  clearConfig(_tempSens);
+  config.clearConfig(tempMap);
   for(u_int8_t i = 0; i < oneWCount; i++){
     uint8_t *devAddr = new uint8_t[sizeof(DeviceAddress)];
     CurrentTemp *tmp = new CurrentTemp();
@@ -1071,7 +896,7 @@ void getTempSensors()
     tmp->Valid = false;
     tmp->Value = 0.0f;
     tmp->onCurrTempChanged = currentTempChangeCallback;
-    tmp->onCurrTempUpdate = currentTempCallback; 
+    tmp->onCurrTempUpdate = currentTempCallback;
     switch (i){
       case 0:
          tmp->description = "LINE_TEMP";
@@ -1088,16 +913,21 @@ void getTempSensors()
       default:
         tmp->description = "UNKOWN_TEMP";
     }
-    if(_tempSens.count(tmp->description) == 0) _tempSens[tmp->description] = tmp;
-    if (!sensors.getAddress(_tempSens[tmp->description]->deviceAddress, i))
+    if(tempMap.count(tmp->description) == 0) tempMap[tmp->description] = tmp;
+    if (!sensors.getAddress(tempMap[tmp->description]->deviceAddress, i))
       Serial.println("Unable to find address for Device 0");
     Serial.print("Device ");
     Serial.print(i);
     Serial.print (" Address: ");
-    
-    Serial.printf("Current Temp Description: %s ", _tempSens[tmp->description]->description);
+
+    Serial.printf("Current Temp Description: %s ", tempMap[tmp->description]->description);
     Serial.println(getStrDeviceAddress(devAddr));
   }
+}
+
+void getTempSensors()
+{
+  getTempSensors(_tempSens);
 }
 
 String getStrDeviceAddress(DeviceAddress temp)
