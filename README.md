@@ -31,7 +31,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - `HEAT` — Y and O inputs active (heating mode)
   - `DEFROST` — DFT input active (defrost cycle)
 
-- **Automatic Control** — CNT (contactor) relay activates automatically after Y input has been active for 30 seconds
+- **Automatic Control** — CNT (contactor) relay activates automatically when Y input becomes active, with short cycle protection: if CNT was off for less than 5 minutes, a 30-second delay is enforced before reactivation; if off for 5+ minutes, CNT activates immediately
 
 ### Class Structure
 
