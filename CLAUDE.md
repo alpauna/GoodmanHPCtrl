@@ -71,7 +71,8 @@ Global `operator new`/`delete` are overridden to route all allocations through P
   - `TempSensorMap` for temperature sensors (LINE, SUCTION, AMBIENT, CONDENSER)
   - Pin methods: `addInput()`, `addOutput()`, `getInput()`, `getOutput()`, `getInputMap()`, `getOutputMap()`
   - Temp methods: `addTempSensor()`, `getTempSensor()`, `getTempSensorMap()`, `clearTempSensors()`
-  - State machine: OFF, COOL, HEAT, DEFROST
+  - State machine: OFF, COOL (Y+O active), HEAT (Y active only), DEFROST
+  - RV (reversing valve) automatically controlled: ON in COOL mode, OFF in HEAT/OFF mode
   - Auto-activates CNT relay when Y input becomes active, with 5-minute short cycle protection: if CNT was off for less than 5 minutes, enforces a 30-second delay before reactivation; if off for 5+ minutes (or never activated), CNT activates immediately
   - **Automatic defrost**: After 90 min accumulated CNT runtime in HEAT mode, checks CONDENSER_TEMP — if < 33°F, initiates software defrost (turn off CNT, turn on RV, turn on CNT) until condenser > 42°F or 15-min safety timeout. If condenser >= 33°F, rechecks every 10 min. Runtime resets on COOL mode or after defrost completes. Runtime persists to SD card every 5 min via `tSaveRuntime` task.
   - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`

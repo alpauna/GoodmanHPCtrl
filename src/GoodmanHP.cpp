@@ -171,9 +171,9 @@ void GoodmanHP::updateState() {
     if (dft->isActive() || _softwareDefrost || _defrostPersistent) {
         newState = State::DEFROST;
     } else if (y->isActive() && o->isActive()) {
-        newState = State::HEAT;
-    } else if (y->isActive()) {
         newState = State::COOL;
+    } else if (y->isActive()) {
+        newState = State::HEAT;
     }
 
     if (newState != _state) {
@@ -182,6 +182,19 @@ void GoodmanHP::updateState() {
                  newState == State::COOL ? "COOL" :
                  newState == State::HEAT ? "HEAT" : "DEFROST");
         _state = newState;
+
+        // Control RV based on mode: ON for COOL, OFF for HEAT/OFF
+        OutPin* rv = getOutput("RV");
+        if (rv != nullptr && !_softwareDefrost) {
+            if (newState == State::COOL) {
+                rv->turnOn();
+                Log.info("HP", "RV turned ON for COOL mode");
+            } else if (newState == State::HEAT || newState == State::OFF) {
+                rv->turnOff();
+                Log.info("HP", "RV turned OFF for %s mode",
+                         newState == State::HEAT ? "HEAT" : "OFF");
+            }
+        }
     }
 }
 
@@ -280,9 +293,9 @@ void GoodmanHP::checkDefrostNeeded() {
     if (_defrostPersistent && !_softwareDefrost) {
         InputPin* y = getInput("Y");
         InputPin* o = getInput("O");
-        if (y != nullptr && o != nullptr && y->isActive() && o->isActive()) {
-            // Y and O returned — resume defrost
-            Log.info("HP", "Y/O returned during persistent defrost, restarting software defrost");
+        if (y != nullptr && o != nullptr && y->isActive() && !o->isActive()) {
+            // Y returned without O (HEAT mode) — resume defrost
+            Log.info("HP", "HEAT mode returned during persistent defrost, restarting software defrost");
             startSoftwareDefrost();
         }
         return;

@@ -27,8 +27,8 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 
 - **State Machine** — Tracks heat pump operating mode:
   - `OFF` — No active request
-  - `COOL` — Y input active (cooling mode)
-  - `HEAT` — Y and O inputs active (heating mode)
+  - `HEAT` — Y input active (heating mode, RV off)
+  - `COOL` — Y and O inputs active (cooling mode, RV on)
   - `DEFROST` — DFT input active (defrost cycle)
 
 - **Automatic Control** — CNT (contactor) relay activates automatically when Y input becomes active, with short cycle protection: if CNT was off for less than 5 minutes, a 30-second delay is enforced before reactivation; if off for 5+ minutes, CNT activates immediately
@@ -63,8 +63,8 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 |-----|------|-----------|-------------|
 | LPS | 15 | Input | Low Pressure Switch |
 | DFT | 16 | Input | Defrost signal |
-| Y | 17 | Input | Cooling request |
-| O | 18 | Input | Heating request |
+| Y | 17 | Input | Compressor request (heat or cool) |
+| O | 18 | Input | Reversing valve signal (cool mode) |
 | FAN | 4 | Output | Fan relay |
 | CNT | 5 | Output | Contactor relay (3s delay) |
 | W | 6 | Output | Heating relay |
