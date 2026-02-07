@@ -61,6 +61,7 @@ void* operator new(size_t size) {
       abort();
       #endif
   } 
+  return ptr;
 }
 
 void operator delete(void* ptr) noexcept {
@@ -103,7 +104,7 @@ String _WIFI_SSID = "";
 String _WIFI_PASSWORD = "";
 
 // NTP Configuration
-const char* _ntpServer1 = "pool.ntp.org";
+const char* _ntpServer1 = "192.168.0.1";
 const char* _ntpServer2 = "time.nist.gov";
 const long _gmtOffset_sec = 0;        // UTC offset in seconds (adjust for your timezone)
 const int _daylightOffset_sec = 0;    // Daylight saving offset in seconds
@@ -239,6 +240,8 @@ void onInput(InputPin *pin){
 
 bool onOutpin(OutPin *pin, bool on, bool inCallback, float &newPercent, float origPercent){
   cout << "Output pin:" << pin->getName() << " On:" << on << endl; 
+  cout << "Last On Tick:" << pin->getOnTick() << endl;
+  cout << "Last Off Tick:" << pin->getOffTick() << endl;
   return true;
 }
 

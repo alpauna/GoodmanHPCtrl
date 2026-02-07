@@ -25,7 +25,11 @@ void OutPin::turnOnPercent(float percent){
   _changeOnTick = millis();
 
   if(!_pwm){
-    digitalWrite(_pin, _inverse ? LOW : HIGH);
+    if(percent > 0.0){
+      digitalWrite(_pin, _inverse ? LOW : HIGH);
+    }else{
+      digitalWrite(_pin, _inverse ? HIGH : LOW);
+    }
   }else{
     analogWrite(_pin, percent_to_byte_float(percent));
   }
@@ -120,7 +124,6 @@ OutPin::OutPin(Scheduler *ts, uint32_t delay, int8_t pin, String name, String bo
 
 void OutPin::Callback(){
   _onCount++;
-  Serial.printf("new Percent: %lf,\n", _percentOn);
   turnOnPercent(_percentOn);
 }
 
@@ -142,6 +145,16 @@ void OutPin::resetOnCount() { _onCount = 0; }
 float OutPin::getOnPercent() {return _percentOn;}
 Task * OutPin::getTask() {return _tsk;}
 bool OutPin::isOn() { return _percentOn > 0.0;}
+bool OutPin::isPinOn() { 
+  if(!_pwm){ 
+    if(!_inverse)
+      return digitalRead(_pin);
+    else
+      return !digitalRead(_pin);
+  }else{
+    return analogRead(_pin) > 500;
+  }
+}
 
 void OutPin::initPin(){
   if(!_openDrain){

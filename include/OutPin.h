@@ -52,6 +52,7 @@ class OutPin
     float getOnPercent();
     Task * getTask();
     bool isOn();
+    bool isPinOn();
     void initPin();
     void turnOff();
     void turnOn();
