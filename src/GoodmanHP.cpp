@@ -127,12 +127,21 @@ void GoodmanHP::checkYAndActivateCNT() {
             Log.info("HP", "Y input deactivated, CNT turned off");
         }
     } else if (yActive && _yWasActive && !_cntActivated) {
-        // Y still active - check if 30 seconds have passed
-        uint32_t elapsed = millis() - _yActiveStartTick;
-        if (elapsed >= Y_DELAY_MS) {
+        // Check if CNT was off for less than 5 minutes - if so, enforce 30s delay
+        uint32_t offElapsed = millis() - cnt->getOffTick();
+        if (cnt->getOffTick() > 0 && offElapsed < 5 * 60 * 1000UL) {
+            // Y still active, CNT off < 5 min - check if 30 seconds have passed
+            uint32_t elapsed = millis() - _yActiveStartTick;
+            if (elapsed >= Y_DELAY_MS) {
+                cnt->turnOn();
+                _cntActivated = true;
+                Log.info("HP", "Y active for 30s, CNT activated (short cycle protection)");
+            }
+        } else {
+            // CNT off >= 5 min or never turned off - activate immediately
             cnt->turnOn();
             _cntActivated = true;
-            Log.info("HP", "Y active for 30s, CNT activated");
+            Log.info("HP", "Y active, CNT activated immediately (off > 5 min)");
         }
     }
 }
