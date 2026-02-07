@@ -114,6 +114,11 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     cout << "Read log settings: maxSize=" << proj.maxLogSize
          << " maxOldCount=" << (int)proj.maxOldLogCount << endl;
 
+    // Load heat runtime accumulation
+    JsonObject runtime = doc["runtime"];
+    proj.heatRuntimeAccumulatedMs = runtime["heatAccumulatedMs"] | 0;
+    cout << "Read heat runtime: " << proj.heatRuntimeAccumulatedMs << " ms" << endl;
+
     clearConfig(config);
     for (JsonPair sensors_temp_item : doc["sensors"]["temp"].as<JsonObject>()) {
         const char* key = sensors_temp_item.key().c_str();
@@ -185,6 +190,9 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     logging["maxLogSize"] = proj.maxLogSize;
     logging["maxOldLogCount"] = proj.maxOldLogCount;
 
+    JsonObject runtime = doc["runtime"].to<JsonObject>();
+    runtime["heatAccumulatedMs"] = proj.heatRuntimeAccumulatedMs;
+
     JsonObject sensors = doc["sensors"].to<JsonObject>();
     JsonObject sensors_temp = sensors["temp"].to<JsonObject>();
 
@@ -206,5 +214,35 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     cout << "Temp sensor as json..." << endl;
     cout << output << endl;
     _configFile.close();
+    return true;
+}
+
+bool Config::updateRuntime(const char* filename, uint32_t heatRuntimeMs) {
+    if (!_sdInitialized) {
+        return false;
+    }
+
+    FsFile file;
+    if (!file.open(filename, O_RDONLY)) {
+        return false;
+    }
+
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, file);
+    file.close();
+
+    if (error) {
+        return false;
+    }
+
+    // Update runtime field
+    doc["runtime"]["heatAccumulatedMs"] = heatRuntimeMs;
+
+    // Write back
+    if (!file.open(filename, O_RDWR | O_TRUNC)) {
+        return false;
+    }
+    serializeJson(doc, file);
+    file.close();
     return true;
 }

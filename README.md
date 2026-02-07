@@ -33,6 +33,13 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 
 - **Automatic Control** — CNT (contactor) relay activates automatically when Y input becomes active, with short cycle protection: if CNT was off for less than 5 minutes, a 30-second delay is enforced before reactivation; if off for 5+ minutes, CNT activates immediately
 
+- **Automatic Defrost** — After 90 minutes of accumulated CNT runtime in HEAT mode, checks CONDENSER_TEMP:
+  - If < 33°F: initiates software defrost (turns off CNT, turns on RV reversing valve, turns on CNT) until condenser exceeds 42°F
+  - If >= 33°F: schedules recheck every 10 minutes
+  - 15-minute safety timeout forces defrost exit
+  - Switching to COOL mode resets accumulated runtime
+  - Runtime persists to SD card every 5 minutes, restored on boot
+
 ### Class Structure
 
 | Class | Purpose |
@@ -106,6 +113,9 @@ Place a `config.txt` file on the SD card with the following format:
   "logging": {
     "maxLogSize": 52428800,
     "maxOldLogCount": 10
+  },
+  "runtime": {
+    "heatAccumulatedMs": 0
   },
   "sensors": {
     "temp": {

@@ -15,6 +15,7 @@ struct ProjectInfo {
     bool encrypted;
     uint32_t maxLogSize;      // Max log file size in bytes before rotation
     uint8_t maxOldLogCount;   // Number of rotated log files to keep
+    uint32_t heatRuntimeAccumulatedMs;  // Accumulated HEAT mode CNT runtime in ms
 };
 
 class Config {
@@ -26,6 +27,7 @@ class Config {
     bool openConfigFile(const char* filename, TempSensorMap& config, ProjectInfo& proj);
     bool loadTempConfig(const char* filename, TempSensorMap& config, ProjectInfo& proj);
     bool saveConfiguration(const char* filename, TempSensorMap& config, ProjectInfo& proj);
+    bool updateRuntime(const char* filename, uint32_t heatRuntimeMs);
     void clearConfig(TempSensorMap& config);
 
     // Getters for loaded config values

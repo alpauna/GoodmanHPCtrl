@@ -57,6 +57,7 @@ Task-based cooperative scheduling using TaskScheduler with two scheduler instanc
 | `tConnectMQQT` | 1s | MQTT reconnection (disables itself on success) |
 | `tWaitOnWiFi` | 1s x60 | WiFi connection wait |
 | `tNtpSync` | 2h | NTP time sync (enabled on WiFi connect) |
+| `tSaveRuntime` | 5min | Persist heat runtime accumulation to SD card |
 
 ### Memory Management
 
@@ -72,6 +73,8 @@ Global `operator new`/`delete` are overridden to route all allocations through P
   - Temp methods: `addTempSensor()`, `getTempSensor()`, `getTempSensorMap()`, `clearTempSensors()`
   - State machine: OFF, COOL, HEAT, DEFROST
   - Auto-activates CNT relay when Y input becomes active, with 5-minute short cycle protection: if CNT was off for less than 5 minutes, enforces a 30-second delay before reactivation; if off for 5+ minutes (or never activated), CNT activates immediately
+  - **Automatic defrost**: After 90 min accumulated CNT runtime in HEAT mode, checks CONDENSER_TEMP — if < 33°F, initiates software defrost (turn off CNT, turn on RV, turn on CNT) until condenser > 42°F or 15-min safety timeout. If condenser >= 33°F, rechecks every 10 min. Runtime resets on COOL mode or after defrost completes. Runtime persists to SD card every 5 min via `tSaveRuntime` task.
+  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`
 - **OutPin** (`OutPin.h/cpp`): Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
 - **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, debouncing via delayed verification (circular buffer queue checked by `_tGetInputs`), and callback on change.
 - **TempSensor** (`TempSensor.h/cpp`): OneWire temperature sensor wrapper with encapsulated state and callbacks:
@@ -111,6 +114,7 @@ struct ProjectInfo {
     bool encrypted;        // Encryption flag (unused)
     uint32_t maxLogSize;   // Max log file size in bytes before rotation
     uint8_t maxOldLogCount; // Number of rotated log files to keep
+    uint32_t heatRuntimeAccumulatedMs; // Accumulated HEAT mode CNT runtime (persisted)
 };
 ```
 
@@ -119,6 +123,7 @@ struct ProjectInfo {
 - `openConfigFile(filename, config, proj)` — Open or create config file
 - `loadTempConfig(filename, config, proj)` — Load JSON config into TempSensorMap and ProjectInfo
 - `saveConfiguration(filename, config, proj)` — Write config to SD card
+- `updateRuntime(filename, heatRuntimeMs)` — Update only the runtime field in config JSON
 - `clearConfig(config)` — Free memory and clear TempSensorMap
 
 **Config Getters/Setters:**
@@ -128,7 +133,7 @@ struct ProjectInfo {
 
 **Usage:**
 ```cpp
-ProjectInfo proj = {"Project Name", __DATE__, "Description", "", false, 50*1024*1024, 10};
+ProjectInfo proj = {"Project Name", __DATE__, "Description", "", false, 50*1024*1024, 10, 0};
 Config config;
 config.setTempSensorDiscoveryCallback([](TempSensorMap& tempMap) { getTempSensors(tempMap); });
 if (config.initSDCard()) {
@@ -153,6 +158,7 @@ JSON config stored on SD card at `/config.txt` (SdFat library, SPI interface). C
   "wifi": { "ssid": "...", "password": "..." },
   "mqtt": { "user": "...", "password": "...", "host": "...", "port": 1883 },
   "logging": { "maxLogSize": 52428800, "maxOldLogCount": 10 },
+  "runtime": { "heatAccumulatedMs": 0 },
   "sensors": { "temp": { ... } }
 }
 ```

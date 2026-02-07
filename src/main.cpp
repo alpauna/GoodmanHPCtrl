@@ -212,7 +212,8 @@ ProjectInfo proj = {
   "",
   false,
   50 * 1024 * 1024,  // maxLogSize: 50MB default
-  10                  // maxOldLogCount: 10 files default
+  10,                 // maxOldLogCount: 10 files default
+  0                   // heatRuntimeAccumulatedMs: restored from config
 };
 
 
@@ -257,6 +258,10 @@ Task _tGetInputs(500 * TASK_MILLISECOND, TASK_FOREVER, &onCheckInputQueue, &ts, 
 // NTP Time Sync Task - runs every 2 hours once enabled
 void syncNtpTime();
 Task tNtpSync(2 * TASK_HOUR, TASK_FOREVER, &syncNtpTime, &ts, false);
+
+// Save heat runtime to SD card every 5 minutes
+void onSaveRuntime();
+Task tSaveRuntime(5 * TASK_MINUTE, TASK_FOREVER, &onSaveRuntime, &ts, false);
 
 Task tConnectMQQT(TASK_SECOND, TASK_FOREVER, [](){
   connectToMqtt();
@@ -548,6 +553,8 @@ void setup() {
       _MQTT_PORT = config.getMqttPort();
       _MQTT_USER = config.getMqttUser();
       _MQTT_PASSWORD = config.getMqttPassword();
+      // Restore accumulated heat runtime from config
+      hpController.setHeatRuntimeMs(proj.heatRuntimeAccumulatedMs);
     }
   }
   cout << "SD Card is read." << endl;
@@ -587,6 +594,7 @@ void setup() {
 
   tRuntime.enable();
   _tGetInputs.enable();
+  tSaveRuntime.enable();
 
   Log.info("MAIN", "Starting Main Loop");
 }
@@ -821,6 +829,16 @@ void getTempSensors()
 void OnRunTimeUpdate(){
   currentRuntime = millis();
   Serial.printf("Current runtime: %ld\r\n", currentRuntime);
+}
+
+void onSaveRuntime(){
+  uint32_t runtimeMs = hpController.getHeatRuntimeMs();
+  if (runtimeMs != proj.heatRuntimeAccumulatedMs) {
+    proj.heatRuntimeAccumulatedMs = runtimeMs;
+    if (config.updateRuntime(_filename, runtimeMs)) {
+      Log.debug("MAIN", "Heat runtime saved: %lu ms", runtimeMs);
+    }
+  }
 }
 
 bool OnReadInputsEnable(){

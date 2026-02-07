@@ -13,6 +13,13 @@ class GoodmanHP {
   public:
     enum class State { OFF, COOL, HEAT, DEFROST };
 
+    // Defrost constants
+    static const uint32_t HEAT_RUNTIME_THRESHOLD_MS = 90UL * 60 * 1000;  // 90 min
+    static const uint32_t DEFROST_RECHECK_MS = 10UL * 60 * 1000;         // 10 min
+    static const uint32_t DEFROST_TIMEOUT_MS = 15UL * 60 * 1000;         // 15 min safety timeout
+    static constexpr float DEFROST_TRIGGER_F = 33.0f;
+    static constexpr float DEFROST_EXIT_F = 42.0f;
+
     GoodmanHP(Scheduler *ts);
 
     void setDallasTemperature(DallasTemperature *sensors);
@@ -43,6 +50,12 @@ class GoodmanHP {
 
     uint32_t getYActiveTime();
 
+    // Heat runtime accumulation & automatic defrost
+    uint32_t getHeatRuntimeMs() const;
+    void setHeatRuntimeMs(uint32_t ms);
+    void resetHeatRuntime();
+    bool isSoftwareDefrostActive() const;
+
   private:
     Scheduler *_ts;
     Task *_tskUpdate;
@@ -60,8 +73,21 @@ class GoodmanHP {
 
     static const uint32_t Y_DELAY_MS = 30000;  // 30 seconds
 
+    // Heat runtime accumulation & automatic defrost
+    uint32_t _heatRuntimeMs;
+    uint32_t _heatRuntimeLastTick;
+    uint32_t _heatRuntimeLastLogMs;
+    bool _softwareDefrost;
+    uint32_t _defrostStartTick;
+    uint32_t _defrostRecheckTick;
+    bool _defrostPersistent;
+
     void checkYAndActivateCNT();
     void updateState();
+    void accumulateHeatRuntime();
+    void checkDefrostNeeded();
+    void startSoftwareDefrost();
+    void stopSoftwareDefrost();
 
     // Runtime callback for OutPins
     static GoodmanHP* _instance;
