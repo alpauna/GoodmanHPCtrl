@@ -25,13 +25,18 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - `getInput(name)` / `getOutput(name)` — Access individual pins
   - `getInputMap()` / `getOutputMap()` — Access full pin collections
 
+- **Startup** — All outputs (FAN, CNT, W, RV) are turned OFF on controller startup
+
 - **State Machine** — Tracks heat pump operating mode:
   - `OFF` — No active request
-  - `HEAT` — Y input active (heating mode, RV off)
-  - `COOL` — Y and O inputs active (cooling mode, RV on)
-  - `DEFROST` — DFT emergency defrost or software defrost cycle
+  - `HEAT` — Y input active (heating mode, RV off, W off)
+  - `COOL` — Y and O inputs active (cooling mode, RV on, W off)
+  - `DEFROST` — DFT emergency defrost or software defrost cycle (W on)
 
-- **Automatic Control** — CNT (contactor) relay activates automatically when Y input becomes active, with short cycle protection: if CNT was off for less than 5 minutes, a 30-second delay is enforced before reactivation; if off for 5+ minutes, CNT activates immediately
+- **Output Control by State:**
+  - **RV** (reversing valve): ON in COOL, OFF in HEAT/OFF
+  - **W** (auxiliary heat): ON only in DEFROST, OFF in all other modes
+  - **CNT** (contactor): auto-activates when Y input becomes active, with short cycle protection: if CNT was off for less than 5 minutes, a 30-second delay is enforced before reactivation; if off for 5+ minutes, CNT activates immediately
 
 - **Automatic Defrost** — After 90 minutes of accumulated CNT runtime in HEAT mode, checks CONDENSER_TEMP:
   - If < 33°F: initiates software defrost (turns off CNT, turns on RV reversing valve, turns on CNT) until condenser exceeds 42°F
