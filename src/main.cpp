@@ -876,6 +876,7 @@ void printIdleStatus() {
   if (millis() <= _nextIdlePrintTime) {
     return;
   }
+  
   // Stats for outpin activation.
   for (auto& out : hpController.getOutputMap()) {
     cout << "Out Pin: " << out.first << " On Count: " << out.second->getOnCount() << endl;

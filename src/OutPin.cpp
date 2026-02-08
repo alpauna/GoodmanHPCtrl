@@ -162,15 +162,10 @@ void OutPin::initPin(){
   }else{
     pinMode(_pin, OUTPUT_OPEN_DRAIN);
   }
-  if(!_pwm){
-    if(_percentOn > 0.0){
-      turnOn();
-    }else{
-      turnOff();
-    }
-  }else{
-    turnOnPercent(_percentOn);
-  }
+  // Immediately drive pin to known OFF state before any callback logic
+  digitalWrite(_pin, _inverse ? HIGH : LOW);
+  _percentOn = 0.0;
+  _changeOffTick = millis();
 }
 
 void OutPin::turnOff(){
