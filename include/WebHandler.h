@@ -15,6 +15,7 @@ class WebHandler {
   public:
     WebHandler(uint16_t port, Scheduler* ts, GoodmanHP* hpController);
     void begin();
+    void startNtpSync();
     bool shouldReboot() const { return _shouldReboot; }
 
   private:

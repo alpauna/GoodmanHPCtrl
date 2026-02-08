@@ -8,10 +8,10 @@ WebHandler::WebHandler(uint16_t port, Scheduler* ts, GoodmanHP* hpController)
       _shouldReboot(false), _ntpSynced(false), _tNtpSync(nullptr) {}
 
 void WebHandler::begin() {
-    // NTP sync task - runs immediately then every 2 hours
+    // NTP sync task - enabled on WiFi connect, then repeats every 2 hours
     _tNtpSync = new Task(2 * TASK_HOUR, TASK_FOREVER, [this]() {
         this->syncNtpTime();
-    }, _ts, true);
+    }, _ts, false);
 
     _server.onNotFound([](AsyncWebServerRequest *request) {
         request->send(404);
@@ -31,6 +31,12 @@ void WebHandler::begin() {
 
     _server.begin();
     Log.info("HTTP", "HTTP server started");
+}
+
+void WebHandler::startNtpSync() {
+    if (_tNtpSync) {
+        _tNtpSync->enableDelayed();
+    }
 }
 
 void WebHandler::syncNtpTime() {
