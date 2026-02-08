@@ -222,13 +222,13 @@ void printAddress(DeviceAddress temp);
 void wifiConnected(){
   cout << "WiFi Connected within " << millis() - _wifiStartMillis << " ms." << endl;
   mqttHandler.startReconnect();
-  webHandler.startNtpSync();
 }
 
 void onWiFiEvent(arduino_event_id_t event, arduino_event_info_t info){
   switch(event){
     case SYSTEM_EVENT_STA_GOT_IP:
       tWaitOnWiFi.disable();
+      webHandler.startNtpSync();
       break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
       _wifiStartMillis = millis();

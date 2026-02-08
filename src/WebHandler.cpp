@@ -35,7 +35,7 @@ void WebHandler::begin() {
 
 void WebHandler::startNtpSync() {
     if (_tNtpSync) {
-        _tNtpSync->enableDelayed();
+        _tNtpSync->enable();
     }
 }
 
