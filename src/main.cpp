@@ -5,75 +5,21 @@
 #include <DallasTemperature.h>
 #include <SPI.h>
 #include "SdFat.h"
-#include <AsyncMqttClient.h>
 #include <StringStream.h>
 #include "sdios.h"
 #include <TaskSchedulerDeclarations.h>
 #include "CircularBuffer.hpp"
-#include "esp32-hal-psram.h"
 #include "Logger.h"
 #include "OutPin.h"
 #include "InputPin.h"
 #include "GoodmanHP.h"
 #include "Config.h"
 #include "WebHandler.h"
-bool psramInited = false;
-bool serialInited = false;
-
-// Override global new and delete operators
-void* operator new(size_t size) {
-  if(!serialInited){
-    Serial.begin(115200);
-    serialInited = true;
-  }
-  if(!psramInited){
-    if( psramInit()){
-      psramInited = true;
-      Serial.println("PSRAM intiated!!!");
-    }else{
-      Serial.println("PSRAM Failed!!!"); 
-    }
-  }
-  if(psramInited){
-    void* ptr = ps_malloc(size); // Use ps_malloc
-    if (!ptr) {
-        // Handle allocation failure if necessary
-        #ifdef ARDUINO
-        ets_printf("ps_malloc failed\n");
-        #else
-        abort();
-        #endif
-    }
-    return ptr;
-  }
-  void* ptr = malloc(size); // Use ps_malloc
-  if (!ptr) {
-      // Handle allocation failure if necessary
-      #ifdef ARDUINO
-      ets_printf("malloc failed\n");
-      #else
-      abort();
-      #endif
-  } 
-  return ptr;
-}
-
-void operator delete(void* ptr) noexcept {
-    free(ptr);
-}
-
-// ... (also override new[] and delete[] for arrays)
-void* operator new[](size_t size) {
-    return operator new(size);
-}
-
-void operator delete[](void* ptr) noexcept {
-    operator delete(ptr);
-}
+#include "MQTTHandler.h"
 
 const char compile_date[] = __DATE__ " " __TIME__;
 ArduinoOutStream cout(Serial);
-IPAddress _MQTT_HOST = IPAddress(192, 168, 0, 46);
+IPAddress _MQTT_HOST_DEFAULT = IPAddress(192, 168, 0, 46);
 const char* _filename = "/config.txt";
 const float MB_MULTIPLIER = 1.0/(1024.0*1024.0);
 const u_int16_t n_elements = 2000;
@@ -84,15 +30,9 @@ const u_int16_t n_elements = 2000;
 #error "Needs to set CIRCULAR_BUFFER_INT_SAFE"
 #endif
 
-#if ASYNC_TCP_SSL_ENABLED
-#define MQTT_SECURE true
-#define MQTT_SERVER_FINGERPRINT {0x6f, 0xa2, 0x20, 0x02, 0xe9, 0x7e, 0x99, 0x2f, 0xc5, 0xdb, 0x3d, 0xbe, 0xac, 0x48, 0x51, 0x5b, 0x5d, 0x47, 0xa7, 0x99}
-#define MQTT_PORT 8883
-#else
 u_int16_t _MQTT_PORT = 1883;
 String _MQTT_USER = "debian";
 String _MQTT_PASSWORD = "";
-#endif
 
 String _WIFI_SSID = "";
 String _WIFI_PASSWORD = "";
@@ -170,14 +110,13 @@ std::map<String, InputPin* > activePins;
 // GoodmanHP controller instance - contains input and output pin maps
 GoodmanHP hpController(&ts);
 WebHandler webHandler(80, &ts, &hpController);
+MQTTHandler mqttHandler(&ts);
 
 OneWire oneWire(ONE_WIRE_BUS);
 
 // Pass our oneWire reference to Dallas Temperature.
 DallasTemperature sensors(&oneWire);
 
-
-AsyncMqttClient _mqttClient;
 
 typedef enum AC_STATE { OFF, COOL, HEAT, DEFROST } ACState;
 static String AC_STATE_STR[] = {"OFF", "COOL", "HEAT", "DEFROST"};
@@ -203,11 +142,8 @@ void OnInputChangeDisable();
 void OnRunTimeUpdate();
 void getTempSensors();
 void getTempSensors(TempSensorMap& tempMap);
-void connectToMqtt();
 bool onWifiWaitEnable();
 void onWifiWaitDisable();
-bool onMqttWaitEnable();
-void onMqttDisable();
 bool CheckTickTime(InputPin *pin);
 void onCheckInputQueue();
 
@@ -234,14 +170,6 @@ Task _tGetInputs(500 * TASK_MILLISECOND, TASK_FOREVER, &onCheckInputQueue, &ts, 
 // Save heat runtime to SD card every 5 minutes
 void onSaveRuntime();
 Task tSaveRuntime(5 * TASK_MINUTE, TASK_FOREVER, &onSaveRuntime, &ts, false);
-
-Task tConnectMQQT(10 * TASK_SECOND, TASK_FOREVER, [](){
-  if(_mqttClient.connected()){
-    tConnectMQQT.disable();
-    return;
-  }
-  connectToMqtt();
-}, &ts, false, onMqttWaitEnable, onMqttDisable);
 
 
 
@@ -279,90 +207,21 @@ bool onWifiWaitEnable(){
   if(WiFi.isConnected()){
     return false;
   }
-  _mqttClient.disconnect();
+  mqttHandler.disconnect();
   return true;
-}   
+}
 
 void onWifiWaitDisable(){
   cout << endl;
   cout << "WiFi IP:" << WiFi.localIP() << endl;
-  tConnectMQQT.enableDelayed();
-}
-
-bool onMqttWaitEnable(){
-  cout << "Wifi Down so wait on MQTT." << endl;
-  return true;
-}
-void onMqttDisable(){
-  cout << "MQTT connected and disabled MQTT start." << endl;
-}
-void connectToMqtt() {
-  Log.info("MQTT", "Connecting to MQTT...");
-  _mqttClient.connect();
-}
-
-void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
-  Log.warn("MQTT", "Disconnected from MQTT (reason: %d)", (int)reason);
-
-  if (reason == AsyncMqttClientDisconnectReason::TLS_BAD_FINGERPRINT) {
-    Log.error("MQTT", "Bad server fingerprint");
-  }
-
-  if (WiFi.isConnected()) {
-    tConnectMQQT.enableDelayed();
-  }
-}
-void onMqttConnect(bool sessionPresent) {
-  Log.info("MQTT", "Connected to MQTT (session present: %s)", sessionPresent ? "yes" : "no");
-  Log.info("MQTT", "IP: %s", WiFi.localIP().toString().c_str());
-  tConnectMQQT.disable();
-}
-
-
-void onMqttSubscribe(uint16_t packetId, uint8_t qos) {
-  Serial.println("Subscribe acknowledged.");
-  Serial.print("  packetId: ");
-  Serial.println(packetId);
-  Serial.print("  qos: ");
-  Serial.println(qos);
-}
-
-void onMqttUnsubscribe(uint16_t packetId) {
-  Serial.println("Unsubscribe acknowledged.");
-  Serial.print("  packetId: ");
-  Serial.println(packetId);
-}
-
-void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
-  Serial.println("Publish received.");
-  Serial.print("  topic: ");
-  Serial.println(topic);
-  Serial.print("  qos: ");
-  Serial.println(properties.qos);
-  Serial.print("  dup: ");
-  Serial.println(properties.dup);
-  Serial.print("  retain: ");
-  Serial.println(properties.retain);
-  Serial.print("  len: ");
-  Serial.println(len);
-  Serial.print("  index: ");
-  Serial.println(index);
-  Serial.print("  total: ");
-  Serial.println(total);
-}
-
-void onMqttPublish(uint16_t packetId) {
-  Serial.println("Publish acknowledged.");
-  Serial.print("  packetId: ");
-  Serial.println(packetId);
+  mqttHandler.startReconnect();
 }
 
 void printAddress(DeviceAddress temp);
 
 void wifiConnected(){
   cout << "WiFi Connected within " << millis() - _wifiStartMillis << " ms." << endl;
-  tConnectMQQT.enableDelayed();
-  
+  mqttHandler.startReconnect();
 }
 
 void onWiFiEvent(arduino_event_id_t event, arduino_event_info_t info){
@@ -373,7 +232,7 @@ void onWiFiEvent(arduino_event_id_t event, arduino_event_info_t info){
     case SYSTEM_EVENT_STA_DISCONNECTED:
       _wifiStartMillis = millis();
       tWaitOnWiFi.enableDelayed();
-      tConnectMQQT.disable();
+      mqttHandler.stopReconnect();
       Log.warn("WIFI", "WiFi lost connection");
       break;
     case SYSTEM_EVENT_STA_CONNECTED:
@@ -384,17 +243,6 @@ void onWiFiEvent(arduino_event_id_t event, arduino_event_info_t info){
 
 void connectToWifi() {
   WiFi.begin(_WIFI_SSID, _WIFI_PASSWORD);
-}
-
-void setupMQTT(){
-  _mqttClient.onConnect(onMqttConnect);
-  _mqttClient.onDisconnect(onMqttDisconnect);
-  _mqttClient.onSubscribe(onMqttSubscribe);
-  _mqttClient.onUnsubscribe(onMqttUnsubscribe);
-  _mqttClient.onMessage(onMqttMessage);
-  _mqttClient.onPublish(onMqttPublish);
-  _mqttClient.setServer(_MQTT_HOST, _MQTT_PORT);
-  _mqttClient.setCredentials(_MQTT_USER.c_str(), _MQTT_PASSWORD.c_str());
 }
 
 
@@ -425,19 +273,8 @@ void onCheckInputQueue(){
 
 unsigned char * acc_data_all;
 void setup() {
-  if(!serialInited){
-    Serial.begin(115200);
-    serialInited = true;
-  }
-  if(!psramInited){
-    if( psramInit()){
-      psramInited = true;
-      Serial.println("PSRAM intiated!!!");
-    }else{
-      Serial.println("PSRAM Failed!!!"); 
-    }
-  }
-  
+  Serial.begin(115200);
+
   acc_data_all = (unsigned char *) ps_malloc (n_elements * sizeof (unsigned char));
   sprintf((char *)acc_data_all, "Test %d", millis());
   sensors.begin();
@@ -454,7 +291,7 @@ void setup() {
       // Update global variables from config
       _WIFI_SSID = config.getWifiSSID();
       _WIFI_PASSWORD = config.getWifiPassword();
-      _MQTT_HOST = config.getMqttHost();
+      _MQTT_HOST_DEFAULT = config.getMqttHost();
       _MQTT_PORT = config.getMqttPort();
       _MQTT_USER = config.getMqttUser();
       _MQTT_PASSWORD = config.getMqttPassword();
@@ -468,11 +305,11 @@ void setup() {
 
   webHandler.begin();
 
-  setupMQTT();
+  mqttHandler.begin(_MQTT_HOST_DEFAULT, _MQTT_PORT, _MQTT_USER, _MQTT_PASSWORD);
 
   // Initialize Logger
   Log.setLevel(Logger::LOG_INFO);
-  Log.setMqttClient(&_mqttClient, "goodman/log");
+  Log.setMqttClient(mqttHandler.getClient(), "goodman/log");
   Log.setLogFile(config.getSd(), "/log.txt", proj.maxLogSize, proj.maxOldLogCount);
   Log.info("MAIN", "Logger initialized");
 
