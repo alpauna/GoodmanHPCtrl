@@ -198,6 +198,16 @@ void GoodmanHP::updateState() {
     // DFT input only triggers defrost from HEAT mode or if DFT defrost already active
     bool dftTrigger = dft->isActive() && (_state == State::HEAT || _dftDefrost);
 
+    // Block new DFT defrost if condenser temp is >= 33°F (not frozen)
+    if (dftTrigger && !_dftDefrost) {
+        TempSensor* condenser = getTempSensor("CONDENSER_TEMP");
+        if (condenser != nullptr && condenser->isValid() && condenser->getValue() >= DEFROST_TRIGGER_F) {
+            Log.info("HP", "DFT triggered but condenser %.1fF >= %.1fF, defrost not needed",
+                     condenser->getValue(), DEFROST_TRIGGER_F);
+            dftTrigger = false;
+        }
+    }
+
     if (dftTrigger || _dftDefrost || _softwareDefrost || _defrostPersistent) {
         newState = State::DEFROST;
         // Latch DFT defrost on first activation
