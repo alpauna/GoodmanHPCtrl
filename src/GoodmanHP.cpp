@@ -18,6 +18,8 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _defrostStartTick(0)
     , _defrostRecheckTick(0)
     , _defrostPersistent(false)
+    , _dftDefrost(false)
+    , _dftDefrostStartTick(0)
 {
     _instance = this;
     _tskUpdate = new Task(500, TASK_FOREVER, [this]() {
@@ -168,8 +170,17 @@ void GoodmanHP::updateState() {
 
     State newState = State::OFF;
 
-    if (dft->isActive() || _softwareDefrost || _defrostPersistent) {
+    // DFT input only triggers defrost from HEAT mode or if DFT defrost already active
+    bool dftTrigger = dft->isActive() && (_state == State::HEAT || _dftDefrost);
+
+    if (dftTrigger || _dftDefrost || _softwareDefrost || _defrostPersistent) {
         newState = State::DEFROST;
+        // Latch DFT defrost on first activation
+        if (dftTrigger && !_dftDefrost) {
+            _dftDefrost = true;
+            _dftDefrostStartTick = millis();
+            Log.info("HP", "DFT emergency defrost activated (sensor < 41F)");
+        }
     } else if (y->isActive() && o->isActive()) {
         newState = State::COOL;
     } else if (y->isActive()) {
@@ -288,6 +299,29 @@ void GoodmanHP::accumulateHeatRuntime() {
 
 void GoodmanHP::checkDefrostNeeded() {
     uint32_t now = millis();
+
+    // DFT emergency defrost: enforce 5-min minimum, then check condenser temp
+    if (_dftDefrost) {
+        uint32_t elapsed = now - _dftDefrostStartTick;
+        if (elapsed < DFT_MIN_RUNTIME_MS) {
+            // Still within minimum runtime, keep running
+            return;
+        }
+        TempSensor* condenser = getTempSensor("CONDENSER_TEMP");
+        if (condenser != nullptr && condenser->isValid() && condenser->getValue() > DEFROST_EXIT_F) {
+            Log.info("HP", "DFT defrost complete: condenser %.1fF > %.1fF after %lu sec",
+                     condenser->getValue(), DEFROST_EXIT_F, elapsed / 1000UL);
+            _dftDefrost = false;
+            _dftDefrostStartTick = 0;
+            resetHeatRuntime();
+        } else if (elapsed >= DEFROST_TIMEOUT_MS) {
+            Log.error("HP", "DFT defrost timeout (%lu min), forcing exit", DEFROST_TIMEOUT_MS / 60000UL);
+            _dftDefrost = false;
+            _dftDefrostStartTick = 0;
+            resetHeatRuntime();
+        }
+        return;
+    }
 
     // If defrost was triggered but Y dropped, keep persistent flag
     if (_defrostPersistent && !_softwareDefrost) {

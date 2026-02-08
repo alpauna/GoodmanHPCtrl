@@ -29,7 +29,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - `OFF` — No active request
   - `HEAT` — Y input active (heating mode, RV off)
   - `COOL` — Y and O inputs active (cooling mode, RV on)
-  - `DEFROST` — DFT input active (defrost cycle)
+  - `DEFROST` — DFT emergency defrost or software defrost cycle
 
 - **Automatic Control** — CNT (contactor) relay activates automatically when Y input becomes active, with short cycle protection: if CNT was off for less than 5 minutes, a 30-second delay is enforced before reactivation; if off for 5+ minutes, CNT activates immediately
 
@@ -39,6 +39,11 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - 15-minute safety timeout forces defrost exit
   - Switching to COOL mode resets accumulated runtime
   - Runtime persists to SD card every 5 minutes, restored on boot
+
+- **DFT Emergency Defrost** — DFT input (external sensor < 41°F) triggers defrost only from HEAT mode:
+  - Enforces 5-minute minimum runtime before checking exit conditions
+  - Exits when CONDENSER_TEMP > 42°F (after minimum) or 15-minute safety timeout
+  - Resets accumulated heat runtime on completion
 
 ### Class Structure
 
