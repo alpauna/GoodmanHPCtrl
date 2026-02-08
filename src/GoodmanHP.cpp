@@ -40,9 +40,17 @@ void GoodmanHP::setDallasTemperature(DallasTemperature *sensors) {
 }
 
 void GoodmanHP::begin() {
+    // Ensure all outputs are OFF on startup
+    for (auto& pair : _outputMap) {
+        if (pair.second != nullptr) {
+            pair.second->turnOff();
+        }
+    }
+    _cntActivated = false;
+
     _tskUpdate->enable();
     _tskCheckTemps->enable();
-    Log.info("HP", "GoodmanHP controller started");
+    Log.info("HP", "GoodmanHP controller started, all outputs OFF");
 }
 
 void GoodmanHP::addInput(const String& name, InputPin* pin) {
@@ -204,6 +212,18 @@ void GoodmanHP::updateState() {
                 rv->turnOff();
                 Log.info("HP", "RV turned OFF for %s mode",
                          newState == State::HEAT ? "HEAT" : "OFF");
+            }
+        }
+
+        // Control W: ON only in DEFROST, OFF otherwise
+        OutPin* w = getOutput("W");
+        if (w != nullptr) {
+            if (newState == State::DEFROST) {
+                w->turnOn();
+                Log.info("HP", "W turned ON for DEFROST mode");
+            } else {
+                w->turnOff();
+                Log.info("HP", "W turned OFF for %s mode", getStateString());
             }
         }
     }
