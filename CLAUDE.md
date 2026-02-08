@@ -31,7 +31,7 @@ pio test -e freenove_esp32_s3_wroom
 
 | File | Purpose |
 |------|---------|
-| `src/main.cpp` | Application entry point, setup/loop, tasks, web API, MQTT |
+| `src/main.cpp` | Application entry point, setup/loop, tasks, WiFi |
 | `src/GoodmanHP.cpp` | Heat pump controller with pin management and state machine |
 | `src/OutPin.cpp` | Output relay control implementation |
 | `src/InputPin.cpp` | Input pin handling implementation |
@@ -44,6 +44,11 @@ pio test -e freenove_esp32_s3_wroom
 | `include/Logger.h` | Logger class |
 | `include/Config.h` | Config class for SD card and JSON configuration |
 | `include/TempSensor.h` | TempSensor class for OneWire temperature sensors |
+| `src/WebHandler.cpp` | Web server and REST API implementation |
+| `include/WebHandler.h` | WebHandler class declaration |
+| `src/MQTTHandler.cpp` | MQTT client, callbacks, and reconnect logic |
+| `include/MQTTHandler.h` | MQTTHandler class declaration |
+| `src/PSRAMAllocator.cpp` | Global operator new/delete PSRAM overrides |
 
 ### Execution Model
 
@@ -54,14 +59,14 @@ Task-based cooperative scheduling using TaskScheduler with two scheduler instanc
 | `tCheckTemps` | 10s | Read OneWire temperature sensors |
 | `tRuntime` | 1min | Update runtime counter |
 | `_tGetInputs` | 500ms | Process queued input pin changes |
-| `tConnectMQQT` | 1s | MQTT reconnection (disables itself on success) |
+| `_tReconnect` (MQTTHandler) | 10s | MQTT reconnection (disables itself on success) |
 | `tWaitOnWiFi` | 1s x60 | WiFi connection wait |
 | `tNtpSync` | 2h | NTP time sync (enabled on WiFi connect) |
 | `tSaveRuntime` | 5min | Persist heat runtime accumulation to SD card |
 
 ### Memory Management
 
-Global `operator new`/`delete` are overridden to route all allocations through PSRAM (`ps_malloc`) when available, falling back to regular `malloc`.
+Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to route all allocations through PSRAM (`ps_malloc`) when available, falling back to regular `malloc`. PSRAM is initialized early via `__attribute__((constructor(101)))`, which runs before C++ global constructors so PSRAM is available for any static object that allocates memory.
 
 ### I/O Classes
 
@@ -77,7 +82,7 @@ Global `operator new`/`delete` are overridden to route all allocations through P
   - W (auxiliary heat) automatically controlled: ON only in DEFROST mode, OFF in all other modes
   - Auto-activates CNT relay when Y input becomes active, with 5-minute short cycle protection: if CNT was off for less than 5 minutes, enforces a 30-second delay before reactivation; if off for 5+ minutes (or never activated), CNT activates immediately
   - **Automatic defrost**: After 90 min accumulated CNT runtime in HEAT mode, checks CONDENSER_TEMP — if < 33°F, initiates software defrost (turn off CNT, turn on RV, turn on CNT) until condenser > 42°F or 15-min safety timeout. If condenser >= 33°F, rechecks every 10 min. Runtime resets on COOL mode or after defrost completes. Runtime persists to SD card every 5 min via `tSaveRuntime` task.
-  - **DFT emergency defrost**: DFT input (external sensor < 41°F) only triggers DEFROST from HEAT mode. Latches on with 5-min minimum runtime, then exits when CONDENSER_TEMP > 42°F (or 15-min safety timeout). Resets heat runtime on completion.
+  - **DFT emergency defrost**: DFT input (external sensor < 41°F) only triggers DEFROST from HEAT mode and only if CONDENSER_TEMP < 33°F. If condenser is >= 33°F, DFT is ignored (coil not frozen). Latches on with 5-min minimum runtime, then exits when CONDENSER_TEMP > 42°F (or 15-min safety timeout). Resets heat runtime on completion.
   - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`
 - **OutPin** (`OutPin.h/cpp`): Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
 - **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, debouncing via delayed verification (circular buffer queue checked by `_tGetInputs`), and callback on change.
@@ -102,7 +107,7 @@ OneWire bus: GPIO21
 
 - **AsyncWebServer** on port 80 with REST endpoints (`/temps`, `/heap`, `/scan`, `/log/level`, `/log/config`, `/update` for OTA)
 - **WebSocket** at `/ws`
-- **MQTT** (AsyncMqttClient) to configurable broker, default `192.168.0.46:1883`
+- **MQTT** (`MQTTHandler` wrapping AsyncMqttClient) to configurable broker, default `192.168.0.46:1883`
 
 ### Configuration
 
