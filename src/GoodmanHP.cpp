@@ -136,15 +136,27 @@ void GoodmanHP::checkYAndActivateCNT() {
 
     bool yActive = y->isActive();
 
+    OutPin* fan = getOutput("FAN");
+
     if (yActive && !_yWasActive) {
         // Y just became active - record start time
         _yActiveStartTick = millis();
         _yWasActive = true;
+        // Turn on FAN when Y activates (unless in defrost)
+        if (fan != nullptr && _state != State::DEFROST) {
+            fan->turnOn();
+            Log.info("HP", "FAN turned ON (Y activated)");
+        }
         Log.info("HP", "Y input activated, starting 30s timer");
     } else if (!yActive && _yWasActive) {
         // Y just became inactive - reset
         _yWasActive = false;
         _yActiveStartTick = 0;
+        // Turn off FAN when Y deactivates
+        if (fan != nullptr) {
+            fan->turnOff();
+            Log.info("HP", "FAN turned OFF (Y deactivated)");
+        }
         if (_cntActivated && !_softwareDefrost) {
             cnt->turnOff();
             _cntActivated = false;
@@ -201,6 +213,7 @@ void GoodmanHP::updateState() {
     }
 
     if (newState != _state) {
+        State oldState = _state;
         Log.info("HP", "State changed: %s -> %s", getStateString(),
                  newState == State::OFF ? "OFF" :
                  newState == State::COOL ? "COOL" :
@@ -229,6 +242,19 @@ void GoodmanHP::updateState() {
             } else {
                 w->turnOff();
                 Log.info("HP", "W turned OFF for %s mode", getStateString());
+            }
+        }
+
+        // Control FAN: OFF during DEFROST, restore when leaving DEFROST if Y active
+        OutPin* fan = getOutput("FAN");
+        if (fan != nullptr) {
+            if (newState == State::DEFROST) {
+                fan->turnOff();
+                Log.info("HP", "FAN turned OFF for DEFROST mode");
+            } else if (oldState == State::DEFROST && y->isActive()) {
+                // Leaving defrost with Y still active — turn FAN back on
+                fan->turnOn();
+                Log.info("HP", "FAN turned ON (defrost complete, Y active)");
             }
         }
     }
