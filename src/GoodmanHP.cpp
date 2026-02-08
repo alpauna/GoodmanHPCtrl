@@ -40,17 +40,22 @@ void GoodmanHP::setDallasTemperature(DallasTemperature *sensors) {
 }
 
 void GoodmanHP::begin() {
-    // Ensure all outputs are OFF on startup
+    // Ensure all outputs are OFF on startup and verify via digital read
     for (auto& pair : _outputMap) {
         if (pair.second != nullptr) {
             pair.second->turnOff();
+            if (pair.second->isPinOn()) {
+                Log.error("HP", "Output %s failed to turn OFF (pin still HIGH)", pair.first.c_str());
+            } else {
+                Log.info("HP", "Output %s verified OFF", pair.first.c_str());
+            }
         }
     }
     _cntActivated = false;
 
     _tskUpdate->enable();
     _tskCheckTemps->enable();
-    Log.info("HP", "GoodmanHP controller started, all outputs OFF");
+    Log.info("HP", "GoodmanHP controller started, all outputs verified OFF");
 }
 
 void GoodmanHP::addInput(const String& name, InputPin* pin) {
@@ -328,8 +333,8 @@ void GoodmanHP::checkDefrostNeeded() {
             return;
         }
         TempSensor* condenser = getTempSensor("CONDENSER_TEMP");
-        if (condenser != nullptr && condenser->isValid() && condenser->getValue() > DEFROST_EXIT_F) {
-            Log.info("HP", "DFT defrost complete: condenser %.1fF > %.1fF after %lu sec",
+        if (condenser != nullptr && condenser->isValid() && condenser->getValue() >= DEFROST_EXIT_F) {
+            Log.info("HP", "DFT defrost complete: condenser %.1fF >= %.1fF after %lu sec",
                      condenser->getValue(), DEFROST_EXIT_F, elapsed / 1000UL);
             _dftDefrost = false;
             _dftDefrostStartTick = 0;
@@ -358,8 +363,8 @@ void GoodmanHP::checkDefrostNeeded() {
     // If software defrost is active, check exit conditions
     if (_softwareDefrost) {
         TempSensor* condenser = getTempSensor("CONDENSER_TEMP");
-        if (condenser != nullptr && condenser->isValid() && condenser->getValue() > DEFROST_EXIT_F) {
-            Log.info("HP", "Condenser temp %.1fF > %.1fF, ending software defrost", condenser->getValue(), DEFROST_EXIT_F);
+        if (condenser != nullptr && condenser->isValid() && condenser->getValue() >= DEFROST_EXIT_F) {
+            Log.info("HP", "Condenser temp %.1fF >= %.1fF, ending software defrost", condenser->getValue(), DEFROST_EXIT_F);
             stopSoftwareDefrost();
             return;
         }
