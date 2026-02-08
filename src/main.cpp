@@ -5,13 +5,6 @@
 #include <DallasTemperature.h>
 #include <SPI.h>
 #include "SdFat.h"
-#include <ESPAsyncWebServer.h>
-#include "AsyncJson.h"
-#include "ArduinoJson.h"
-#include <AsyncTCP.h>
-#include <Update.h>
-#include <WiFi.h>
-#include <time.h>
 #include <AsyncMqttClient.h>
 #include <StringStream.h>
 #include "sdios.h"
@@ -23,6 +16,7 @@
 #include "InputPin.h"
 #include "GoodmanHP.h"
 #include "Config.h"
+#include "WebHandler.h"
 bool psramInited = false;
 bool serialInited = false;
 
@@ -103,13 +97,6 @@ String _MQTT_PASSWORD = "";
 String _WIFI_SSID = "";
 String _WIFI_PASSWORD = "";
 
-// NTP Configuration
-const char* _ntpServer1 = "192.168.0.1";
-const char* _ntpServer2 = "time.nist.gov";
-const long _gmtOffset_sec = 0;        // UTC offset in seconds (adjust for your timezone)
-const int _daylightOffset_sec = 0;    // Daylight saving offset in seconds
-bool _ntpSynced = false;
-
 
 
 
@@ -136,22 +123,13 @@ Config config;
 
 std::map<String, InputPin*> _isrEvent;
 
-AsyncWebServer server(80);
-
-
-AsyncWebSocket wes("/ws"); // access at ws://[esp ip]/ws
-AsyncEventSource events("/events"); // event source (Server-Sent events)
-
 // Scheduler
 Scheduler ts, hts;
 u_int32_t _nextIdlePrintTime = 0;
-u_int32_t updateTotalSize, updateCurrentSize;
 
 u_int32_t _idleLoopCount = 0;
 u_int32_t _workLoopCount = 0;
 volatile bool InISR, InitialPinStateSet, FinalPinSetState;
-
-bool updateInProgress;
 
 u_int32_t _wifiStartMillis = 0;
 
@@ -190,7 +168,8 @@ bool onOutpin(OutPin *pin, bool on, bool inCallback, float &newPercent, float or
 std::map<String, InputPin* > activePins;
 
 // GoodmanHP controller instance - contains input and output pin maps
-GoodmanHP hpController(&ts); 
+GoodmanHP hpController(&ts);
+WebHandler webHandler(80, &ts, &hpController);
 
 OneWire oneWire(ONE_WIRE_BUS);
 
@@ -198,7 +177,6 @@ OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 
 
-bool _shouldReboot;
 AsyncMqttClient _mqttClient;
 
 typedef enum AC_STATE { OFF, COOL, HEAT, DEFROST } ACState;
@@ -223,10 +201,8 @@ void OnReadInputsDisable();
 bool OnInputChangeEnable();
 void OnInputChangeDisable();
 void OnRunTimeUpdate();
-void webAsyncFunctions();
 void getTempSensors();
 void getTempSensors(TempSensorMap& tempMap);
-void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len);
 void connectToMqtt();
 bool onWifiWaitEnable();
 void onWifiWaitDisable();
@@ -255,10 +231,6 @@ Task tRuntime(TASK_MINUTE, TASK_FOREVER, &OnRunTimeUpdate, &ts, false);
 
 Task _tGetInputs(500 * TASK_MILLISECOND, TASK_FOREVER, &onCheckInputQueue, &ts, false);
 
-// NTP Time Sync Task - runs every 2 hours once enabled
-void syncNtpTime();
-Task tNtpSync(2 * TASK_HOUR, TASK_FOREVER, &syncNtpTime, &ts, false);
-
 // Save heat runtime to SD card every 5 minutes
 void onSaveRuntime();
 Task tSaveRuntime(5 * TASK_MINUTE, TASK_FOREVER, &onSaveRuntime, &ts, false);
@@ -277,34 +249,6 @@ Task tConnectMQQT(TASK_SECOND, TASK_FOREVER, [](){
 }, &ts, false, onMqttWaitEnable, onMqttDisable);
 
 
-
-void syncNtpTime() {
-  if (WiFi.status() != WL_CONNECTED) {
-    Log.warn("NTP", "WiFi not connected, skipping NTP sync");
-    return;
-  }
-
-  Log.info("NTP", "Syncing time from NTP servers...");
-  configTime(_gmtOffset_sec, _daylightOffset_sec, _ntpServer1, _ntpServer2);
-
-  // Wait for time to be set (max 10 seconds)
-  struct tm timeinfo;
-  int retry = 0;
-  while (!getLocalTime(&timeinfo) && retry < 10) {
-    yield();
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    retry++;
-  }
-
-  if (retry < 10) {
-    _ntpSynced = true;
-    char timeStr[64];
-    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
-    Log.info("NTP", "Time synced: %s", timeStr);
-  } else {
-    Log.error("NTP", "Failed to sync time from NTP");
-  }
-}
 
 /**
  * NOTE: ISR logic should be kept simple for both timings and prevent strange core panics.
@@ -420,23 +364,6 @@ void onMqttPublish(uint16_t packetId) {
 
 void printAddress(DeviceAddress temp);
 
-void onRequest(AsyncWebServerRequest *request){
-  //Handle Unknown Request
-  request->send(404);
-}
-
-void onBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
-  //Handle body
-}
-
-void onUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
-  //Handle upload
-}
-
-void onEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len){
-  //Handle WebSocket event
-}
-
 void wifiConnected(){
   cout << "WiFi Connected within " << millis() - _wifiStartMillis << " ms." << endl;
   tConnectMQQT.enableDelayed();
@@ -501,23 +428,6 @@ void onCheckInputQueue(){
   }  
 }
 
-void SetupWebServer()
-{
-  // Start NTP sync - run immediately then every 2 hours
-  syncNtpTime();
-  tNtpSync.enable();
-
-  server.onNotFound(onRequest);
-  server.onFileUpload(onUpload);
-  server.onRequestBody(onBody);
-
-  wes.onEvent(onWsEvent);
-  server.addHandler(&wes);
-  // Start the Web server
-  server.begin();
-  Log.info("HTTP", "HTTP server started");
-}
-
 unsigned char * acc_data_all;
 void setup() {
   if(!serialInited){
@@ -561,7 +471,7 @@ void setup() {
   WiFi.onEvent(onWiFiEvent);
   connectToWifi();
 
-  SetupWebServer();
+  webHandler.begin();
 
   setupMQTT();
 
@@ -588,215 +498,11 @@ void setup() {
   hpController.setDallasTemperature(&sensors);
   hpController.begin();
 
-   // Define route for the root URL
-  webAsyncFunctions();
-
-
   tRuntime.enable();
   _tGetInputs.enable();
   tSaveRuntime.enable();
 
   Log.info("MAIN", "Starting Main Loop");
-}
-
-void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len){
-  if(type == WS_EVT_CONNECT){
-    Serial.println("WebSocket client connected");
-    // Send connection status to client
-    String json = "{\"status\":\"connected\",\"ip\":\"" + WiFi.localIP().toString() + "\"}";
-    client->text(json);
-  } else if(type == WS_EVT_DISCONNECT){
-    Serial.println("WebSocket client disconnected");
-  } else if(type == WS_EVT_ERROR){
-    Serial.println("WebSocket error");
-  } 
-  // else if ( type == WS_EVT_DATA ){
-
-  // }
-}
-
-
-void webAsyncFunctions()
-{
-  // Handle WebSocket events
-  server.on("/ws", HTTP_GET, [](AsyncWebServerRequest *request){
-    wes.handleRequest(request);
-  });
-
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
-            { request->send(200, "text/html", 
-      "<html><head><title>ESP32 OTA Update</title>"
-      "<style>"
-      "body { font-family: Arial, sans-serif; margin: 20px; }"
-      ".progress-container { width: 100%; background-color: #f0f0f0; border-radius: 5px; margin: 10px 0; }"
-      ".progress-bar { height: 20px; background-color: #4CAF50; border-radius: 5px; transition: width 0.1s; }"
-      ".progress-text { text-align: center; margin: 5px 0; }"
-      "button { background-color: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }"
-      "button:hover { background-color: #45a049; }"
-      "</style>"
-      "</head>"
-      "<body><h1>ESP32 OTA Update Server</h1>"
-      "<p>Current IP: " + WiFi.localIP().toString() + "</p>"
-      "<p>Use this server to upload new firmware</p>"
-      "<a href='/update'>OTA Update Page</a>"
-      "</body></html>"); });
-
-  // First request will return 0 results unless you start scan from somewhere else (loop/setup)
-  // Do not request more often than 3-5 seconds
-  server.on("/scan", HTTP_GET, [](AsyncWebServerRequest *request)
-            {
-  String json = "[";
-  int n = WiFi.scanComplete();
-  if(n == -2){
-    WiFi.scanNetworks(true);
-  } else if(n){
-    for (int i = 0; i < n; ++i){
-      if(i) json += ",";
-      json += "{";
-      json += "\"rssi\":"+String(WiFi.RSSI(i));
-      json += ",\"ssid\":\""+WiFi.SSID(i)+"\"";
-      json += ",\"bssid\":\""+WiFi.BSSIDstr(i)+"\"";
-      json += ",\"channel\":"+String(WiFi.channel(i));
-      json += ",\"secure\":"+String(WiFi.encryptionType(i));
-      //json += ",\"hidden\":"+String(WiFi.isHidden(i)?"true":"false");
-      json += "}";
-    }
-    WiFi.scanDelete();
-    if(WiFi.scanComplete() == -2){
-      WiFi.scanNetworks(true);
-    }
-  }
-  json += "]";
-  request->send(200, "application/json", json);
-  json = String(); });
-
-  // Temp data
-  server.on("/temps", HTTP_GET, [](AsyncWebServerRequest *request)
-            {
-  String json = "[";
-  bool firstTime = true;
-  for (const auto& m: hpController.getTempSensorMap()){
-      if(m.first.length() > 0 && m.second != nullptr){
-        if(!firstTime) json += ",";
-        json += "{";
-        json += "\"description\":\"" + m.second->getDescription() + "\"";
-        json += ",\"devid\":\"" + TempSensor::addressToString(m.second->getDeviceAddress()) + "\"";
-        json += ",\"value\":" + String(m.second->getValue());
-        json += ",\"previous\":" + String(m.second->getPrevious());
-        json += ",\"valid\":\"" + String(m.second->isValid() ? "true" : "false") + "\"";
-        json += "}";
-      }
-      firstTime = false;
-  }
-  json += "]";
-  request->send(200, "application/json", json);
-  json = String(); });
-
-  // respond to GET requests on URL /heap
-  server.on("/heap", HTTP_GET, [](AsyncWebServerRequest *request)
-            {
-      String json = "{";
-        json += "\"free heap\":" + String(ESP.getFreeHeap());
-        json += ",\"free psram MB\":" + String(ESP.getFreePsram() * MB_MULTIPLIER);
-        json += ",\"used psram MB\":" + String((ESP.getPsramSize() - ESP.getFreePsram()) * MB_MULTIPLIER);
-        json += "}";
-  request->send(200, "application/json", json);
-  json = String();
-            });
-
-  // Log level configuration endpoints
-  server.on("/log/level", HTTP_GET, [](AsyncWebServerRequest *request) {
-    String json = "{";
-    json += "\"level\":" + String(Log.getLevel());
-    json += ",\"levelName\":\"" + String(Log.getLevelName(Log.getLevel())) + "\"";
-    json += "}";
-    request->send(200, "application/json", json);
-  });
-
-  server.on("/log/level", HTTP_POST, [](AsyncWebServerRequest *request) {
-    if (request->hasParam("level")) {
-      int level = request->getParam("level")->value().toInt();
-      if (level >= 0 && level <= 3) {
-        Log.setLevel((Logger::Level)level);
-        Log.info("HTTP", "Log level changed to %d", level);
-        request->send(200, "application/json", "{\"status\":\"ok\"}");
-      } else {
-        request->send(400, "application/json", "{\"error\":\"level must be 0-3\"}");
-      }
-    } else {
-      request->send(400, "application/json", "{\"error\":\"missing level param\"}");
-    }
-  });
-
-  server.on("/log/config", HTTP_GET, [](AsyncWebServerRequest *request) {
-    String json = "{";
-    json += "\"level\":" + String(Log.getLevel());
-    json += ",\"levelName\":\"" + String(Log.getLevelName(Log.getLevel())) + "\"";
-    json += ",\"serial\":" + String(Log.isSerialEnabled() ? "true" : "false");
-    json += ",\"mqtt\":" + String(Log.isMqttEnabled() ? "true" : "false");
-    json += ",\"sdcard\":" + String(Log.isSdCardEnabled() ? "true" : "false");
-    json += "}";
-    request->send(200, "application/json", json);
-  });
-
-  server.on("/log/config", HTTP_POST, [](AsyncWebServerRequest *request) {
-    if (request->hasParam("serial")) {
-      Log.enableSerial(request->getParam("serial")->value() == "true");
-    }
-    if (request->hasParam("mqtt")) {
-      Log.enableMqtt(request->getParam("mqtt")->value() == "true");
-    }
-    if (request->hasParam("sdcard")) {
-      Log.enableSdCard(request->getParam("sdcard")->value() == "true");
-    }
-    Log.info("HTTP", "Log config updated");
-    request->send(200, "application/json", "{\"status\":\"ok\"}");
-  });
-  // Simple Firmware Update Form
-  server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "text/html", 
-      "<html><head><title>ESP32 OTA Update</title></head>"
-      "<body><h1>ESP32 OTA Update</h1>"
-      "<form method='POST' action='/update' enctype='multipart/form-data'>"
-      "<input type='file' name='update'>"
-      "<input type='submit' value='Update'>"
-      "</form>"
-      "</body></html>");
-  });
-
-  server.on("/update", HTTP_POST, [](AsyncWebServerRequest *request){
-    // Send status 200 (OK) to tell the browser to continue with the upload
-    _shouldReboot = !Update.hasError();
-    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", _shouldReboot?"OK":"FAIL");
-    response->addHeader("Connection", "close");
-    request->send(response); 
-  }, [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
-    
-    if (!index) {
-      Log.info("OTA", "Update Start: %s", filename.c_str());
-      // Update started
-      if (!Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000)) { // Start with unknown size
-        Log.error("OTA", "Update.begin failed");
-        Update.printError(Serial);
-      }
-    }
-    
-    // Write data to the flash
-    if(!Update.hasError()){
-      if(Update.write(data, len) != len){
-        Update.printError(Serial);
-      }
-    }
-
-    if (final) {
-      if (Update.end(true)) { // true to set the size to the current progress
-        Log.info("OTA", "OTA Update Successful");
-      } else {
-        Log.error("OTA", "OTA Update Failed");
-        Update.printError(Serial);
-      }
-    }
-  });
 }
 
 void tempSensorUpdateCallback(TempSensor *sensor){
@@ -901,7 +607,7 @@ void printIdleStatus() {
 }
 
 void loop() {
-  if (_shouldReboot) {
+  if (webHandler.shouldReboot()) {
     Serial.println("Rebooting...");
     vTaskDelay(pdMS_TO_TICKS(100));
     ESP.restart();
