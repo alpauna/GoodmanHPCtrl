@@ -236,16 +236,11 @@ void onSaveRuntime();
 Task tSaveRuntime(5 * TASK_MINUTE, TASK_FOREVER, &onSaveRuntime, &ts, false);
 
 Task tConnectMQQT(TASK_SECOND, TASK_FOREVER, [](){
-  connectToMqtt();
-  while(!_mqttClient.connected()){
-    yield();
-    vTaskDelay(pdMS_TO_TICKS(500));
-  }
-  cout << "Mqtt connected:" << _mqttClient.connected() << endl;
   if(_mqttClient.connected()){
     tConnectMQQT.disable();
+    return;
   }
-  
+  connectToMqtt();
 }, &ts, false, onMqttWaitEnable, onMqttDisable);
 
 
