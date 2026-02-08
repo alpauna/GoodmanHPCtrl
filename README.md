@@ -166,6 +166,10 @@ Sensor addresses are discovered automatically on startup and can be mapped to na
 | POST | `/update` | Upload new firmware |
 | WS | `/ws` | WebSocket for real-time data |
 
+## Build Notes
+
+- **AsyncTCP watchdog** — The `CONFIG_ASYNC_TCP_USE_WDT=0` build flag is required in `platformio.ini`. Without it, AsyncTCP subscribes its task to the ESP-IDF task watchdog (5s timeout). When the MQTT broker is slow or unreachable, the async_tcp task cannot reset the watchdog in time, causing a panic and reboot. This flag prevents the async_tcp task from registering with the watchdog.
+
 ## Dependencies
 
 Managed automatically by PlatformIO. Key libraries:

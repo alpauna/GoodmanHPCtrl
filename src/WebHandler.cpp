@@ -8,8 +8,7 @@ WebHandler::WebHandler(uint16_t port, Scheduler* ts, GoodmanHP* hpController)
       _shouldReboot(false), _ntpSynced(false), _tNtpSync(nullptr) {}
 
 void WebHandler::begin() {
-    // Start NTP sync - run immediately then every 2 hours
-    syncNtpTime();
+    // NTP sync task - runs immediately then every 2 hours
     _tNtpSync = new Task(2 * TASK_HOUR, TASK_FOREVER, [this]() {
         this->syncNtpTime();
     }, _ts, true);

@@ -235,7 +235,7 @@ Task _tGetInputs(500 * TASK_MILLISECOND, TASK_FOREVER, &onCheckInputQueue, &ts, 
 void onSaveRuntime();
 Task tSaveRuntime(5 * TASK_MINUTE, TASK_FOREVER, &onSaveRuntime, &ts, false);
 
-Task tConnectMQQT(TASK_SECOND, TASK_FOREVER, [](){
+Task tConnectMQQT(10 * TASK_SECOND, TASK_FOREVER, [](){
   if(_mqttClient.connected()){
     tConnectMQQT.disable();
     return;
