@@ -165,58 +165,6 @@ Sensor addresses are discovered automatically on startup and can be mapped to na
 | GET | `/update` | OTA firmware update page |
 | POST | `/update` | Upload new firmware |
 | WS | `/ws` | WebSocket for real-time data |
-| GET | `/test/w-to-o` | Start W relay wiring/toggle test |
-| GET | `/test/w-in-heat` | Start W relay all-state verification test |
-| GET | `/test/w-to-o/result` | Get result of last test run |
-
-## Diagnostic Tests
-
-REST endpoints for verifying W relay behavior. W (auxiliary heat) is safety-critical — it must only energize during DEFROST mode. These tests use the O input pin physically wired to the W output as a relay state proxy, since `digitalRead()` on ESP32-S3 output GPIOs does not reliably read back the driven level.
-
-### `/test/w-to-o` — Wiring and Toggle Test
-
-Verifies the W-to-O wiring works and the relay toggles correctly:
-
-1. Records initial W and O state
-2. Turns W ON, waits 500ms, reads O (should be HIGH)
-3. Turns W OFF, waits 500ms, reads O (should be LOW)
-4. Runs `update()` (state machine) and confirms W stays OFF in current mode
-
-```json
-{
-  "mode": "OFF",
-  "initial": {"w_sw": 0, "o_pin": 0},
-  "w_on": {"w_sw": 1, "o_pin": 1},
-  "w_off": {"w_sw": 0, "o_pin": 0},
-  "after_update": {"mode": "OFF", "w_sw": 0, "o_pin": 0},
-  "wiring_ok": true,
-  "w_off_after_update": true,
-  "pass": true
-}
-```
-
-### `/test/w-in-heat` — All-State W Verification
-
-Cycles through every state (HEAT, COOL, DEFROST, OFF) and verifies W is only ON in DEFROST. Pauses the update task during the test to prevent race conditions, then restores it.
-
-```json
-{
-  "initial": {"mode": "OFF", "w_sw": 0, "o_pin": 0},
-  "heat": {"mode": "HEAT", "w_sw": 0, "o_pin": 0},
-  "cool": {"mode": "COOL", "w_sw": 0, "o_pin": 0},
-  "defrost": {"mode": "DEFROST", "w_sw": 1, "o_pin": 1},
-  "off": {"mode": "OFF", "w_sw": 0, "o_pin": 0},
-  "w_off_in_heat": true,
-  "w_off_in_cool": true,
-  "w_on_in_defrost": true,
-  "w_off_in_off": true,
-  "pass": true
-}
-```
-
-### `/test/w-to-o/result` — Retrieve Results
-
-Returns the JSON result of the last test run, or `{"status":"running"}` if a test is in progress, or `{"status":"no test run"}` if no test has been executed.
 
 ## Build Notes
 
