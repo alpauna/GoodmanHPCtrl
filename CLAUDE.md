@@ -124,6 +124,8 @@ struct ProjectInfo {
     uint32_t maxLogSize;   // Max log file size in bytes before rotation
     uint8_t maxOldLogCount; // Number of rotated log files to keep
     uint32_t heatRuntimeAccumulatedMs; // Accumulated HEAT mode CNT runtime (persisted)
+    int32_t gmtOffsetSec;        // GMT offset in seconds (default -21600 = UTC-6)
+    int32_t daylightOffsetSec;   // DST offset in seconds (default 3600 = 1hr)
 };
 ```
 
@@ -142,7 +144,7 @@ struct ProjectInfo {
 
 **Usage:**
 ```cpp
-ProjectInfo proj = {"Project Name", __DATE__, "Description", "", false, 50*1024*1024, 10, 0};
+ProjectInfo proj = {"Project Name", __DATE__, "Description", "", false, 50*1024*1024, 10, 0, -21600, 3600};
 Config config;
 config.setTempSensorDiscoveryCallback([](TempSensorMap& tempMap) { getTempSensors(tempMap); });
 if (config.initSDCard()) {
@@ -156,7 +158,7 @@ if (config.initSDCard()) {
 Log.setLogFile(config.getSd(), "/log.txt", proj.maxLogSize, proj.maxOldLogCount);
 ```
 
-JSON config stored on SD card at `/config.txt` (SdFat library, SPI interface). Contains WiFi credentials, MQTT settings, log rotation settings, and temperature sensor address-to-name mappings. Loaded during `setup()`, writable via API.
+JSON config stored on SD card at `/config.txt` (SdFat library, SPI interface). Contains WiFi credentials, MQTT settings, log rotation settings, timezone settings, and temperature sensor address-to-name mappings. Loaded during `setup()`, writable via API.
 
 **JSON structure:**
 ```json
@@ -168,6 +170,7 @@ JSON config stored on SD card at `/config.txt` (SdFat library, SPI interface). C
   "mqtt": { "user": "...", "password": "...", "host": "...", "port": 1883 },
   "logging": { "maxLogSize": 52428800, "maxOldLogCount": 10 },
   "runtime": { "heatAccumulatedMs": 0 },
+  "timezone": { "gmtOffset": -21600, "daylightOffset": 3600 },
   "sensors": { "temp": { ... } }
 }
 ```
@@ -191,7 +194,7 @@ Multi-output logging (Serial, MQTT topic, SD card with file rotation). Runtime-c
 
 ### NTP Time Sync
 
-RTC time is synchronized from NTP servers (`pool.ntp.org`, `time.nist.gov`) using the ESP32's built-in SNTP client. The `tNtpSync` task is enabled when WiFi connects, syncs immediately, then repeats every 2 hours. Timezone offset is configurable via `_gmtOffset_sec` and `_daylightOffset_sec` variables in `main.cpp`.
+RTC time is synchronized from NTP servers (`192.168.0.1`, `time.nist.gov`) using the ESP32's built-in SNTP client. The `tNtpSync` task is enabled when WiFi connects, syncs immediately, then repeats every 2 hours. Timezone is configurable via `gmtOffsetSec` and `daylightOffsetSec` in `ProjectInfo`, persisted to SD card in the `timezone` JSON section. Default: US Central (UTC-6, DST +1hr). Values are passed to `WebHandler::setTimezone()` before `begin()` and used in `configTime()` calls.
 
 ### State Machine
 
