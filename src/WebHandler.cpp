@@ -32,6 +32,10 @@ void WebHandler::begin() {
     _server.begin();
     Log.info("HTTP", "HTTP server started");
 }
+const char * WebHandler::getWiFiIP(){
+    String ipStr = WiFi.localIP().toString();
+    return WiFi.isConnected() && ipStr.length() > 0  ? WiFi.localIP().toString().c_str() : NOT_AVAILABLE;
+}
 
 void WebHandler::startNtpSync() {
     if (_tNtpSync) {
@@ -46,7 +50,7 @@ void WebHandler::syncNtpTime() {
     }
 
     Log.info("NTP", "Syncing time from NTP servers...");
-    configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER1, NTP_SERVER2);
+    configTime(_gmtOffsetSec, _daylightOffsetSec, NTP_SERVER1, NTP_SERVER2);
 
     struct tm timeinfo;
     int retry = 0;
@@ -77,6 +81,11 @@ void WebHandler::onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
     } else if (type == WS_EVT_ERROR) {
         Serial.println("WebSocket error");
     }
+}
+
+void WebHandler::setTimezone(int32_t gmtOffset, int32_t daylightOffset) {
+    _gmtOffsetSec = gmtOffset;
+    _daylightOffsetSec = daylightOffset;
 }
 
 void WebHandler::setupRoutes() {

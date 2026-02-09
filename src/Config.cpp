@@ -119,6 +119,13 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     proj.heatRuntimeAccumulatedMs = runtime["heatAccumulatedMs"] | 0;
     cout << "Read heat runtime: " << proj.heatRuntimeAccumulatedMs << " ms" << endl;
 
+    // Load timezone settings
+    JsonObject timezone = doc["timezone"];
+    proj.gmtOffsetSec = timezone["gmtOffset"] | (-21600);
+    proj.daylightOffsetSec = timezone["daylightOffset"] | 3600;
+    cout << "Read timezone: gmtOffset=" << proj.gmtOffsetSec
+         << " daylightOffset=" << proj.daylightOffsetSec << endl;
+
     clearConfig(config);
     for (JsonPair sensors_temp_item : doc["sensors"]["temp"].as<JsonObject>()) {
         const char* key = sensors_temp_item.key().c_str();
@@ -192,6 +199,10 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
 
     JsonObject runtime = doc["runtime"].to<JsonObject>();
     runtime["heatAccumulatedMs"] = proj.heatRuntimeAccumulatedMs;
+
+    JsonObject timezone = doc["timezone"].to<JsonObject>();
+    timezone["gmtOffset"] = proj.gmtOffsetSec;
+    timezone["daylightOffset"] = proj.daylightOffsetSec;
 
     JsonObject sensors = doc["sensors"].to<JsonObject>();
     JsonObject sensors_temp = sensors["temp"].to<JsonObject>();

@@ -130,7 +130,9 @@ ProjectInfo proj = {
   false,
   50 * 1024 * 1024,  // maxLogSize: 50MB default
   10,                 // maxOldLogCount: 10 files default
-  0                   // heatRuntimeAccumulatedMs: restored from config
+  0,                  // heatRuntimeAccumulatedMs: restored from config
+  -21600,             // gmtOffsetSec: UTC-6 (US Central)
+  3600                // daylightOffsetSec: 1hr DST
 };
 
 
@@ -148,13 +150,12 @@ bool CheckTickTime(InputPin *pin);
 void onCheckInputQueue();
 
 void onInput(InputPin *pin){
-  cout << "Input Pin name:" << pin->getName() << " Value:" << pin->getValue() << endl;
+  Log.info("InputPin", "Name: %s Value: %d", pin->getName(), pin->getValue());
 }
 
 bool onOutpin(OutPin *pin, bool on, bool inCallback, float &newPercent, float origPercent){
-  cout << "Output pin:" << pin->getName() << " On:" << on << endl; 
-  cout << "Last On Tick:" << pin->getOnTick() << endl;
-  cout << "Last Off Tick:" << pin->getOffTick() << endl;
+  //cout << "Output pin:" << pin->getName() << " On:" << pin->isPinOn() << endl; 
+  Log.info("OutPin", "Name: %s State: %d Requested State: %d New Percent On: %lf Orig Percent On: %lf", pin->getName(), pin->isPinOn(), on, newPercent, origPercent);
   return true;
 }
 
@@ -229,6 +230,7 @@ void onWiFiEvent(arduino_event_id_t event, arduino_event_info_t info){
     case SYSTEM_EVENT_STA_GOT_IP:
       tWaitOnWiFi.disable();
       webHandler.startNtpSync();
+      Log.info("WIFI", "Got ip: %s", webHandler.getWiFiIP());
       break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
       _wifiStartMillis = millis();
@@ -304,6 +306,7 @@ void setup() {
   WiFi.onEvent(onWiFiEvent);
   connectToWifi();
 
+  webHandler.setTimezone(proj.gmtOffsetSec, proj.daylightOffsetSec);
   webHandler.begin();
 
   mqttHandler.begin(_MQTT_HOST_DEFAULT, _MQTT_PORT, _MQTT_USER, _MQTT_PASSWORD);
@@ -415,10 +418,12 @@ void printIdleStatus() {
   if (millis() <= _nextIdlePrintTime) {
     return;
   }
+  cout << "Current WiFi IP:" << webHandler.getWiFiIP() << endl;
+  cout << "Current HP Mode: " << hpController.getStateString() << endl;
   
   // Stats for outpin activation.
   for (auto& out : hpController.getOutputMap()) {
-    cout << "Out Pin: " << out.first << " On Count: " << out.second->getOnCount() << endl;
+    cout << "Out Pin: " << out.first << " On Count: " << out.second->getOnCount()  << " State: " << out.second->isPinOn()  << endl;
   }
   digitalWrite(_WPin, HIGH);
   _nextIdlePrintTime = millis() + 10000;
