@@ -44,6 +44,14 @@ class WebHandler {
     void setupRoutes();
     void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
                    AwsEventType type, void* arg, uint8_t* data, size_t len);
+
+    // GPIO test state
+    Task* _tGpioTest;
+    bool _gpioTestRunning;
+    int _gpioTestStep;
+    String _gpioTestResult;
+    int _gpioTestWOn, _gpioTestOOn;   // W/O reads after W turned ON
+    int _gpioTestWOff, _gpioTestOOff; // W/O reads after W turned OFF
 };
 
 #endif

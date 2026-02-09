@@ -43,6 +43,9 @@ class GoodmanHP {
 
     State getState();
     const char* getStateString();
+    void testSetState(State newState);  // For GPIO testing only
+    void pauseUpdate();   // Disable update task for testing
+    void resumeUpdate();  // Re-enable update task after testing
 
     bool isYActive();
     bool isOActive();

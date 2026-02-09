@@ -284,6 +284,26 @@ const char* GoodmanHP::getStateString() {
     }
 }
 
+void GoodmanHP::testSetState(State newState) {
+    _state = newState;
+    OutPin* w = getOutput("W");
+    if (w != nullptr) {
+        if (newState == State::DEFROST) {
+            w->turnOn();
+        } else {
+            w->turnOff();
+        }
+    }
+}
+
+void GoodmanHP::pauseUpdate() {
+    if (_tskUpdate) _tskUpdate->disable();
+}
+
+void GoodmanHP::resumeUpdate() {
+    if (_tskUpdate) _tskUpdate->enable();
+}
+
 bool GoodmanHP::isYActive() {
     InputPin* y = getInput("Y");
     return y != nullptr && y->isActive();

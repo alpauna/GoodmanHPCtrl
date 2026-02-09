@@ -5,7 +5,8 @@
 
 WebHandler::WebHandler(uint16_t port, Scheduler* ts, GoodmanHP* hpController)
     : _server(port), _ws("/ws"), _ts(ts), _hpController(hpController),
-      _shouldReboot(false), _ntpSynced(false), _tNtpSync(nullptr) {}
+      _shouldReboot(false), _ntpSynced(false), _tNtpSync(nullptr),
+      _tGpioTest(nullptr), _gpioTestRunning(false), _gpioTestStep(0) {}
 
 void WebHandler::begin() {
     // NTP sync task - enabled on WiFi connect, then repeats every 2 hours
@@ -223,6 +224,239 @@ void WebHandler::setupRoutes() {
             "<input type='submit' value='Update'>"
             "</form>"
             "</body></html>");
+    });
+
+    _server.on("/test/w-to-o/result", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (_gpioTestRunning) {
+            request->send(200, "application/json", "{\"status\":\"running\"}");
+            return;
+        }
+        if (_gpioTestResult.length() == 0) {
+            request->send(200, "application/json", "{\"status\":\"no test run\"}");
+            return;
+        }
+        request->send(200, "application/json", _gpioTestResult);
+    });
+
+    _server.on("/test/w-to-o", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (_gpioTestRunning) {
+            request->send(200, "application/json", "{\"status\":\"running\"}");
+            return;
+        }
+        _gpioTestRunning = true;
+        _gpioTestStep = 0;
+        _gpioTestResult = "";
+
+        OutPin* wPin = _hpController->getOutput("W");
+        uint8_t oGpio = _hpController->getInput("O")->getPin();
+
+        // 8 steps: initial, W on, read, W off, read, update(), read, finalize
+        _tGpioTest = new Task(500 * TASK_MILLISECOND, 8, [this, wPin, oGpio]() {
+            int oState;
+            switch (_gpioTestStep) {
+                case 0: {
+                    // Record initial state
+                    oState = digitalRead(oGpio);
+                    const char* mode = _hpController->getStateString();
+                    Log.info("GPIO-TEST", "Step 0 - Initial: mode=%s, W.isOn=%d, O=%d",
+                             mode, wPin->isOn() ? 1 : 0, oState);
+                    _gpioTestResult = "{\"mode\":\"" + String(mode) + "\"";
+                    _gpioTestResult += ",\"initial\":{\"w_sw\":" + String(wPin->isOn() ? 1 : 0) +
+                                       ",\"o_pin\":" + String(oState) + "}";
+                    break;
+                }
+                case 1: {
+                    // Turn W ON to verify O follows (proves wiring works)
+                    Log.info("GPIO-TEST", "Step 1 - Turning W ON");
+                    wPin->turnOn();
+                    break;
+                }
+                case 2: {
+                    oState = digitalRead(oGpio);
+                    _gpioTestOOn = oState;
+                    Log.info("GPIO-TEST", "Step 2 - After W ON: W.isOn=%d, O=%d",
+                             wPin->isOn() ? 1 : 0, oState);
+                    _gpioTestResult += ",\"w_on\":{\"w_sw\":" + String(wPin->isOn() ? 1 : 0) +
+                                       ",\"o_pin\":" + String(oState) + "}";
+                    break;
+                }
+                case 3: {
+                    // Turn W OFF
+                    Log.info("GPIO-TEST", "Step 3 - Turning W OFF");
+                    wPin->turnOff();
+                    break;
+                }
+                case 4: {
+                    oState = digitalRead(oGpio);
+                    _gpioTestOOff = oState;
+                    Log.info("GPIO-TEST", "Step 4 - After W OFF: W.isOn=%d, O=%d",
+                             wPin->isOn() ? 1 : 0, oState);
+                    _gpioTestResult += ",\"w_off\":{\"w_sw\":" + String(wPin->isOn() ? 1 : 0) +
+                                       ",\"o_pin\":" + String(oState) + "}";
+                    break;
+                }
+                case 5: {
+                    // Run state machine update to let it enforce W state
+                    Log.info("GPIO-TEST", "Step 5 - Running update() (state machine)");
+                    _hpController->update();
+                    break;
+                }
+                case 6: {
+                    // Read O after state machine ran — W should be off unless DEFROST
+                    oState = digitalRead(oGpio);
+                    const char* mode = _hpController->getStateString();
+                    bool wSw = wPin->isOn();
+                    Log.info("GPIO-TEST", "Step 6 - After update(): mode=%s, W.isOn=%d, O=%d",
+                             mode, wSw ? 1 : 0, oState);
+                    _gpioTestResult += ",\"after_update\":{\"mode\":\"" + String(mode) +
+                                       "\",\"w_sw\":" + String(wSw ? 1 : 0) +
+                                       ",\"o_pin\":" + String(oState) + "}";
+                    break;
+                }
+                case 7: {
+                    // Compute pass/fail
+                    // O must follow W: high when on, low when off
+                    bool wiringOk = (_gpioTestOOn == 1 && _gpioTestOOff == 0);
+                    // After update(), O must be low (W off) unless mode is DEFROST
+                    bool afterOk;
+                    if (_hpController->getState() == GoodmanHP::State::DEFROST) {
+                        afterOk = true;  // W on is expected in DEFROST
+                    } else {
+                        afterOk = (digitalRead(oGpio) == 0);  // W must be off
+                    }
+                    bool pass = wiringOk && afterOk;
+                    _gpioTestResult += ",\"wiring_ok\":" + String(wiringOk ? "true" : "false");
+                    _gpioTestResult += ",\"w_off_after_update\":" + String(afterOk ? "true" : "false");
+                    _gpioTestResult += ",\"pass\":" + String(pass ? "true" : "false") + "}";
+                    Log.info("GPIO-TEST", "Test complete: wiring=%s, w_off_after_update=%s, pass=%s",
+                             wiringOk ? "OK" : "FAIL", afterOk ? "OK" : "FAIL",
+                             pass ? "PASS" : "FAIL");
+                    _gpioTestRunning = false;
+                    break;
+                }
+            }
+            _gpioTestStep++;
+        }, _ts, false);
+
+        _tGpioTest->enable();
+        request->send(200, "application/json", "{\"status\":\"started\"}");
+    });
+
+    _server.on("/test/w-in-heat", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (_gpioTestRunning) {
+            request->send(200, "application/json", "{\"status\":\"running\"}");
+            return;
+        }
+        _gpioTestRunning = true;
+        _gpioTestStep = 0;
+        _gpioTestResult = "";
+
+        OutPin* wPin = _hpController->getOutput("W");
+        uint8_t oGpio = _hpController->getInput("O")->getPin();
+
+        // Test W relay in each state via testSetState() which sets state + controls W
+        // Pause update task to prevent race conditions
+        _tGpioTest = new Task(500 * TASK_MILLISECOND, 10, [this, wPin, oGpio]() {
+            int oState;
+            switch (_gpioTestStep) {
+                case 0: {
+                    // Pause the update task so it doesn't override our state changes
+                    _hpController->pauseUpdate();
+                    oState = digitalRead(oGpio);
+                    Log.info("GPIO-TEST", "ALL-STATE test - Initial: mode=%s, W.isOn=%d, O=%d",
+                             _hpController->getStateString(), wPin->isOn() ? 1 : 0, oState);
+                    _gpioTestResult = "{\"initial\":{\"mode\":\"" + String(_hpController->getStateString()) +
+                                       "\",\"w_sw\":" + String(wPin->isOn() ? 1 : 0) +
+                                       ",\"o_pin\":" + String(oState) + "}";
+                    break;
+                }
+                case 1: {
+                    Log.info("GPIO-TEST", "ALL-STATE test - Setting HEAT");
+                    _hpController->testSetState(GoodmanHP::State::HEAT);
+                    break;
+                }
+                case 2: {
+                    oState = digitalRead(oGpio);
+                    Log.info("GPIO-TEST", "ALL-STATE test - HEAT: mode=%s, W.isOn=%d, O=%d",
+                             _hpController->getStateString(), wPin->isOn() ? 1 : 0, oState);
+                    _gpioTestResult += ",\"heat\":{\"mode\":\"" + String(_hpController->getStateString()) +
+                                       "\",\"w_sw\":" + String(wPin->isOn() ? 1 : 0) +
+                                       ",\"o_pin\":" + String(oState) + "}";
+                    _gpioTestOOn = oState;
+                    break;
+                }
+                case 3: {
+                    Log.info("GPIO-TEST", "ALL-STATE test - Setting COOL");
+                    _hpController->testSetState(GoodmanHP::State::COOL);
+                    break;
+                }
+                case 4: {
+                    oState = digitalRead(oGpio);
+                    Log.info("GPIO-TEST", "ALL-STATE test - COOL: mode=%s, W.isOn=%d, O=%d",
+                             _hpController->getStateString(), wPin->isOn() ? 1 : 0, oState);
+                    _gpioTestResult += ",\"cool\":{\"mode\":\"" + String(_hpController->getStateString()) +
+                                       "\",\"w_sw\":" + String(wPin->isOn() ? 1 : 0) +
+                                       ",\"o_pin\":" + String(oState) + "}";
+                    _gpioTestOOff = oState;
+                    break;
+                }
+                case 5: {
+                    Log.info("GPIO-TEST", "ALL-STATE test - Setting DEFROST");
+                    _hpController->testSetState(GoodmanHP::State::DEFROST);
+                    break;
+                }
+                case 6: {
+                    oState = digitalRead(oGpio);
+                    Log.info("GPIO-TEST", "ALL-STATE test - DEFROST: mode=%s, W.isOn=%d, O=%d",
+                             _hpController->getStateString(), wPin->isOn() ? 1 : 0, oState);
+                    _gpioTestResult += ",\"defrost\":{\"mode\":\"" + String(_hpController->getStateString()) +
+                                       "\",\"w_sw\":" + String(wPin->isOn() ? 1 : 0) +
+                                       ",\"o_pin\":" + String(oState) + "}";
+                    _gpioTestWOn = oState;
+                    break;
+                }
+                case 7: {
+                    Log.info("GPIO-TEST", "ALL-STATE test - Restoring OFF");
+                    _hpController->testSetState(GoodmanHP::State::OFF);
+                    break;
+                }
+                case 8: {
+                    oState = digitalRead(oGpio);
+                    Log.info("GPIO-TEST", "ALL-STATE test - OFF: mode=%s, W.isOn=%d, O=%d",
+                             _hpController->getStateString(), wPin->isOn() ? 1 : 0, oState);
+                    _gpioTestResult += ",\"off\":{\"mode\":\"" + String(_hpController->getStateString()) +
+                                       "\",\"w_sw\":" + String(wPin->isOn() ? 1 : 0) +
+                                       ",\"o_pin\":" + String(oState) + "}";
+                    _gpioTestWOff = oState;
+                    break;
+                }
+                case 9: {
+                    // Resume update task
+                    _hpController->resumeUpdate();
+                    // Finalize: W must be OFF in HEAT, COOL, OFF and ON only in DEFROST
+                    bool heatOk = (_gpioTestOOn == 0);
+                    bool coolOk = (_gpioTestOOff == 0);
+                    bool defrostOk = (_gpioTestWOn == 1);
+                    bool offOk = (_gpioTestWOff == 0);
+                    bool pass = heatOk && coolOk && defrostOk && offOk;
+                    _gpioTestResult += ",\"w_off_in_heat\":" + String(heatOk ? "true" : "false");
+                    _gpioTestResult += ",\"w_off_in_cool\":" + String(coolOk ? "true" : "false");
+                    _gpioTestResult += ",\"w_on_in_defrost\":" + String(defrostOk ? "true" : "false");
+                    _gpioTestResult += ",\"w_off_in_off\":" + String(offOk ? "true" : "false");
+                    _gpioTestResult += ",\"pass\":" + String(pass ? "true" : "false") + "}";
+                    Log.info("GPIO-TEST", "ALL-STATE test: heat=%s cool=%s defrost=%s off=%s pass=%s",
+                             heatOk ? "OK" : "FAIL", coolOk ? "OK" : "FAIL",
+                             defrostOk ? "OK" : "FAIL", offOk ? "OK" : "FAIL",
+                             pass ? "PASS" : "FAIL");
+                    _gpioTestRunning = false;
+                    break;
+                }
+            }
+            _gpioTestStep++;
+        }, _ts, false);
+
+        _tGpioTest->enable();
+        request->send(200, "application/json", "{\"status\":\"started\"}");
     });
 
     _server.on("/update", HTTP_POST, [this](AsyncWebServerRequest *request) {
