@@ -15,11 +15,9 @@ class GoodmanHP {
 
     // Defrost constants
     static const uint32_t HEAT_RUNTIME_THRESHOLD_MS = 90UL * 60 * 1000;  // 90 min
-    static const uint32_t DEFROST_RECHECK_MS = 10UL * 60 * 1000;         // 10 min
+    static const uint32_t DEFROST_MIN_RUNTIME_MS = 3UL * 60 * 1000;      // 3 min minimum defrost
     static const uint32_t DEFROST_TIMEOUT_MS = 15UL * 60 * 1000;         // 15 min safety timeout
-    static const uint32_t DFT_MIN_RUNTIME_MS = 5UL * 60 * 1000;          // 5 min minimum DFT defrost
-    static constexpr float DEFROST_TRIGGER_F = 33.0f;
-    static constexpr float DEFROST_EXIT_F = 42.0f;
+    static constexpr float DEFROST_EXIT_F = 41.0f;
 
     GoodmanHP(Scheduler *ts);
 
@@ -80,12 +78,6 @@ class GoodmanHP {
     uint32_t _heatRuntimeLastLogMs;
     bool _softwareDefrost;
     uint32_t _defrostStartTick;
-    uint32_t _defrostRecheckTick;
-    bool _defrostPersistent;
-
-    // DFT (emergency/hardware) defrost
-    bool _dftDefrost;
-    uint32_t _dftDefrostStartTick;
 
     void checkYAndActivateCNT();
     void updateState();

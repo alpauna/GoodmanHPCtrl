@@ -16,10 +16,6 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _heatRuntimeLastLogMs(0)
     , _softwareDefrost(false)
     , _defrostStartTick(0)
-    , _defrostRecheckTick(0)
-    , _defrostPersistent(false)
-    , _dftDefrost(false)
-    , _dftDefrostStartTick(0)
 {
     _instance = this;
     _tskUpdate = new Task(500, TASK_FOREVER, [this]() {
@@ -157,12 +153,17 @@ void GoodmanHP::checkYAndActivateCNT() {
             fan->turnOff();
             Log.info("HP", "FAN turned OFF (Y deactivated)");
         }
-        if (_cntActivated && !_softwareDefrost) {
+        if (_cntActivated) {
             cnt->turnOff();
             _cntActivated = false;
             Log.info("HP", "Y input deactivated, CNT turned off");
-        } else if (_softwareDefrost) {
-            Log.info("HP", "Y input deactivated during software defrost, keeping CNT on");
+        }
+        if (_softwareDefrost) {
+            // RV off too — system shuts down, but _softwareDefrost stays set
+            // so defrost resumes on next Y activation in HEAT mode
+            OutPin* rv = getOutput("RV");
+            if (rv != nullptr) rv->turnOff();
+            Log.info("HP", "Y dropped during defrost, system shutdown (defrost pending)");
         }
     } else if (yActive && _yWasActive && !_cntActivated) {
         // Check if CNT was off for less than 5 minutes - if so, enforce 30s delay
@@ -195,30 +196,20 @@ void GoodmanHP::updateState() {
 
     State newState = State::OFF;
 
-    // DFT input only triggers defrost from HEAT mode or if DFT defrost already active
-    bool dftTrigger = dft->isActive() && (_state == State::HEAT || _dftDefrost);
+    // DFT input triggers defrost from HEAT mode only
+    bool dftTrigger = dft->isActive() && _state == State::HEAT && !_softwareDefrost;
 
-    // Block new DFT defrost if condenser temp is >= 33°F (not frozen)
-    if (dftTrigger && !_dftDefrost) {
-        TempSensor* condenser = getTempSensor("CONDENSER_TEMP");
-        if (condenser != nullptr && condenser->isValid() && condenser->getValue() >= DEFROST_TRIGGER_F) {
-            Log.info("HP", "DFT triggered but condenser %.1fF >= %.1fF, defrost not needed",
-                     condenser->getValue(), DEFROST_TRIGGER_F);
-            dftTrigger = false;
-        }
+    if (dftTrigger) {
+        Log.info("HP", "DFT emergency defrost triggered from HEAT mode");
+        startSoftwareDefrost();
     }
 
-    if (dftTrigger || _dftDefrost || _softwareDefrost || _defrostPersistent) {
+    if (_softwareDefrost && y->isActive()) {
         newState = State::DEFROST;
-        // Latch DFT defrost on first activation
-        if (dftTrigger && !_dftDefrost) {
-            _dftDefrost = true;
-            _dftDefrostStartTick = millis();
-            Log.info("HP", "DFT emergency defrost activated (sensor < 41F)");
-        }
     } else if (y->isActive() && o->isActive()) {
         newState = State::COOL;
     } else if (y->isActive()) {
+        // If _softwareDefrost is set, re-enter DEFROST is handled above
         newState = State::HEAT;
     }
 
@@ -252,6 +243,20 @@ void GoodmanHP::updateState() {
             } else {
                 w->turnOff();
                 Log.info("HP", "W turned OFF for %s mode", getStateString());
+            }
+        }
+
+        // Re-engage defrost relays when resuming defrost (Y returned after drop)
+        if (newState == State::DEFROST && _softwareDefrost && oldState != State::DEFROST) {
+            OutPin* cnt = getOutput("CNT");
+            if (rv != nullptr) {
+                rv->turnOn();
+                Log.info("HP", "RV re-engaged for resumed defrost");
+            }
+            if (cnt != nullptr && !_cntActivated) {
+                cnt->turnOn();
+                _cntActivated = true;
+                Log.info("HP", "CNT re-engaged for resumed defrost");
             }
         }
 
@@ -323,7 +328,6 @@ void GoodmanHP::setHeatRuntimeMs(uint32_t ms) {
 void GoodmanHP::resetHeatRuntime() {
     _heatRuntimeMs = 0;
     _heatRuntimeLastLogMs = 0;
-    _defrostRecheckTick = 0;
 }
 
 bool GoodmanHP::isSoftwareDefrostActive() const {
@@ -361,53 +365,26 @@ void GoodmanHP::accumulateHeatRuntime() {
 void GoodmanHP::checkDefrostNeeded() {
     uint32_t now = millis();
 
-    // DFT emergency defrost: enforce 5-min minimum, then check condenser temp
-    if (_dftDefrost) {
-        uint32_t elapsed = now - _dftDefrostStartTick;
-        if (elapsed < DFT_MIN_RUNTIME_MS) {
-            // Still within minimum runtime, keep running
-            return;
-        }
-        TempSensor* condenser = getTempSensor("CONDENSER_TEMP");
-        if (condenser != nullptr && condenser->isValid() && condenser->getValue() >= DEFROST_EXIT_F) {
-            Log.info("HP", "DFT defrost complete: condenser %.1fF >= %.1fF after %lu sec",
-                     condenser->getValue(), DEFROST_EXIT_F, elapsed / 1000UL);
-            _dftDefrost = false;
-            _dftDefrostStartTick = 0;
-            resetHeatRuntime();
-        } else if (elapsed >= DEFROST_TIMEOUT_MS) {
-            Log.error("HP", "DFT defrost timeout (%lu min), forcing exit", DEFROST_TIMEOUT_MS / 60000UL);
-            _dftDefrost = false;
-            _dftDefrostStartTick = 0;
-            resetHeatRuntime();
-        }
-        return;
-    }
-
-    // If defrost was triggered but Y dropped, keep persistent flag
-    if (_defrostPersistent && !_softwareDefrost) {
-        InputPin* y = getInput("Y");
-        InputPin* o = getInput("O");
-        if (y != nullptr && o != nullptr && y->isActive() && !o->isActive()) {
-            // Y returned without O (HEAT mode) — resume defrost
-            Log.info("HP", "HEAT mode returned during persistent defrost, restarting software defrost");
-            startSoftwareDefrost();
-        }
-        return;
-    }
-
     // If software defrost is active, check exit conditions
     if (_softwareDefrost) {
+        uint32_t elapsed = now - _defrostStartTick;
+
+        // Enforce minimum runtime
+        if (elapsed < DEFROST_MIN_RUNTIME_MS) {
+            return;
+        }
+
         TempSensor* condenser = getTempSensor("CONDENSER_TEMP");
         if (condenser != nullptr && condenser->isValid() && condenser->getValue() >= DEFROST_EXIT_F) {
-            Log.info("HP", "Condenser temp %.1fF >= %.1fF, ending software defrost", condenser->getValue(), DEFROST_EXIT_F);
+            Log.info("HP", "Defrost complete: condenser %.1fF >= %.1fF after %lu sec",
+                     condenser->getValue(), DEFROST_EXIT_F, elapsed / 1000UL);
             stopSoftwareDefrost();
             return;
         }
 
         // Safety timeout
-        if (now - _defrostStartTick >= DEFROST_TIMEOUT_MS) {
-            Log.error("HP", "Software defrost timeout (%lu min), forcing stop", DEFROST_TIMEOUT_MS / 60000UL);
+        if (elapsed >= DEFROST_TIMEOUT_MS) {
+            Log.error("HP", "Defrost timeout (%lu min), forcing stop", DEFROST_TIMEOUT_MS / 60000UL);
             stopSoftwareDefrost();
             return;
         }
@@ -415,34 +392,16 @@ void GoodmanHP::checkDefrostNeeded() {
     }
 
     // Check if heat runtime threshold reached
-    if (_heatRuntimeMs < HEAT_RUNTIME_THRESHOLD_MS) {
-        return;
-    }
-
-    // If a recheck is scheduled and not due yet, skip
-    if (_defrostRecheckTick > 0 && now < _defrostRecheckTick) {
-        return;
-    }
-
-    TempSensor* condenser = getTempSensor("CONDENSER_TEMP");
-    if (condenser == nullptr || !condenser->isValid()) {
-        Log.warn("HP", "Condenser temp not available, scheduling recheck in 10 min");
-        _defrostRecheckTick = now + DEFROST_RECHECK_MS;
-        return;
-    }
-
-    if (condenser->getValue() < DEFROST_TRIGGER_F) {
-        Log.info("HP", "Condenser temp %.1fF < %.1fF after %lu min HEAT runtime, starting defrost",
-                 condenser->getValue(), DEFROST_TRIGGER_F, _heatRuntimeMs / 60000UL);
+    if (_heatRuntimeMs >= HEAT_RUNTIME_THRESHOLD_MS) {
+        Log.info("HP", "Heat runtime %lu min >= %lu min threshold, starting defrost",
+                 _heatRuntimeMs / 60000UL, HEAT_RUNTIME_THRESHOLD_MS / 60000UL);
         startSoftwareDefrost();
-    } else {
-        Log.info("HP", "Condenser temp %.1fF >= %.1fF after %lu min, defrost not needed, recheck in 10 min",
-                 condenser->getValue(), DEFROST_TRIGGER_F, _heatRuntimeMs / 60000UL);
-        _defrostRecheckTick = now + DEFROST_RECHECK_MS;
     }
 }
 
 void GoodmanHP::startSoftwareDefrost() {
+    if (_softwareDefrost) return;
+
     OutPin* cnt = getOutput("CNT");
     OutPin* rv = getOutput("RV");
 
@@ -465,9 +424,7 @@ void GoodmanHP::startSoftwareDefrost() {
     _cntActivated = true;
 
     _softwareDefrost = true;
-    _defrostPersistent = true;
     _defrostStartTick = millis();
-    _defrostRecheckTick = 0;
 }
 
 void GoodmanHP::stopSoftwareDefrost() {
@@ -485,7 +442,6 @@ void GoodmanHP::stopSoftwareDefrost() {
     }
 
     _softwareDefrost = false;
-    _defrostPersistent = false;
     resetHeatRuntime();
 }
 
