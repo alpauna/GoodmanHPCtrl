@@ -120,9 +120,12 @@ OneWire oneWire(ONE_WIRE_BUS);
 // Pass our oneWire reference to Dallas Temperature.
 DallasTemperature sensors(&oneWire);
 
+// MCP9600 I2C thermocouple amplifier for LIQUID_TEMP
+Adafruit_MCP9600 mcp9600;
 
-typedef enum AC_STATE { OFF, COOL, HEAT, DEFROST, ERROR } ACState;
-static String AC_STATE_STR[] = {"OFF", "COOL", "HEAT", "DEFROST", "ERROR"};
+
+typedef enum AC_STATE { OFF, COOL, HEAT, DEFROST, ERROR, LOW_TEMP } ACState;
+static String AC_STATE_STR[] = {"OFF", "COOL", "HEAT", "DEFROST", "ERROR", "LOW_TEMP"};
 static String BOOL_STR[] = {"TRUE", "FALSE"};
 
 ProjectInfo proj = {
@@ -135,7 +138,8 @@ ProjectInfo proj = {
   10,                 // maxOldLogCount: 10 files default
   0,                  // heatRuntimeAccumulatedMs: restored from config
   -21600,             // gmtOffsetSec: UTC-6 (US Central)
-  3600                // daylightOffsetSec: 1hr DST
+  3600,               // daylightOffsetSec: 1hr DST
+  20.0f               // lowTempThreshold: 20°F default
 };
 
 
@@ -299,6 +303,19 @@ void setup() {
     Serial.printf("I2C scan: %d device(s) found\r\n", i2cCount);
   }
 
+  // Initialize MCP9600 thermocouple amplifier at 0x67
+  bool mcp9600Ready = false;
+  if (mcp9600.begin(0x67)) {
+    mcp9600.setADCresolution(MCP9600_ADCRESOLUTION_18);
+    mcp9600.setThermocoupleType(MCP9600_TYPE_K);
+    mcp9600.setFilterCoefficient(3);
+    mcp9600.enable(true);
+    mcp9600Ready = true;
+    Serial.println("MCP9600 thermocouple amplifier initialized at 0x67");
+  } else {
+    Serial.println("MCP9600 not found at 0x67, LIQUID_TEMP will be unavailable");
+  }
+
   acc_data_all = (unsigned char *) ps_malloc (n_elements * sizeof (unsigned char));
   sprintf((char *)acc_data_all, "Test %d", millis());
   sensors.begin();
@@ -321,6 +338,8 @@ void setup() {
       _MQTT_PASSWORD = config.getMqttPassword();
       // Restore accumulated heat runtime from config
       hpController.setHeatRuntimeMs(proj.heatRuntimeAccumulatedMs);
+      // Set low temp threshold from config
+      hpController.setLowTempThreshold(proj.lowTempThreshold);
     }
   }
   cout << "SD Card is read." << endl;
@@ -354,6 +373,17 @@ void setup() {
 
   // Start GoodmanHP controller
   hpController.setDallasTemperature(&sensors);
+
+  // Add MCP9600 LIQUID_TEMP sensor if hardware is present
+  if (mcp9600Ready) {
+    TempSensor* liquidSensor = new TempSensor("LIQUID_TEMP");
+    liquidSensor->setMCP9600(&mcp9600);
+    liquidSensor->setUpdateCallback(tempSensorUpdateCallback);
+    liquidSensor->setChangeCallback(tempSensorChangeCallback);
+    hpController.addTempSensor("LIQUID_TEMP", liquidSensor);
+    Log.info("MAIN", "LIQUID_TEMP sensor added (MCP9600 thermocouple)");
+  }
+
   hpController.setStateChangeCallback([](GoodmanHP::State, GoodmanHP::State) {
     mqttHandler.publishState();
   });

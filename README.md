@@ -5,7 +5,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 ## Features
 
 - **Relay control** — 4 output pins (FAN, Contactor, W-Heat, Reversing Valve) driven by 4 input signals (Low Pressure Switch, Defrost, Y-Cool, O-Heat)
-- **Temperature monitoring** — 4 OneWire (Dallas DS18B20) sensors: line, suction, ambient, and condenser
+- **Temperature monitoring** — 4 OneWire (Dallas DS18B20) sensors (compressor, suction, ambient, condenser) + 1 MCP9600 I2C thermocouple (liquid line)
 - **Remote access** — REST API, WebSocket, and MQTT for monitoring and control
 - **OTA updates** — Firmware upload via web interface
 - **SD card configuration** — WiFi, MQTT, and sensor settings stored as JSON on SD card
@@ -35,6 +35,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - `COOL` — Y and O inputs active (cooling mode, RV on, W off)
   - `DEFROST` — DFT emergency defrost or software defrost cycle (W on)
   - `ERROR` — Fault condition active (LPS low pressure); all outputs shut down, state updates blocked until fault clears
+  - `LOW_TEMP` — Ambient temperature below threshold (default 20°F); compressor off, auxiliary heat (W) on, auto-recovers when temp rises
 
 - **Output Control by State:**
   - **RV** (reversing valve): ON in COOL, OFF in HEAT/OFF
@@ -45,8 +46,16 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - Immediately shuts down CNT if running
   - Sets state to `ERROR`, blocking all state updates
   - Blocks CNT activation while fault is active
-  - Auto-recovers when LPS goes HIGH; short-cycle protection (30s delay) is enforced on CNT reactivation
+  - Turns on W (auxiliary heat) if in HEAT mode (Y active, O not active); W is never turned on in COOL mode
+  - Auto-recovers when LPS goes HIGH; W turned off, short-cycle protection (30s delay) is enforced on CNT reactivation
   - Publishes fault events via MQTT (`goodman/fault` topic)
+
+- **Low Ambient Temperature Protection** — When AMBIENT_TEMP drops below the configurable threshold (default 20°F):
+  - Enters `LOW_TEMP` state: shuts down CNT, turns off FAN and RV
+  - Turns on W (auxiliary heat) as backup heating, but only if not in COOL mode (W is never turned on in COOL mode)
+  - Blocks compressor activation while ambient temp is too low
+  - Auto-recovers when temperature rises above threshold
+  - Threshold is configurable via `lowTemp.threshold` in SD card config
 
 - **Automatic Defrost** — After 90 minutes of accumulated CNT runtime in HEAT mode, initiates software defrost (turns off CNT, turns on RV, turns on CNT):
   - Runs for at least 3 minutes before checking exit conditions
@@ -67,7 +76,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | `GoodmanHP` | Central controller with pin maps, temp sensors, and state machine |
 | `InputPin` | Digital/analog input with ISR, debouncing, callbacks |
 | `OutPin` | Output relay with delay, PWM support, state tracking |
-| `TempSensor` | OneWire temperature sensor with callbacks and static discovery |
+| `TempSensor` | Temperature sensor with callbacks; supports OneWire (DS18B20) and I2C (MCP9600) |
 | `Config` | SD card and JSON configuration management |
 | `Logger` | Multi-output logging with tar.gz rotation, ring buffer, and WebSocket streaming |
 
@@ -92,6 +101,12 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | SDA | 8 | I/O | I2C data |
 | SCL | 9 | I/O | I2C clock |
 | OneWire | 21 | I/O | Temperature sensor bus |
+
+**I2C Devices:**
+
+| Device | Address | Description |
+|--------|---------|-------------|
+| MCP9600 | 0x67 | Type-K thermocouple amplifier (LIQUID_TEMP) |
 
 ## Getting Started
 
@@ -143,11 +158,14 @@ Place a `config.txt` file on the SD card with the following format:
     "gmtOffset": -21600,
     "daylightOffset": 3600
   },
+  "lowTemp": {
+    "threshold": 20.0
+  },
   "sensors": {
     "temp": {
       "288514B2000000EA": { "description": "AMBIENT_TEMP", "name": "AMBIENT_TEMP" },
       "28C7E8B200000076": { "description": "CONDENSER_TEMP", "name": "CONDENSER_TEMP" },
-      "28DCC0B200000013": { "description": "LINE_TEMP", "name": "LINE_TEMP" },
+      "28DCC0B200000013": { "description": "COMPRESSOR_TEMP", "name": "COMPRESSOR_TEMP" },
       "2862D5B2000000A9": { "description": "SUCTION_TEMP", "name": "SUCTION_TEMP" }
     }
   }
@@ -216,10 +234,11 @@ Temperature sensor readings, published whenever any sensor value changes.
 
 ```json
 {
-  "LINE_TEMP": 72.5,
+  "COMPRESSOR_TEMP": 72.5,
   "SUCTION_TEMP": 65.2,
   "AMBIENT_TEMP": 48.1,
-  "CONDENSER_TEMP": 38.7
+  "CONDENSER_TEMP": 38.7,
+  "LIQUID_TEMP": 185.3
 }
 ```
 
@@ -246,18 +265,20 @@ Full controller state, published on every state transition and fault event.
   },
   "heatRuntimeMin": 42,
   "defrost": false,
-  "lpsFault": false
+  "lpsFault": false,
+  "lowTemp": false
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `state` | string | Current state: `OFF`, `HEAT`, `COOL`, `DEFROST`, or `ERROR` |
+| `state` | string | Current state: `OFF`, `HEAT`, `COOL`, `DEFROST`, `ERROR`, or `LOW_TEMP` |
 | `inputs` | object | Input pin active states (true = active) |
 | `outputs` | object | Output pin states (true = on) |
 | `heatRuntimeMin` | number | Accumulated HEAT mode CNT runtime in minutes |
 | `defrost` | bool | Whether a software defrost cycle is active |
 | `lpsFault` | bool | Whether an LPS low-pressure fault is active |
+| `lowTemp` | bool | Whether ambient temperature is below the low-temp threshold |
 
 ### `goodman/fault`
 
@@ -304,3 +325,4 @@ Managed automatically by PlatformIO. Key libraries:
 - [ArduinoJson](https://github.com/bblanchon/ArduinoJson) — JSON parsing/serialization
 - [SdFat](https://github.com/adafruit/SdFat) — SD card filesystem
 - [ESP32-targz](https://github.com/tobozo/ESP32-targz) — tar.gz compression for log rotation
+- [Adafruit MCP9600](https://github.com/adafruit/Adafruit_MCP9600) — I2C thermocouple amplifier driver

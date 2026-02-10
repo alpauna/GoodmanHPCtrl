@@ -97,6 +97,7 @@ void MQTTHandler::publishState() {
     doc["heatRuntimeMin"] = _controller->getHeatRuntimeMs() / 60000UL;
     doc["defrost"] = _controller->isSoftwareDefrostActive();
     doc["lpsFault"] = _controller->isLPSFaultActive();
+    doc["lowTemp"] = _controller->isLowTempActive();
 
     char buf[384];
     size_t len = serializeJson(doc, buf, sizeof(buf));

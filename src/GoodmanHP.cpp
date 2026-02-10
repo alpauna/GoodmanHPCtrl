@@ -17,14 +17,17 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _softwareDefrost(false)
     , _defrostStartTick(0)
     , _lpsFault(false)
+    , _lowTemp(false)
+    , _lowTempThreshold(DEFAULT_LOW_TEMP_F)
 {
     _instance = this;
     _tskUpdate = new Task(500, TASK_FOREVER, [this]() {
         this->update();
     }, ts, false);
     _tskCheckTemps = new Task(10 * TASK_SECOND, TASK_FOREVER, [this]() {
-        if (_sensors == nullptr) return;
-        _sensors->requestTemperatures();
+        if (_sensors != nullptr) {
+            _sensors->requestTemperatures();
+        }
         for (auto& mp : _tempSensorMap) {
             if (mp.second == nullptr) continue;
             mp.second->update(_sensors);
@@ -118,6 +121,7 @@ void GoodmanHP::clearTempSensors() {
 
 void GoodmanHP::update() {
     checkLPSFault();
+    checkAmbientTemp();
     checkYAndActivateCNT();
     accumulateHeatRuntime();
     updateState();
@@ -136,16 +140,79 @@ void GoodmanHP::checkLPSFault() {
             _cntActivated = false;
             Log.error("HP", "CNT shut down due to LPS fault");
         }
+        // Turn on W if in HEAT mode (Y active, O not active)
+        OutPin* w = getOutput("W");
+        if (w != nullptr && isYActive() && !isOActive()) {
+            w->turnOn();
+            Log.info("HP", "W turned ON for ERROR state (HEAT mode)");
+        }
         if (_lpsFaultCb) _lpsFaultCb(true);
         if (_stateChangeCb) _stateChangeCb(State::ERROR, oldState);
     } else if (isLPSActive() && _lpsFault) {
         _lpsFault = false;
         Log.info("HP", "LPS fault cleared: pressure restored");
+        // Turn off W that was enabled during ERROR
+        OutPin* w = getOutput("W");
+        if (w != nullptr && w->isOn()) {
+            w->turnOff();
+            Log.info("HP", "W turned OFF (LPS fault cleared)");
+        }
         // Reset Y active start so short-cycle protection applies from recovery
         if (_yWasActive) {
             _yActiveStartTick = millis();
         }
         if (_lpsFaultCb) _lpsFaultCb(false);
+        // Don't set _state here — let updateState() determine the correct state
+    }
+}
+
+void GoodmanHP::checkAmbientTemp() {
+    // Don't override LPS fault
+    if (_lpsFault) return;
+
+    TempSensor* ambient = getTempSensor("AMBIENT_TEMP");
+    if (ambient == nullptr || !ambient->isValid()) return;
+
+    float temp = ambient->getValue();
+
+    if (temp < _lowTempThreshold && !_lowTemp) {
+        _lowTemp = true;
+        State oldState = _state;
+        _state = State::LOW_TEMP;
+        Log.warn("HP", "Low ambient temp %.1fF < %.1fF threshold, entering LOW_TEMP state",
+                 temp, _lowTempThreshold);
+
+        // Shut down CNT if running
+        OutPin* cnt = getOutput("CNT");
+        if (cnt != nullptr && cnt->isOn()) {
+            cnt->turnOff();
+            _cntActivated = false;
+            Log.warn("HP", "CNT shut down due to low ambient temp");
+        }
+
+        // Turn off FAN and RV
+        OutPin* fan = getOutput("FAN");
+        if (fan != nullptr) fan->turnOff();
+        OutPin* rv = getOutput("RV");
+        if (rv != nullptr) rv->turnOff();
+
+        // Turn on W (auxiliary heat) only if not in COOL mode (O+Y)
+        OutPin* w = getOutput("W");
+        if (w != nullptr && !isOActive()) {
+            w->turnOn();
+            Log.info("HP", "W turned ON for LOW_TEMP mode");
+        }
+
+        if (_stateChangeCb) _stateChangeCb(State::LOW_TEMP, oldState);
+    } else if (temp >= _lowTempThreshold && _lowTemp) {
+        _lowTemp = false;
+        Log.info("HP", "Ambient temp %.1fF >= %.1fF threshold, exiting LOW_TEMP state",
+                 temp, _lowTempThreshold);
+
+        // Turn off W
+        OutPin* w = getOutput("W");
+        if (w != nullptr) w->turnOff();
+
         // Don't set _state here — let updateState() determine the correct state
     }
 }
@@ -194,7 +261,7 @@ void GoodmanHP::checkYAndActivateCNT() {
             Log.info("HP", "Y dropped during defrost, system shutdown (defrost pending)");
         }
     } else if (yActive && _yWasActive && !_cntActivated) {
-        if (_lpsFault) return;
+        if (_lpsFault || _lowTemp) return;
         // Check if CNT was off for less than 5 minutes - if so, enforce 30s delay
         uint32_t offElapsed = millis() - cnt->getOffTick();
         if (cnt->getOffTick() > 0 && offElapsed < 5 * 60 * 1000UL) {
@@ -215,8 +282,8 @@ void GoodmanHP::checkYAndActivateCNT() {
 }
 
 void GoodmanHP::updateState() {
-    // Don't compute new state while faulted
-    if (_lpsFault) return;
+    // Don't compute new state while faulted or low temp
+    if (_lpsFault || _lowTemp) return;
 
     InputPin* dft = getInput("DFT");
     InputPin* y = getInput("Y");
@@ -323,6 +390,7 @@ const char* GoodmanHP::getStateString() {
         case State::HEAT: return "HEAT";
         case State::DEFROST: return "DEFROST";
         case State::ERROR: return "ERROR";
+        case State::LOW_TEMP: return "LOW_TEMP";
         default: return "UNKNOWN";
     }
 }
@@ -374,6 +442,19 @@ bool GoodmanHP::isSoftwareDefrostActive() const {
 
 bool GoodmanHP::isLPSFaultActive() const {
     return _lpsFault;
+}
+
+bool GoodmanHP::isLowTempActive() const {
+    return _lowTemp;
+}
+
+void GoodmanHP::setLowTempThreshold(float threshold) {
+    _lowTempThreshold = threshold;
+    Log.info("HP", "Low temp threshold set to %.1fF", threshold);
+}
+
+float GoodmanHP::getLowTempThreshold() const {
+    return _lowTempThreshold;
 }
 
 void GoodmanHP::setStateChangeCallback(StateChangeCallback cb) {

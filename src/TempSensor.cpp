@@ -8,6 +8,7 @@ TempSensor::TempSensor()
     , _valid(false)
     , _onUpdate(nullptr)
     , _onChange(nullptr)
+    , _mcp9600(nullptr)
 {
     _deviceAddress = new uint8_t[sizeof(DeviceAddress)];
     memset(_deviceAddress, 0, sizeof(DeviceAddress));
@@ -21,6 +22,7 @@ TempSensor::TempSensor(const String& description)
     , _valid(false)
     , _onUpdate(nullptr)
     , _onChange(nullptr)
+    , _mcp9600(nullptr)
 {
     _deviceAddress = new uint8_t[sizeof(DeviceAddress)];
     memset(_deviceAddress, 0, sizeof(DeviceAddress));
@@ -46,6 +48,15 @@ void TempSensor::setValue(float value) {
 }
 
 void TempSensor::update(DallasTemperature* sensors, float threshold) {
+    // MCP9600 I2C thermocouple path
+    if (_mcp9600 != nullptr) {
+        float tempC = _mcp9600->readThermocouple();
+        float tempF = tempC * 9.0f / 5.0f + 32.0f;
+        updateValue(tempF, threshold);
+        return;
+    }
+
+    // OneWire DallasTemperature path
     if (sensors == nullptr || _deviceAddress == nullptr) {
         return;
     }
@@ -58,6 +69,17 @@ void TempSensor::update(DallasTemperature* sensors, float threshold) {
         _previous = _value;
         _value = tempF;
         _valid = (_value != DEVICE_DISCONNECTED_F);
+        fireChangeCallback();
+    }
+}
+
+void TempSensor::updateValue(float tempF, float threshold) {
+    float delta = abs(_previous - tempF);
+
+    if (delta > threshold) {
+        _previous = _value;
+        _value = tempF;
+        _valid = true;
         fireChangeCallback();
     }
 }
@@ -107,7 +129,7 @@ void TempSensor::printAddress(uint8_t* address) {
 
 String TempSensor::getDefaultDescription(uint8_t index) {
     switch (index) {
-        case 0: return "LINE_TEMP";
+        case 0: return "COMPRESSOR_TEMP";
         case 1: return "SUCTION_TEMP";
         case 2: return "AMBIENT_TEMP";
         case 3: return "CONDENSER_TEMP";

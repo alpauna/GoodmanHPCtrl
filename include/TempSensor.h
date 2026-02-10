@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <map>
 #include <DallasTemperature.h>
+#include <Adafruit_MCP9600.h>
 
 class TempSensor;
 typedef void (*TempSensorCallback)(TempSensor* sensor);
@@ -28,6 +29,7 @@ class TempSensor {
     void setValue(float value);
     void setPrevious(float previous) { _previous = previous; }
     void setValid(bool valid) { _valid = valid; }
+    void setMCP9600(Adafruit_MCP9600* mcp) { _mcp9600 = mcp; }
 
     // Callbacks
     void setUpdateCallback(TempSensorCallback callback) { _onUpdate = callback; }
@@ -37,6 +39,7 @@ class TempSensor {
 
     // Operations
     void update(DallasTemperature* sensors, float threshold = 0.33f);
+    void updateValue(float tempF, float threshold = 0.33f);
     void fireUpdateCallback();
     void fireChangeCallback();
 
@@ -59,6 +62,7 @@ class TempSensor {
     bool _valid;
     TempSensorCallback _onUpdate;
     TempSensorCallback _onChange;
+    Adafruit_MCP9600* _mcp9600;
 };
 
 #endif

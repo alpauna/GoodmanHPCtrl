@@ -18,6 +18,7 @@ struct ProjectInfo {
     uint32_t heatRuntimeAccumulatedMs;  // Accumulated HEAT mode CNT runtime in ms
     int32_t gmtOffsetSec;        // GMT offset in seconds (default -21600 = UTC-6)
     int32_t daylightOffsetSec;   // DST offset in seconds (default 3600 = 1hr)
+    float lowTempThreshold;      // Ambient temp threshold in F below which compressor is blocked (default 20.0)
 };
 
 class Config {

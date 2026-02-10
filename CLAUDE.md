@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Embedded HVAC controller for Goodman heatpumps (cooling, heating, defrost modes) running on ESP32. Controls 4 relay outputs (FAN, CNT, W, RV) based on 4 input signals (LPS, DFT, Y, O) and 4 OneWire temperature sensors (LINE, SUCTION, AMBIENT, CONDENSER). Provides a REST API, WebSocket, and MQTT interface for remote monitoring and control.
+Embedded HVAC controller for Goodman heatpumps (cooling, heating, defrost modes) running on ESP32. Controls 4 relay outputs (FAN, CNT, W, RV) based on 4 input signals (LPS, DFT, Y, O), 4 OneWire temperature sensors (COMPRESSOR, SUCTION, AMBIENT, CONDENSER), and 1 MCP9600 I2C thermocouple (LIQUID). Provides a REST API, WebSocket, and MQTT interface for remote monitoring and control.
 
 ## Build Commands
 
@@ -73,36 +73,38 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
 - **GoodmanHP** (`GoodmanHP.h/cpp`): Central controller managing input/output pin maps, temperature sensors, and heat pump state machine. Contains:
   - `std::map<String, InputPin*>` for input pins (LPS, DFT, Y, O)
   - `std::map<String, OutPin*>` for output pins (FAN, CNT, W, RV)
-  - `TempSensorMap` for temperature sensors (LINE, SUCTION, AMBIENT, CONDENSER)
+  - `TempSensorMap` for temperature sensors (COMPRESSOR, SUCTION, AMBIENT, CONDENSER via OneWire; LIQUID via MCP9600 I2C thermocouple)
   - Pin methods: `addInput()`, `addOutput()`, `getInput()`, `getOutput()`, `getInputMap()`, `getOutputMap()`
   - Temp methods: `addTempSensor()`, `getTempSensor()`, `getTempSensorMap()`, `clearTempSensors()`
   - State machine: OFF, COOL (Y+O active), HEAT (Y active only), DEFROST
   - All outputs are turned OFF on startup via `begin()`
   - RV (reversing valve) automatically controlled: ON in COOL mode, OFF in HEAT/OFF mode
-  - W (auxiliary heat) automatically controlled: ON only in DEFROST mode, OFF in all other modes
+  - W (auxiliary heat) automatically controlled: ON in DEFROST, ERROR (HEAT only), and LOW_TEMP (HEAT only) modes; never turned on in COOL mode
   - Auto-activates CNT relay when Y input becomes active, with 5-minute short cycle protection: if CNT was off for less than 5 minutes, enforces a 30-second delay before reactivation; if off for 5+ minutes (or never activated), CNT activates immediately
   - **Automatic defrost**: After 90 min accumulated CNT runtime in HEAT mode, initiates software defrost (turn off CNT, turn on RV, turn on CNT). Runs for at least 3 minutes, then exits when CONDENSER_TEMP > 41°F or 15-min safety timeout. Runtime resets on COOL mode or after defrost completes. Runtime persists to SD card every 5 min via `tSaveRuntime` task. If Y drops during defrost, all outputs turn off but `_softwareDefrost` stays set; defrost resumes when Y reactivates in HEAT mode.
   - **DFT emergency defrost**: DFT input triggers the same unified defrost cycle from HEAT mode (same 3-min minimum, 41°F exit, 15-min timeout). Uses the same `_softwareDefrost` path as automatic defrost.
-  - **LPS fault protection**: When LPS input goes LOW (low refrigerant pressure), immediately shuts down CNT if running and blocks CNT activation. Auto-recovers when LPS goes HIGH. Publishes fault events via `LPSFaultCallback`. `lpsFault` field included in `goodman/state` MQTT payload.
-  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `isLPSFaultActive()`, `setLPSFaultCallback()`
+  - **LPS fault protection**: When LPS input goes LOW (low refrigerant pressure), immediately shuts down CNT if running and blocks CNT activation. If in HEAT mode (Y active, O not active), turns on W for auxiliary heat. Auto-recovers when LPS goes HIGH (W turned off). Publishes fault events via `LPSFaultCallback`. `lpsFault` field included in `goodman/state` MQTT payload.
+  - **Low ambient temperature protection**: When AMBIENT_TEMP drops below configurable threshold (default 20°F), enters `LOW_TEMP` state: shuts down CNT, turns off FAN and RV. Turns on W (auxiliary heat) only if not in COOL mode (O active). W is never turned on in COOL mode. Blocks CNT activation and state updates while active. Auto-recovers when temp rises above threshold. `lowTemp` field included in `goodman/state` MQTT payload.
+  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `setLowTempThreshold()`, `getLowTempThreshold()`
 - **OutPin** (`OutPin.h/cpp`): Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
 - **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, debouncing via delayed verification (circular buffer queue checked by `_tGetInputs`), and callback on change.
-- **TempSensor** (`TempSensor.h/cpp`): OneWire temperature sensor wrapper with encapsulated state and callbacks:
+- **TempSensor** (`TempSensor.h/cpp`): Temperature sensor wrapper with encapsulated state and callbacks. Supports OneWire (via `update()`) and external sources like MCP9600 I2C thermocouple (via `updateValue()`):
   - Properties: `description`, `deviceAddress`, `value`, `previous`, `valid`
   - Callbacks: `setUpdateCallback()`, `setChangeCallback()`
-  - Methods: `update(DallasTemperature*, threshold)` reads sensor and fires change callback if delta exceeds threshold
+  - Methods: `setMCP9600(Adafruit_MCP9600*)` assigns I2C thermocouple source; `update(DallasTemperature*, threshold)` reads from MCP9600 if set, otherwise from OneWire; `updateValue(float tempF, threshold)` accepts a raw Fahrenheit value directly. All fire change callback if delta exceeds threshold
   - Static helpers:
     - `addressToString(uint8_t*)` — Convert DeviceAddress to hex string
     - `stringToAddress(String&, uint8_t*)` — Parse hex string to DeviceAddress
     - `printAddress(uint8_t*)` — Print address to Serial in hex format
     - `discoverSensors(DallasTemperature*, TempSensorMap&, updateCb, changeCb)` — Enumerate OneWire bus and populate TempSensorMap
-    - `getDefaultDescription(uint8_t index)` — Returns sensor name by index (LINE_TEMP, SUCTION_TEMP, AMBIENT_TEMP, CONDENSER_TEMP)
+    - `getDefaultDescription(uint8_t index)` — Returns sensor name by index (COMPRESSOR_TEMP, SUCTION_TEMP, AMBIENT_TEMP, CONDENSER_TEMP)
 
 ### GPIO Pin Mapping (ESP32-S3)
 
 Inputs: LPS=GPIO15, DFT=GPIO16, Y=GPIO17, O=GPIO18
 Outputs: FAN=GPIO4, CNT=GPIO5 (3s delay), W=GPIO6, RV=GPIO7
 OneWire bus: GPIO21
+I2C: SDA=GPIO8, SCL=GPIO9 — MCP9600 thermocouple amplifier at 0x67 (LIQUID_TEMP)
 
 ### Networking
 
@@ -110,8 +112,8 @@ OneWire bus: GPIO21
 - **WebSocket** at `/ws`
 - **MQTT** (`MQTTHandler` wrapping AsyncMqttClient) to configurable broker, default `192.168.0.46:1883`
   - `goodman/log` — log messages (Logger output)
-  - `goodman/temps` — all valid temp sensor values as JSON, published on any sensor change. Format: `{"LINE_TEMP":72.5,"SUCTION_TEMP":65.2,...}`
-  - `goodman/state` — state + inputs/outputs as JSON, published on state transitions. Format: `{"state":"HEAT","inputs":{...},"outputs":{...},"heatRuntimeMin":42,"defrost":false,"lpsFault":false}`
+  - `goodman/temps` — all valid temp sensor values as JSON, published on any sensor change. Format: `{"COMPRESSOR_TEMP":72.5,"SUCTION_TEMP":65.2,"LIQUID_TEMP":185.3,...}`
+  - `goodman/state` — state + inputs/outputs as JSON, published on state transitions. Format: `{"state":"HEAT","inputs":{...},"outputs":{...},"heatRuntimeMin":42,"defrost":false,"lpsFault":false,"lowTemp":false}`
   - `goodman/fault` — fault events as JSON, published when faults activate/clear. Format: `{"fault":"LPS","message":"Low refrigerant pressure","active":true}`
 
 ### Configuration
@@ -131,6 +133,7 @@ struct ProjectInfo {
     uint32_t heatRuntimeAccumulatedMs; // Accumulated HEAT mode CNT runtime (persisted)
     int32_t gmtOffsetSec;        // GMT offset in seconds (default -21600 = UTC-6)
     int32_t daylightOffsetSec;   // DST offset in seconds (default 3600 = 1hr)
+    float lowTempThreshold;      // Ambient temp threshold in F below which compressor is blocked (default 20.0)
 };
 ```
 
@@ -176,6 +179,7 @@ JSON config stored on SD card at `/config.txt` (SdFat library, SPI interface). C
   "logging": { "maxLogSize": 52428800, "maxOldLogCount": 10 },
   "runtime": { "heatAccumulatedMs": 0 },
   "timezone": { "gmtOffset": -21600, "daylightOffset": 3600 },
+  "lowTemp": { "threshold": 20.0 },
   "sensors": { "temp": { ... } }
 }
 ```
@@ -208,7 +212,7 @@ RTC time is synchronized from NTP servers (`192.168.0.1`, `time.nist.gov`) using
 ### State Machine
 
 ```
-enum AC_STATE { OFF, COOL, HEAT, DEFROST, ERROR }
+enum AC_STATE { OFF, COOL, HEAT, DEFROST, ERROR, LOW_TEMP }
 ```
 
 ### Control Flow Example

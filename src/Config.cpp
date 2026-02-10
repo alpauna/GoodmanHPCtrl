@@ -126,6 +126,11 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     cout << "Read timezone: gmtOffset=" << proj.gmtOffsetSec
          << " daylightOffset=" << proj.daylightOffsetSec << endl;
 
+    // Load low temp threshold
+    JsonObject lowTemp = doc["lowTemp"];
+    proj.lowTempThreshold = lowTemp["threshold"] | 20.0f;
+    cout << "Read lowTemp threshold: " << proj.lowTempThreshold << "F" << endl;
+
     clearConfig(config);
     for (JsonPair sensors_temp_item : doc["sensors"]["temp"].as<JsonObject>()) {
         const char* key = sensors_temp_item.key().c_str();
@@ -203,6 +208,9 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     JsonObject timezone = doc["timezone"].to<JsonObject>();
     timezone["gmtOffset"] = proj.gmtOffsetSec;
     timezone["daylightOffset"] = proj.daylightOffsetSec;
+
+    JsonObject lowTemp = doc["lowTemp"].to<JsonObject>();
+    lowTemp["threshold"] = proj.lowTempThreshold;
 
     JsonObject sensors = doc["sensors"].to<JsonObject>();
     JsonObject sensors_temp = sensors["temp"].to<JsonObject>();
