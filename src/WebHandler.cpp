@@ -27,6 +27,9 @@ void WebHandler::begin() {
     });
     _server.addHandler(&_ws);
 
+    Log.setWebSocket(&_ws);
+    Log.enableWebSocket(true);
+
     setupRoutes();
 
     _server.begin();
@@ -197,7 +200,47 @@ void WebHandler::setupRoutes() {
         json += ",\"serial\":" + String(Log.isSerialEnabled() ? "true" : "false");
         json += ",\"mqtt\":" + String(Log.isMqttEnabled() ? "true" : "false");
         json += ",\"sdcard\":" + String(Log.isSdCardEnabled() ? "true" : "false");
+        json += ",\"websocket\":" + String(Log.isWebSocketEnabled() ? "true" : "false");
         json += "}";
+        request->send(200, "application/json", json);
+    });
+
+    _server.on("/log", HTTP_GET, [](AsyncWebServerRequest *request) {
+        size_t count = Log.getRingBufferCount();
+        size_t limit = count;
+        if (request->hasParam("limit")) {
+            limit = request->getParam("limit")->value().toInt();
+            if (limit > count) limit = count;
+        }
+
+        const auto& buffer = Log.getRingBuffer();
+        size_t head = Log.getRingBufferHead();
+        size_t bufSize = buffer.size();
+
+        // Calculate start index: we want the last 'limit' entries
+        size_t startOffset = count - limit;
+
+        String json = "{\"count\":" + String(limit) + ",\"entries\":[";
+        for (size_t i = 0; i < limit; i++) {
+            size_t idx = (head + bufSize - count + startOffset + i) % bufSize;
+            if (i > 0) json += ",";
+            json += "\"";
+            // Escape JSON characters
+            const String& entry = buffer[idx];
+            for (size_t j = 0; j < entry.length(); j++) {
+                char c = entry[j];
+                switch (c) {
+                    case '"':  json += "\\\""; break;
+                    case '\\': json += "\\\\"; break;
+                    case '\n': json += "\\n"; break;
+                    case '\r': json += "\\r"; break;
+                    case '\t': json += "\\t"; break;
+                    default:   json += c; break;
+                }
+            }
+            json += "\"";
+        }
+        json += "]}";
         request->send(200, "application/json", json);
     });
 
@@ -210,6 +253,9 @@ void WebHandler::setupRoutes() {
         }
         if (request->hasParam("sdcard")) {
             Log.enableSdCard(request->getParam("sdcard")->value() == "true");
+        }
+        if (request->hasParam("websocket")) {
+            Log.enableWebSocket(request->getParam("websocket")->value() == "true");
         }
         Log.info("HTTP", "Log config updated");
         request->send(200, "application/json", "{\"status\":\"ok\"}");

@@ -12,14 +12,20 @@ Logger::Logger()
     , _serialEnabled(true)
     , _mqttEnabled(false)
     , _sdCardEnabled(false)
+    , _wsEnabled(false)
     , _mqttClient(nullptr)
     , _mqttTopic("goodman/log")
+    , _ws(nullptr)
     , _sd(nullptr)
     , _logFilename("/log.txt")
     , _maxFileSize(DEFAULT_MAX_FILE_SIZE)
     , _maxRotatedFiles(DEFAULT_MAX_ROTATED_FILES)
     , _compressionAvailable(true)
+    , _ringBufferMax(DEFAULT_RING_BUFFER_SIZE)
+    , _ringBufferHead(0)
+    , _ringBufferCount(0)
 {
+    _ringBuffer.resize(_ringBufferMax);
 }
 
 void Logger::setLevel(Level level) {
@@ -75,6 +81,66 @@ bool Logger::isSdCardEnabled() {
     return _sdCardEnabled;
 }
 
+void Logger::setWebSocket(AsyncWebSocket* ws) {
+    _ws = ws;
+    _wsEnabled = (ws != nullptr);
+}
+
+void Logger::enableWebSocket(bool enable) {
+    _wsEnabled = enable && (_ws != nullptr);
+}
+
+bool Logger::isWebSocketEnabled() {
+    return _wsEnabled;
+}
+
+void Logger::setRingBufferSize(size_t maxEntries) {
+    _ringBufferMax = maxEntries;
+    _ringBuffer.resize(_ringBufferMax);
+    _ringBufferHead = 0;
+    _ringBufferCount = 0;
+}
+
+const std::vector<String>& Logger::getRingBuffer() const {
+    return _ringBuffer;
+}
+
+size_t Logger::getRingBufferHead() const {
+    return _ringBufferHead;
+}
+
+size_t Logger::getRingBufferCount() const {
+    return _ringBufferCount;
+}
+
+void Logger::addToRingBuffer(const char* msg) {
+    _ringBuffer[_ringBufferHead] = String(msg);
+    _ringBufferHead = (_ringBufferHead + 1) % _ringBufferMax;
+    if (_ringBufferCount < _ringBufferMax) {
+        _ringBufferCount++;
+    }
+}
+
+void Logger::writeToWebSocket(const char* msg) {
+    if (_ws == nullptr || _ws->count() == 0) {
+        return;
+    }
+    String json = "{\"type\":\"log\",\"message\":\"";
+    // Escape special JSON characters in the message
+    for (const char* p = msg; *p; p++) {
+        switch (*p) {
+            case '"':  json += "\\\""; break;
+            case '\\': json += "\\\\"; break;
+            case '\n': json += "\\n"; break;
+            case '\r': json += "\\r"; break;
+            case '\t': json += "\\t"; break;
+            default:   json += *p; break;
+        }
+    }
+    json += "\"}";
+    _ws->textAll(json);
+}
+
 void Logger::error(const char* tag, const char* format, ...) {
     if (_level >= LOG_ERROR) {
         va_list args;
@@ -126,6 +192,8 @@ void Logger::log(Level level, const char* tag, const char* format, va_list args)
     snprintf(_buffer, sizeof(_buffer), "[%s] [%s] [%s] %s",
              timeStr, getLevelName(level), tag, msgBuffer);
 
+    addToRingBuffer(_buffer);
+
     if (_serialEnabled) {
         writeToSerial(_buffer);
     }
@@ -134,6 +202,9 @@ void Logger::log(Level level, const char* tag, const char* format, va_list args)
     }
     if (_sdCardEnabled) {
         writeToSdCard(_buffer);
+    }
+    if (_wsEnabled) {
+        writeToWebSocket(_buffer);
     }
 }
 

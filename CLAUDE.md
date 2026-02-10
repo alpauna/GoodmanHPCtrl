@@ -106,7 +106,7 @@ OneWire bus: GPIO21
 
 ### Networking
 
-- **AsyncWebServer** on port 80 with REST endpoints (`/temps`, `/heap`, `/scan`, `/log/level`, `/log/config`, `/update` for OTA)
+- **AsyncWebServer** on port 80 with REST endpoints (`/temps`, `/heap`, `/scan`, `/log`, `/log/level`, `/log/config`, `/update` for OTA)
 - **WebSocket** at `/ws`
 - **MQTT** (`MQTTHandler` wrapping AsyncMqttClient) to configurable broker, default `192.168.0.46:1883`
   - `goodman/log` — log messages (Logger output)
@@ -182,7 +182,11 @@ JSON config stored on SD card at `/config.txt` (SdFat library, SPI interface). C
 
 ### Logger
 
-Multi-output logging (Serial, MQTT topic, SD card with file rotation). Runtime-configurable level (ERROR/WARN/INFO/DEBUG) and output toggles via HTTP API.
+Multi-output logging (Serial, MQTT topic, SD card with file rotation, WebSocket). Runtime-configurable level (ERROR/WARN/INFO/DEBUG) and output toggles via HTTP API.
+
+**In-memory ring buffer**: Stores the last 500 log entries (configurable via `setRingBufferSize()`) in PSRAM for fast access. Accessible via `GET /log` endpoint with optional `?limit=N` query param. Returns JSON: `{"count":N,"entries":["...","..."]}`.
+
+**WebSocket log streaming**: All log entries are broadcast to connected `/ws` clients as JSON: `{"type":"log","message":"..."}`. Enabled by default when WebHandler starts. Configurable via `POST /log/config?websocket=true|false`.
 
 **Log format**: `[YYYY/MM/DD HH:MM:SS] [LEVEL] [TAG] message`
 - Uses RTC time from NTP sync when available
