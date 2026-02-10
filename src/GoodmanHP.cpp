@@ -141,6 +141,10 @@ void GoodmanHP::checkLPSFault() {
     } else if (isLPSActive() && _lpsFault) {
         _lpsFault = false;
         Log.info("HP", "LPS fault cleared: pressure restored");
+        // Reset Y active start so short-cycle protection applies from recovery
+        if (_yWasActive) {
+            _yActiveStartTick = millis();
+        }
         if (_lpsFaultCb) _lpsFaultCb(false);
         // Don't set _state here — let updateState() determine the correct state
     }
