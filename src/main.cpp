@@ -310,6 +310,7 @@ void setup() {
   webHandler.begin();
 
   mqttHandler.begin(_MQTT_HOST_DEFAULT, _MQTT_PORT, _MQTT_USER, _MQTT_PASSWORD);
+  mqttHandler.setController(&hpController);
 
   // Initialize Logger
   Log.setLevel(Logger::LOG_INFO);
@@ -332,6 +333,9 @@ void setup() {
 
   // Start GoodmanHP controller
   hpController.setDallasTemperature(&sensors);
+  hpController.setStateChangeCallback([](GoodmanHP::State, GoodmanHP::State) {
+    mqttHandler.publishState();
+  });
   hpController.begin();
 
   tRuntime.enable();
@@ -353,6 +357,7 @@ void tempSensorChangeCallback(TempSensor *sensor){
   Serial.print("F Previous Temp: ");
   Serial.print(sensor->getPrevious());
   Serial.println("F");
+  mqttHandler.publishTemps();
 }
 
 void getTempSensors(TempSensorMap& tempMap)

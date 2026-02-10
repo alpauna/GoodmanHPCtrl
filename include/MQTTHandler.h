@@ -6,6 +6,7 @@
 #include <WiFi.h>
 #include <TaskSchedulerDeclarations.h>
 #include "Logger.h"
+#include "GoodmanHP.h"
 
 class MQTTHandler {
   public:
@@ -14,6 +15,9 @@ class MQTTHandler {
                const String& user, const String& password);
     AsyncMqttClient* getClient() { return &_client; }
     bool connected() const { return _client.connected(); }
+    void setController(GoodmanHP* controller);
+    void publishTemps();
+    void publishState();
     void startReconnect();
     void stopReconnect();
     void disconnect();
@@ -22,6 +26,7 @@ class MQTTHandler {
     AsyncMqttClient _client;
     Scheduler* _ts;
     Task* _tReconnect;
+    GoodmanHP* _controller;
 
     void onConnect(bool sessionPresent);
     void onDisconnect(AsyncMqttClientDisconnectReason reason);

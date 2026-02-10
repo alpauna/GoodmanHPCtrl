@@ -108,6 +108,9 @@ OneWire bus: GPIO21
 - **AsyncWebServer** on port 80 with REST endpoints (`/temps`, `/heap`, `/scan`, `/log/level`, `/log/config`, `/update` for OTA)
 - **WebSocket** at `/ws`
 - **MQTT** (`MQTTHandler` wrapping AsyncMqttClient) to configurable broker, default `192.168.0.46:1883`
+  - `goodman/log` — log messages (Logger output)
+  - `goodman/temps` — all valid temp sensor values as JSON, published on any sensor change. Format: `{"LINE_TEMP":72.5,"SUCTION_TEMP":65.2,...}`
+  - `goodman/state` — state + inputs/outputs as JSON, published on state transitions. Format: `{"state":"HEAT","inputs":{...},"outputs":{...},"heatRuntimeMin":42,"defrost":false}`
 
 ### Configuration
 

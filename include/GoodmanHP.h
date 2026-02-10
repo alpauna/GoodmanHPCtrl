@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <map>
+#include <functional>
 #include <DallasTemperature.h>
 #include <TaskSchedulerDeclarations.h>
 #include "InputPin.h"
@@ -12,6 +13,7 @@
 class GoodmanHP {
   public:
     enum class State { OFF, COOL, HEAT, DEFROST };
+    typedef std::function<void(State newState, State oldState)> StateChangeCallback;
 
     // Defrost constants
     static const uint32_t HEAT_RUNTIME_THRESHOLD_MS = 90UL * 60 * 1000;  // 90 min
@@ -55,6 +57,8 @@ class GoodmanHP {
     void resetHeatRuntime();
     bool isSoftwareDefrostActive() const;
 
+    void setStateChangeCallback(StateChangeCallback cb);
+
   private:
     Scheduler *_ts;
     Task *_tskUpdate;
@@ -78,6 +82,7 @@ class GoodmanHP {
     uint32_t _heatRuntimeLastLogMs;
     bool _softwareDefrost;
     uint32_t _defrostStartTick;
+    StateChangeCallback _stateChangeCb;
 
     void checkYAndActivateCNT();
     void updateState();

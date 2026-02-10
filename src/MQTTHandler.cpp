@@ -1,7 +1,8 @@
 #include "MQTTHandler.h"
+#include <ArduinoJson.h>
 
 MQTTHandler::MQTTHandler(Scheduler* ts)
-    : _ts(ts), _tReconnect(nullptr) {}
+    : _ts(ts), _tReconnect(nullptr), _controller(nullptr) {}
 
 void MQTTHandler::begin(const IPAddress& host, uint16_t port,
                          const String& user, const String& password) {
@@ -52,6 +53,53 @@ void MQTTHandler::stopReconnect() {
 
 void MQTTHandler::disconnect() {
     _client.disconnect();
+}
+
+void MQTTHandler::setController(GoodmanHP* controller) {
+    _controller = controller;
+}
+
+void MQTTHandler::publishTemps() {
+    if (!_client.connected() || _controller == nullptr) return;
+
+    JsonDocument doc;
+    for (auto& pair : _controller->getTempSensorMap()) {
+        if (pair.second != nullptr && pair.second->isValid()) {
+            doc[pair.first] = pair.second->getValue();
+        }
+    }
+
+    char buf[256];
+    size_t len = serializeJson(doc, buf, sizeof(buf));
+    _client.publish("goodman/temps", 0, false, buf, len);
+}
+
+void MQTTHandler::publishState() {
+    if (!_client.connected() || _controller == nullptr) return;
+
+    JsonDocument doc;
+    doc["state"] = _controller->getStateString();
+
+    JsonObject inputs = doc["inputs"].to<JsonObject>();
+    for (auto& pair : _controller->getInputMap()) {
+        if (pair.second != nullptr) {
+            inputs[pair.first] = pair.second->isActive();
+        }
+    }
+
+    JsonObject outputs = doc["outputs"].to<JsonObject>();
+    for (auto& pair : _controller->getOutputMap()) {
+        if (pair.second != nullptr) {
+            outputs[pair.first] = pair.second->isPinOn();
+        }
+    }
+
+    doc["heatRuntimeMin"] = _controller->getHeatRuntimeMs() / 60000UL;
+    doc["defrost"] = _controller->isSoftwareDefrostActive();
+
+    char buf[384];
+    size_t len = serializeJson(doc, buf, sizeof(buf));
+    _client.publish("goodman/state", 0, false, buf, len);
 }
 
 void MQTTHandler::onConnect(bool sessionPresent) {

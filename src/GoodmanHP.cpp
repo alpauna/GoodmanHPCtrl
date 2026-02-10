@@ -221,6 +221,10 @@ void GoodmanHP::updateState() {
                  newState == State::HEAT ? "HEAT" : "DEFROST");
         _state = newState;
 
+        if (_stateChangeCb) {
+            _stateChangeCb(newState, oldState);
+        }
+
         // Control RV based on mode: ON for COOL, OFF for HEAT/OFF
         OutPin* rv = getOutput("RV");
         if (rv != nullptr && !_softwareDefrost) {
@@ -332,6 +336,10 @@ void GoodmanHP::resetHeatRuntime() {
 
 bool GoodmanHP::isSoftwareDefrostActive() const {
     return _softwareDefrost;
+}
+
+void GoodmanHP::setStateChangeCallback(StateChangeCallback cb) {
+    _stateChangeCb = cb;
 }
 
 void GoodmanHP::accumulateHeatRuntime() {
