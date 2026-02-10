@@ -9,7 +9,8 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **Remote access** — REST API, WebSocket, and MQTT for monitoring and control
 - **OTA updates** — Firmware upload via web interface
 - **SD card configuration** — WiFi, MQTT, and sensor settings stored as JSON on SD card
-- **Multi-output logging** — Serial, MQTT, and SD card with tar.gz compressed log rotation
+- **Multi-output logging** — Serial, MQTT, SD card with tar.gz compressed log rotation, and WebSocket streaming
+- **In-memory log buffer** — 500-entry ring buffer in PSRAM, accessible via `/log` API endpoint
 - **NTP time sync** — Automatic time synchronization from NTP servers, refreshes every 2 hours
 - **I2C bus** — Initialized on GPIO8 (SDA) / GPIO9 (SCL) with automatic device scan at startup and `/i2c/scan` API endpoint
 - **PSRAM support** — All heap allocations routed through PSRAM when available
@@ -68,7 +69,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | `OutPin` | Output relay with delay, PWM support, state tracking |
 | `TempSensor` | OneWire temperature sensor with callbacks and static discovery |
 | `Config` | SD card and JSON configuration management |
-| `Logger` | Multi-output logging with configurable tar.gz rotation |
+| `Logger` | Multi-output logging with tar.gz rotation, ring buffer, and WebSocket streaming |
 
 ## Hardware
 
@@ -164,6 +165,20 @@ Place a `config.txt` file on the SD card with the following format:
 - Oldest log is deleted when count exceeds `maxOldLogCount`
 - Falls back to `.txt` extension if compression fails
 
+**In-memory log ring buffer:**
+- Stores the last 500 log entries in PSRAM for fast retrieval
+- Access via `GET /log` — returns all entries as JSON
+- Use `GET /log?limit=N` to return only the last N entries
+- Response format:
+  ```json
+  {"count": 42, "entries": ["[2026/02/10 14:32:01] [INFO ] [HP] State changed", "..."]}
+  ```
+
+**WebSocket log streaming:**
+- All log entries are broadcast to connected `/ws` clients in real-time
+- Message format: `{"type":"log","message":"[2026/02/10 14:32:01] [INFO ] [HP] ..."}`
+- Enabled by default; toggle via `POST /log/config?websocket=true|false`
+
 Sensor addresses are discovered automatically on startup and can be mapped to names via this config.
 
 ## API Endpoints
@@ -173,14 +188,15 @@ Sensor addresses are discovered automatically on startup and can be mapped to na
 | GET | `/temps` | Current temperature readings |
 | GET | `/heap` | Memory/heap statistics |
 | GET | `/scan` | WiFi network scan |
+| GET | `/log` | Recent log entries from ring buffer |
 | GET | `/log/level` | Current log level |
 | POST | `/log/level` | Set log level |
 | GET | `/log/config` | Logger output configuration |
-| POST | `/log/config` | Configure logger outputs |
+| POST | `/log/config` | Configure logger outputs (serial, mqtt, sdcard, websocket) |
 | GET | `/i2c/scan` | Scan I2C bus for connected devices |
 | GET | `/update` | OTA firmware update page |
 | POST | `/update` | Upload new firmware |
-| WS | `/ws` | WebSocket for real-time data |
+| WS | `/ws` | WebSocket for real-time data and log streaming |
 
 ## MQTT Topics
 
