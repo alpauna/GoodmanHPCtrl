@@ -4,6 +4,7 @@
 #include <WiFiServer.h>
 #include <DallasTemperature.h>
 #include <SPI.h>
+#include <Wire.h>
 #include "SdFat.h"
 #include <StringStream.h>
 #include "sdios.h"
@@ -86,6 +87,8 @@ const u_int8_t _fanPin = GPIO_NUM_4;
 const u_int8_t _CNTPin = GPIO_NUM_5;
 const u_int8_t _WPin = GPIO_NUM_6;
 const u_int8_t _RVPin = GPIO_NUM_7;
+const u_int8_t _sdaPin = GPIO_NUM_8;
+const u_int8_t _sclPin = GPIO_NUM_9;
 #elif  defined (BOARD_ESP32_ROVER)
 const u_int8_t _dftPin = GPIO_NUM_16;
 const u_int8_t _yPin = GPIO_NUM_17;
@@ -277,6 +280,24 @@ void onCheckInputQueue(){
 unsigned char * acc_data_all;
 void setup() {
   Serial.begin(115200);
+
+  Wire.begin(_sdaPin, _sclPin);
+
+  // Scan I2C bus for devices
+  uint8_t i2cCount = 0;
+  Serial.println("I2C scan starting...");
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("I2C device found at 0x%02X\r\n", addr);
+      i2cCount++;
+    }
+  }
+  if (i2cCount == 0) {
+    Serial.println("I2C scan: no devices found");
+  } else {
+    Serial.printf("I2C scan: %d device(s) found\r\n", i2cCount);
+  }
 
   acc_data_all = (unsigned char *) ps_malloc (n_elements * sizeof (unsigned char));
   sprintf((char *)acc_data_all, "Test %d", millis());

@@ -6,6 +6,7 @@
 #include <AsyncTCP.h>
 #include <Update.h>
 #include <WiFi.h>
+#include <Wire.h>
 #include <time.h>
 #include <TaskSchedulerDeclarations.h>
 #include "GoodmanHP.h"
@@ -39,6 +40,7 @@ class WebHandler {
     int32_t _gmtOffsetSec = -21600;
     int32_t _daylightOffsetSec = 3600;
     static constexpr const char* NOT_AVAILABLE = "NA";
+    String _wifiIPStr;
 
     void syncNtpTime();
     void setupRoutes();

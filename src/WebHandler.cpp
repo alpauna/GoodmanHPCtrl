@@ -33,8 +33,9 @@ void WebHandler::begin() {
     Log.info("HTTP", "HTTP server started");
 }
 const char * WebHandler::getWiFiIP(){
-    String ipStr = WiFi.localIP().toString();
-    return WiFi.isConnected() && ipStr.length() > 0  ? WiFi.localIP().toString().c_str() : NOT_AVAILABLE;
+    if (!WiFi.isConnected()) return NOT_AVAILABLE;
+    _wifiIPStr = WiFi.localIP().toString();
+    return _wifiIPStr.length() > 0 ? _wifiIPStr.c_str() : NOT_AVAILABLE;
 }
 
 void WebHandler::startNtpSync() {
@@ -212,6 +213,23 @@ void WebHandler::setupRoutes() {
         }
         Log.info("HTTP", "Log config updated");
         request->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+
+    _server.on("/i2c/scan", HTTP_GET, [](AsyncWebServerRequest *request) {
+        String json = "[";
+        bool first = true;
+        for (uint8_t addr = 1; addr < 127; addr++) {
+            Wire.beginTransmission(addr);
+            if (Wire.endTransmission() == 0) {
+                if (!first) json += ",";
+                char hex[7];
+                snprintf(hex, sizeof(hex), "0x%02X", addr);
+                json += "{\"address\":\"" + String(hex) + "\",\"decimal\":" + String(addr) + "}";
+                first = false;
+            }
+        }
+        json += "]";
+        request->send(200, "application/json", json);
     });
 
     _server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
