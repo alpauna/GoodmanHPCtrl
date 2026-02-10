@@ -18,6 +18,7 @@ class MQTTHandler {
     void setController(GoodmanHP* controller);
     void publishTemps();
     void publishState();
+    void publishFault(const char* fault, const char* message, bool active);
     void startReconnect();
     void stopReconnect();
     void disconnect();

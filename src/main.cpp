@@ -118,8 +118,8 @@ OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 
 
-typedef enum AC_STATE { OFF, COOL, HEAT, DEFROST } ACState;
-static String AC_STATE_STR[] = {"OFF", "COOL", "HEAT", "DEFROST"};
+typedef enum AC_STATE { OFF, COOL, HEAT, DEFROST, ERROR } ACState;
+static String AC_STATE_STR[] = {"OFF", "COOL", "HEAT", "DEFROST", "ERROR"};
 static String BOOL_STR[] = {"TRUE", "FALSE"};
 
 ProjectInfo proj = {
@@ -335,6 +335,11 @@ void setup() {
   hpController.setDallasTemperature(&sensors);
   hpController.setStateChangeCallback([](GoodmanHP::State, GoodmanHP::State) {
     mqttHandler.publishState();
+  });
+  hpController.setLPSFaultCallback([](bool active) {
+    mqttHandler.publishFault("LPS",
+        active ? "Low refrigerant pressure" : "Low refrigerant pressure cleared",
+        active);
   });
   hpController.begin();
 

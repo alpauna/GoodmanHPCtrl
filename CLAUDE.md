@@ -83,7 +83,8 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
   - Auto-activates CNT relay when Y input becomes active, with 5-minute short cycle protection: if CNT was off for less than 5 minutes, enforces a 30-second delay before reactivation; if off for 5+ minutes (or never activated), CNT activates immediately
   - **Automatic defrost**: After 90 min accumulated CNT runtime in HEAT mode, initiates software defrost (turn off CNT, turn on RV, turn on CNT). Runs for at least 3 minutes, then exits when CONDENSER_TEMP > 41°F or 15-min safety timeout. Runtime resets on COOL mode or after defrost completes. Runtime persists to SD card every 5 min via `tSaveRuntime` task. If Y drops during defrost, all outputs turn off but `_softwareDefrost` stays set; defrost resumes when Y reactivates in HEAT mode.
   - **DFT emergency defrost**: DFT input triggers the same unified defrost cycle from HEAT mode (same 3-min minimum, 41°F exit, 15-min timeout). Uses the same `_softwareDefrost` path as automatic defrost.
-  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`
+  - **LPS fault protection**: When LPS input goes LOW (low refrigerant pressure), immediately shuts down CNT if running and blocks CNT activation. Auto-recovers when LPS goes HIGH. Publishes fault events via `LPSFaultCallback`. `lpsFault` field included in `goodman/state` MQTT payload.
+  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `isLPSFaultActive()`, `setLPSFaultCallback()`
 - **OutPin** (`OutPin.h/cpp`): Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
 - **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, debouncing via delayed verification (circular buffer queue checked by `_tGetInputs`), and callback on change.
 - **TempSensor** (`TempSensor.h/cpp`): OneWire temperature sensor wrapper with encapsulated state and callbacks:
@@ -110,7 +111,8 @@ OneWire bus: GPIO21
 - **MQTT** (`MQTTHandler` wrapping AsyncMqttClient) to configurable broker, default `192.168.0.46:1883`
   - `goodman/log` — log messages (Logger output)
   - `goodman/temps` — all valid temp sensor values as JSON, published on any sensor change. Format: `{"LINE_TEMP":72.5,"SUCTION_TEMP":65.2,...}`
-  - `goodman/state` — state + inputs/outputs as JSON, published on state transitions. Format: `{"state":"HEAT","inputs":{...},"outputs":{...},"heatRuntimeMin":42,"defrost":false}`
+  - `goodman/state` — state + inputs/outputs as JSON, published on state transitions. Format: `{"state":"HEAT","inputs":{...},"outputs":{...},"heatRuntimeMin":42,"defrost":false,"lpsFault":false}`
+  - `goodman/fault` — fault events as JSON, published when faults activate/clear. Format: `{"fault":"LPS","message":"Low refrigerant pressure","active":true}`
 
 ### Configuration
 
@@ -202,7 +204,7 @@ RTC time is synchronized from NTP servers (`192.168.0.1`, `time.nist.gov`) using
 ### State Machine
 
 ```
-enum AC_STATE { OFF, COOL, HEAT, DEFROST }
+enum AC_STATE { OFF, COOL, HEAT, DEFROST, ERROR }
 ```
 
 ### Control Flow Example

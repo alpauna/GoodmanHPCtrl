@@ -12,8 +12,9 @@
 
 class GoodmanHP {
   public:
-    enum class State { OFF, COOL, HEAT, DEFROST };
+    enum class State { OFF, COOL, HEAT, DEFROST, ERROR };
     typedef std::function<void(State newState, State oldState)> StateChangeCallback;
+    typedef std::function<void(bool active)> LPSFaultCallback;
 
     // Defrost constants
     static const uint32_t HEAT_RUNTIME_THRESHOLD_MS = 90UL * 60 * 1000;  // 90 min
@@ -56,8 +57,10 @@ class GoodmanHP {
     void setHeatRuntimeMs(uint32_t ms);
     void resetHeatRuntime();
     bool isSoftwareDefrostActive() const;
+    bool isLPSFaultActive() const;
 
     void setStateChangeCallback(StateChangeCallback cb);
+    void setLPSFaultCallback(LPSFaultCallback cb);
 
   private:
     Scheduler *_ts;
@@ -82,8 +85,11 @@ class GoodmanHP {
     uint32_t _heatRuntimeLastLogMs;
     bool _softwareDefrost;
     uint32_t _defrostStartTick;
+    bool _lpsFault;
     StateChangeCallback _stateChangeCb;
+    LPSFaultCallback _lpsFaultCb;
 
+    void checkLPSFault();
     void checkYAndActivateCNT();
     void updateState();
     void accumulateHeatRuntime();

@@ -16,6 +16,7 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _heatRuntimeLastLogMs(0)
     , _softwareDefrost(false)
     , _defrostStartTick(0)
+    , _lpsFault(false)
 {
     _instance = this;
     _tskUpdate = new Task(500, TASK_FOREVER, [this]() {
@@ -116,10 +117,33 @@ void GoodmanHP::clearTempSensors() {
 }
 
 void GoodmanHP::update() {
+    checkLPSFault();
     checkYAndActivateCNT();
     accumulateHeatRuntime();
     updateState();
     checkDefrostNeeded();
+}
+
+void GoodmanHP::checkLPSFault() {
+    if (!isLPSActive() && !_lpsFault) {
+        _lpsFault = true;
+        State oldState = _state;
+        _state = State::ERROR;
+        Log.error("HP", "LPS fault: low refrigerant pressure detected");
+        OutPin* cnt = getOutput("CNT");
+        if (cnt != nullptr && cnt->isOn()) {
+            cnt->turnOff();
+            _cntActivated = false;
+            Log.error("HP", "CNT shut down due to LPS fault");
+        }
+        if (_lpsFaultCb) _lpsFaultCb(true);
+        if (_stateChangeCb) _stateChangeCb(State::ERROR, oldState);
+    } else if (isLPSActive() && _lpsFault) {
+        _lpsFault = false;
+        Log.info("HP", "LPS fault cleared: pressure restored");
+        if (_lpsFaultCb) _lpsFaultCb(false);
+        // Don't set _state here — let updateState() determine the correct state
+    }
 }
 
 void GoodmanHP::checkYAndActivateCNT() {
@@ -166,6 +190,7 @@ void GoodmanHP::checkYAndActivateCNT() {
             Log.info("HP", "Y dropped during defrost, system shutdown (defrost pending)");
         }
     } else if (yActive && _yWasActive && !_cntActivated) {
+        if (_lpsFault) return;
         // Check if CNT was off for less than 5 minutes - if so, enforce 30s delay
         uint32_t offElapsed = millis() - cnt->getOffTick();
         if (cnt->getOffTick() > 0 && offElapsed < 5 * 60 * 1000UL) {
@@ -186,6 +211,9 @@ void GoodmanHP::checkYAndActivateCNT() {
 }
 
 void GoodmanHP::updateState() {
+    // Don't compute new state while faulted
+    if (_lpsFault) return;
+
     InputPin* dft = getInput("DFT");
     InputPin* y = getInput("Y");
     InputPin* o = getInput("O");
@@ -218,7 +246,8 @@ void GoodmanHP::updateState() {
         Log.info("HP", "State changed: %s -> %s", getStateString(),
                  newState == State::OFF ? "OFF" :
                  newState == State::COOL ? "COOL" :
-                 newState == State::HEAT ? "HEAT" : "DEFROST");
+                 newState == State::HEAT ? "HEAT" :
+                 newState == State::DEFROST ? "DEFROST" : "ERROR");
         _state = newState;
 
         if (_stateChangeCb) {
@@ -289,6 +318,7 @@ const char* GoodmanHP::getStateString() {
         case State::COOL: return "COOL";
         case State::HEAT: return "HEAT";
         case State::DEFROST: return "DEFROST";
+        case State::ERROR: return "ERROR";
         default: return "UNKNOWN";
     }
 }
@@ -338,8 +368,16 @@ bool GoodmanHP::isSoftwareDefrostActive() const {
     return _softwareDefrost;
 }
 
+bool GoodmanHP::isLPSFaultActive() const {
+    return _lpsFault;
+}
+
 void GoodmanHP::setStateChangeCallback(StateChangeCallback cb) {
     _stateChangeCb = cb;
+}
+
+void GoodmanHP::setLPSFaultCallback(LPSFaultCallback cb) {
+    _lpsFaultCb = cb;
 }
 
 void GoodmanHP::accumulateHeatRuntime() {

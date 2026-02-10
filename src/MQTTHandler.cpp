@@ -96,10 +96,24 @@ void MQTTHandler::publishState() {
 
     doc["heatRuntimeMin"] = _controller->getHeatRuntimeMs() / 60000UL;
     doc["defrost"] = _controller->isSoftwareDefrostActive();
+    doc["lpsFault"] = _controller->isLPSFaultActive();
 
     char buf[384];
     size_t len = serializeJson(doc, buf, sizeof(buf));
     _client.publish("goodman/state", 0, false, buf, len);
+}
+
+void MQTTHandler::publishFault(const char* fault, const char* message, bool active) {
+    if (!_client.connected()) return;
+
+    JsonDocument doc;
+    doc["fault"] = fault;
+    doc["message"] = message;
+    doc["active"] = active;
+
+    char buf[256];
+    size_t len = serializeJson(doc, buf, sizeof(buf));
+    _client.publish("goodman/fault", 0, false, buf, len);
 }
 
 void MQTTHandler::onConnect(bool sessionPresent) {
