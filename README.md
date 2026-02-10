@@ -11,6 +11,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **SD card configuration** — WiFi, MQTT, and sensor settings stored as JSON on SD card
 - **Multi-output logging** — Serial, MQTT, and SD card with tar.gz compressed log rotation
 - **NTP time sync** — Automatic time synchronization from NTP servers, refreshes every 2 hours
+- **I2C bus** — Initialized on GPIO8 (SDA) / GPIO9 (SCL) with automatic device scan at startup and `/i2c/scan` API endpoint
 - **PSRAM support** — All heap allocations routed through PSRAM when available
 - **FreeRTOS compatible** — Uses `vTaskDelay()` instead of `delay()` for proper RTOS task yielding
 
@@ -87,6 +88,8 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | CNT | 5 | Output | Contactor relay (3s delay) |
 | W | 6 | Output | Heating relay |
 | RV | 7 | Output | Reversing valve relay |
+| SDA | 8 | I/O | I2C data |
+| SCL | 9 | I/O | I2C clock |
 | OneWire | 21 | I/O | Temperature sensor bus |
 
 ## Getting Started
@@ -174,6 +177,7 @@ Sensor addresses are discovered automatically on startup and can be mapped to na
 | POST | `/log/level` | Set log level |
 | GET | `/log/config` | Logger output configuration |
 | POST | `/log/config` | Configure logger outputs |
+| GET | `/i2c/scan` | Scan I2C bus for connected devices |
 | GET | `/update` | OTA firmware update page |
 | POST | `/update` | Upload new firmware |
 | WS | `/ws` | WebSocket for real-time data |
