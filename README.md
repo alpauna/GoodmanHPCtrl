@@ -32,22 +32,30 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - `HEAT` — Y input active (heating mode, RV off, W off)
   - `COOL` — Y and O inputs active (cooling mode, RV on, W off)
   - `DEFROST` — DFT emergency defrost or software defrost cycle (W on)
+  - `ERROR` — Fault condition active (LPS low pressure); all outputs shut down, state updates blocked until fault clears
 
 - **Output Control by State:**
   - **RV** (reversing valve): ON in COOL, OFF in HEAT/OFF
   - **W** (auxiliary heat): ON only in DEFROST, OFF in all other modes
   - **CNT** (contactor): auto-activates when Y input becomes active, with short cycle protection: if CNT was off for less than 5 minutes, a 30-second delay is enforced before reactivation; if off for 5+ minutes, CNT activates immediately
 
-- **Automatic Defrost** — After 90 minutes of accumulated CNT runtime in HEAT mode, checks CONDENSER_TEMP:
-  - If < 33°F: initiates software defrost (turns off CNT, turns on RV reversing valve, turns on CNT) until condenser exceeds 42°F
-  - If >= 33°F: schedules recheck every 10 minutes
-  - 15-minute safety timeout forces defrost exit
+- **LPS Fault Protection** — When the LPS (Low Pressure Switch) input goes LOW:
+  - Immediately shuts down CNT if running
+  - Sets state to `ERROR`, blocking all state updates
+  - Blocks CNT activation while fault is active
+  - Auto-recovers when LPS goes HIGH; short-cycle protection (30s delay) is enforced on CNT reactivation
+  - Publishes fault events via MQTT (`goodman/fault` topic)
+
+- **Automatic Defrost** — After 90 minutes of accumulated CNT runtime in HEAT mode, initiates software defrost (turns off CNT, turns on RV, turns on CNT):
+  - Runs for at least 3 minutes before checking exit conditions
+  - Exits when CONDENSER_TEMP > 41°F or 15-minute safety timeout
   - Switching to COOL mode resets accumulated runtime
   - Runtime persists to SD card every 5 minutes, restored on boot
+  - If Y drops during defrost, all outputs turn off but defrost resumes when Y reactivates in HEAT mode
 
-- **DFT Emergency Defrost** — DFT input (external sensor < 41°F) triggers defrost only from HEAT mode:
-  - Enforces 5-minute minimum runtime before checking exit conditions
-  - Exits when CONDENSER_TEMP > 42°F (after minimum) or 15-minute safety timeout
+- **DFT Emergency Defrost** — DFT input triggers the same unified defrost cycle from HEAT mode:
+  - Same 3-minute minimum runtime, 41°F exit condition, 15-minute safety timeout
+  - Uses the same software defrost path as automatic defrost
   - Resets accumulated heat runtime on completion
 
 ### Class Structure
@@ -127,6 +135,10 @@ Place a `config.txt` file on the SD card with the following format:
   "runtime": {
     "heatAccumulatedMs": 0
   },
+  "timezone": {
+    "gmtOffset": -21600,
+    "daylightOffset": 3600
+  },
   "sensors": {
     "temp": {
       "288514B2000000EA": { "description": "AMBIENT_TEMP", "name": "AMBIENT_TEMP" },
@@ -165,6 +177,95 @@ Sensor addresses are discovered automatically on startup and can be mapped to na
 | GET | `/update` | OTA firmware update page |
 | POST | `/update` | Upload new firmware |
 | WS | `/ws` | WebSocket for real-time data |
+
+## MQTT Topics
+
+The controller publishes to a configurable MQTT broker (default `192.168.0.46:1883`). Subscribe with `mosquitto_sub -t "goodman/#"` to receive all topics.
+
+### `goodman/log`
+
+Log messages from the Logger. Published as plain text strings in the format:
+
+```
+[2026/02/10 14:32:01] [INFO] [HP] State changed: OFF -> HEAT
+```
+
+### `goodman/temps`
+
+Temperature sensor readings, published whenever any sensor value changes.
+
+```json
+{
+  "LINE_TEMP": 72.5,
+  "SUCTION_TEMP": 65.2,
+  "AMBIENT_TEMP": 48.1,
+  "CONDENSER_TEMP": 38.7
+}
+```
+
+Only sensors with valid readings are included. Values are in Fahrenheit.
+
+### `goodman/state`
+
+Full controller state, published on every state transition and fault event.
+
+```json
+{
+  "state": "HEAT",
+  "inputs": {
+    "LPS": true,
+    "DFT": false,
+    "Y": true,
+    "O": false
+  },
+  "outputs": {
+    "FAN": true,
+    "CNT": true,
+    "W": false,
+    "RV": false
+  },
+  "heatRuntimeMin": 42,
+  "defrost": false,
+  "lpsFault": false
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `state` | string | Current state: `OFF`, `HEAT`, `COOL`, `DEFROST`, or `ERROR` |
+| `inputs` | object | Input pin active states (true = active) |
+| `outputs` | object | Output pin states (true = on) |
+| `heatRuntimeMin` | number | Accumulated HEAT mode CNT runtime in minutes |
+| `defrost` | bool | Whether a software defrost cycle is active |
+| `lpsFault` | bool | Whether an LPS low-pressure fault is active |
+
+### `goodman/fault`
+
+Fault events, published when a fault activates or clears.
+
+```json
+{
+  "fault": "LPS",
+  "message": "Low refrigerant pressure",
+  "active": true
+}
+```
+
+When the fault clears:
+
+```json
+{
+  "fault": "LPS",
+  "message": "Low refrigerant pressure cleared",
+  "active": false
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `fault` | string | Fault identifier (currently `LPS`) |
+| `message` | string | Human-readable fault description |
+| `active` | bool | `true` when fault activates, `false` when cleared |
 
 ## Build Notes
 
