@@ -613,6 +613,21 @@ bool GoodmanHP::isSuctionLowTempActive() const {
     return _suctionLowTemp;
 }
 
+bool GoodmanHP::isStartupLockoutActive() const {
+    return _startupLockout;
+}
+
+bool GoodmanHP::isShortCycleProtectionActive() const {
+    auto it = _outputMap.find("CNT");
+    if (it == _outputMap.end() || it->second == nullptr) return false;
+    OutPin* cnt = it->second;
+    // Short cycle protection is active when CNT is off, has been off before,
+    // and less than 5 minutes have elapsed since it turned off
+    if (cnt->isPinOn() || cnt->getOffTick() == 0) return false;
+    uint32_t offElapsed = millis() - cnt->getOffTick();
+    return offElapsed < 5UL * 60 * 1000;
+}
+
 void GoodmanHP::setLowTempThreshold(float threshold) {
     _lowTempThreshold = threshold;
     Log.info("HP", "Low temp threshold set to %.1fF", threshold);

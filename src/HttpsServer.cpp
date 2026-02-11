@@ -553,6 +553,8 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     doc["lowTemp"] = ctx->hpController->isLowTempActive();
     doc["compressorOverTemp"] = ctx->hpController->isCompressorOverTempActive();
     doc["suctionLowTemp"] = ctx->hpController->isSuctionLowTempActive();
+    doc["startupLockout"] = ctx->hpController->isStartupLockoutActive();
+    doc["shortCycleProtection"] = ctx->hpController->isShortCycleProtectionActive();
 
     JsonObject temps = doc["temps"].to<JsonObject>();
     for (const auto& m : ctx->hpController->getTempSensorMap()) {

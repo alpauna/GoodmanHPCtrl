@@ -48,6 +48,8 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <div class='card'>
 <h3>Protection Status</h3>
 <div class='fault-row'>
+<span class='pill ok' id='fStartup'>Startup</span>
+<span class='pill ok' id='fShortCycle'>Short Cycle</span>
 <span class='pill ok' id='fDefrost'>Defrost</span>
 <span class='pill ok' id='fLPS'>LPS Fault</span>
 <span class='pill ok' id='fLowTemp'>Low Temp</span>
@@ -119,7 +121,9 @@ function update(d){
   var mins=rt%60;
   setText('stateRuntime','Heat Runtime: '+(hrs>0?hrs+'h ':'')+mins+'m');
 
-  // Faults
+  // Faults / Protection
+  setPill('fStartup',d.startupLockout);
+  setPill('fShortCycle',d.shortCycleProtection);
   setPill('fDefrost',d.defrost);
   setPill('fLPS',d.lpsFault);
   setPill('fLowTemp',d.lowTemp);

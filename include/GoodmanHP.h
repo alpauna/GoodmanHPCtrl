@@ -80,6 +80,9 @@ class GoodmanHP {
     void setLowTempThreshold(float threshold);
     float getLowTempThreshold() const;
 
+    bool isStartupLockoutActive() const;
+    bool isShortCycleProtectionActive() const;
+
     void setStateChangeCallback(StateChangeCallback cb);
     void setLPSFaultCallback(LPSFaultCallback cb);
 

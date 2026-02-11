@@ -272,6 +272,8 @@ void WebHandler::setupRoutes() {
         doc["lowTemp"] = _hpController->isLowTempActive();
         doc["compressorOverTemp"] = _hpController->isCompressorOverTempActive();
         doc["suctionLowTemp"] = _hpController->isSuctionLowTempActive();
+        doc["startupLockout"] = _hpController->isStartupLockoutActive();
+        doc["shortCycleProtection"] = _hpController->isShortCycleProtectionActive();
 
         JsonObject temps = doc["temps"].to<JsonObject>();
         for (const auto& m : _hpController->getTempSensorMap()) {
