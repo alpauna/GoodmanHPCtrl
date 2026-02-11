@@ -126,6 +126,8 @@ function update(d){
 
   // Faults / Protection
   setPill('fStartup',d.startupLockout);
+  var su=document.getElementById('fStartup');
+  if(su){var sec=d.startupLockoutRemainSec||0;var m=Math.ceil(sec/60);su.textContent=d.startupLockout?'Startup Protect: '+m+'m':'Startup Protect';}
   setPill('fShortCycle',d.shortCycleProtection);
   setPill('fDefrost',d.defrost);
   setPill('fLPS',d.lpsFault);

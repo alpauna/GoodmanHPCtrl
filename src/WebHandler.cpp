@@ -273,6 +273,7 @@ void WebHandler::setupRoutes() {
         doc["compressorOverTemp"] = _hpController->isCompressorOverTempActive();
         doc["suctionLowTemp"] = _hpController->isSuctionLowTempActive();
         doc["startupLockout"] = _hpController->isStartupLockoutActive();
+        doc["startupLockoutRemainSec"] = _hpController->getStartupLockoutRemainingMs() / 1000;
         doc["shortCycleProtection"] = _hpController->isShortCycleProtectionActive();
 
         JsonObject temps = doc["temps"].to<JsonObject>();

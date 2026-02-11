@@ -554,6 +554,7 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     doc["compressorOverTemp"] = ctx->hpController->isCompressorOverTempActive();
     doc["suctionLowTemp"] = ctx->hpController->isSuctionLowTempActive();
     doc["startupLockout"] = ctx->hpController->isStartupLockoutActive();
+    doc["startupLockoutRemainSec"] = ctx->hpController->getStartupLockoutRemainingMs() / 1000;
     doc["shortCycleProtection"] = ctx->hpController->isShortCycleProtectionActive();
 
     JsonObject temps = doc["temps"].to<JsonObject>();

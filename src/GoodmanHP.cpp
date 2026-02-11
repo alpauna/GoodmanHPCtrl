@@ -617,6 +617,13 @@ bool GoodmanHP::isStartupLockoutActive() const {
     return _startupLockout;
 }
 
+uint32_t GoodmanHP::getStartupLockoutRemainingMs() const {
+    if (!_startupLockout) return 0;
+    uint32_t elapsed = millis() - _startupTick;
+    if (elapsed >= STARTUP_LOCKOUT_MS) return 0;
+    return STARTUP_LOCKOUT_MS - elapsed;
+}
+
 bool GoodmanHP::isShortCycleProtectionActive() const {
     auto it = _outputMap.find("CNT");
     if (it == _outputMap.end() || it->second == nullptr) return false;

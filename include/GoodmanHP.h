@@ -81,6 +81,7 @@ class GoodmanHP {
     float getLowTempThreshold() const;
 
     bool isStartupLockoutActive() const;
+    uint32_t getStartupLockoutRemainingMs() const;
     bool isShortCycleProtectionActive() const;
 
     void setStateChangeCallback(StateChangeCallback cb);
