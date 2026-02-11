@@ -93,6 +93,15 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 </div>
 </div>
 
+<div class='card'>
+<h3>System</h3>
+<div class='grid'>
+<div class='indicator'><span class='label'>CPU 0</span><span class='val' id='vCpu0'>--%</span></div>
+<div class='indicator'><span class='label'>CPU 1</span><span class='val' id='vCpu1'>--%</span></div>
+<div class='indicator'><span class='label'>Heap</span><span class='val' id='vHeap'>--</span></div>
+</div>
+</div>
+
 <div class='card chart-card'>
 <h3><span>Temperature History</span>
 <select id='timeRange'>
@@ -189,6 +198,11 @@ function update(d){
     }
   }
   tc.innerHTML=html;
+
+  // System
+  setText('vCpu0',d.cpuLoad0!==undefined?d.cpuLoad0+'%':'--%');
+  setText('vCpu1',d.cpuLoad1!==undefined?d.cpuLoad1+'%':'--%');
+  if(d.freeHeap!==undefined){var kb=Math.round(d.freeHeap/1024);setText('vHeap',kb+'KB');}
 
   // Footer
   var now=new Date();

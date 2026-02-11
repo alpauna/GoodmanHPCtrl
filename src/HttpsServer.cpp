@@ -15,6 +15,9 @@
 #include "GoodmanHP.h"
 #include "Logger.h"
 
+extern uint8_t getCpuLoadCore0();
+extern uint8_t getCpuLoadCore1();
+
 // --- HTTPS Basic Auth helper ---
 
 static bool checkHttpsAuth(httpd_req_t* req) {
@@ -638,6 +641,8 @@ static esp_err_t heapGetHandler(httpd_req_t* req) {
     json += "\"free heap\":" + String(ESP.getFreeHeap());
     json += ",\"free psram MB\":" + String(ESP.getFreePsram() * MB);
     json += ",\"used psram MB\":" + String((ESP.getPsramSize() - ESP.getFreePsram()) * MB);
+    json += ",\"cpuLoad0\":" + String(getCpuLoadCore0());
+    json += ",\"cpuLoad1\":" + String(getCpuLoadCore1());
     json += "}";
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json.c_str(), json.length());
@@ -672,6 +677,9 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     doc["startupLockout"] = ctx->hpController->isStartupLockoutActive();
     doc["startupLockoutRemainSec"] = ctx->hpController->getStartupLockoutRemainingMs() / 1000;
     doc["shortCycleProtection"] = ctx->hpController->isShortCycleProtectionActive();
+    doc["cpuLoad0"] = getCpuLoadCore0();
+    doc["cpuLoad1"] = getCpuLoadCore1();
+    doc["freeHeap"] = ESP.getFreeHeap();
 
     JsonObject temps = doc["temps"].to<JsonObject>();
     for (const auto& m : ctx->hpController->getTempSensorMap()) {

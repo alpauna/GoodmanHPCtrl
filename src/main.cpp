@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <esp_freertos_hooks.h>
 #include <ArxContainer.h>
 #include <OneWire.h>
 #include <WiFiServer.h>
@@ -75,6 +76,20 @@ u_int32_t _nextIdlePrintTime = 0;
 u_int32_t _idleLoopCount = 0;
 u_int32_t _workLoopCount = 0;
 volatile bool InISR, InitialPinStateSet, FinalPinSetState;
+
+// CPU load monitoring via FreeRTOS idle hooks
+static volatile uint32_t _idleCountCore0 = 0;
+static volatile uint32_t _idleCountCore1 = 0;
+static uint32_t _maxIdleCore0 = 0;
+static uint32_t _maxIdleCore1 = 0;
+static uint8_t _cpuLoadCore0 = 0;
+static uint8_t _cpuLoadCore1 = 0;
+
+static bool idleHookCore0() { _idleCountCore0++; return false; }
+static bool idleHookCore1() { _idleCountCore1++; return false; }
+
+uint8_t getCpuLoadCore0() { return _cpuLoadCore0; }
+uint8_t getCpuLoadCore1() { return _cpuLoadCore1; }
 
 u_int32_t _wifiStartMillis = 0;
 
@@ -188,6 +203,10 @@ void onLogTempsCSV();
 void cleanOldTempFiles(int maxAgeDays);
 Task tLogTempsCSV(30 * TASK_SECOND, TASK_FOREVER, &onLogTempsCSV, &ts, false);
 static char _tempsCsvDate[12] = "";
+
+// CPU load calculation every 1 second
+void onCalcCpuLoad();
+Task tCpuLoad(TASK_SECOND, TASK_FOREVER, &onCalcCpuLoad, &ts, false);
 
 
 
@@ -471,6 +490,10 @@ void setup() {
   tSaveRuntime.enable();
   tLogTempsCSV.enable();
 
+  esp_register_freertos_idle_hook_for_cpu(idleHookCore0, 0);
+  esp_register_freertos_idle_hook_for_cpu(idleHookCore1, 1);
+  tCpuLoad.enable();
+
   Log.info("MAIN", "Starting Main Loop");
 }
 
@@ -515,6 +538,35 @@ void onSaveRuntime(){
       Log.debug("MAIN", "Heat runtime saved: %lu ms", runtimeMs);
     }
   }
+}
+
+static uint8_t _cpuLoadWarmup = 15; // Skip first 15s (WiFi/MQTT/NTP settle)
+
+void onCalcCpuLoad() {
+  uint32_t count0 = _idleCountCore0;
+  uint32_t count1 = _idleCountCore1;
+  _idleCountCore0 = 0;
+  _idleCountCore1 = 0;
+
+  if (_cpuLoadWarmup > 0) {
+    _cpuLoadWarmup--;
+    // Seed max with highest count seen during warmup
+    if (count0 > _maxIdleCore0) _maxIdleCore0 = count0;
+    if (count1 > _maxIdleCore1) _maxIdleCore1 = count1;
+    return;
+  }
+
+  // New highs update max immediately
+  if (count0 > _maxIdleCore0) _maxIdleCore0 = count0;
+  if (count1 > _maxIdleCore1) _maxIdleCore1 = count1;
+
+  // Raw load for this second
+  uint8_t raw0 = (_maxIdleCore0 > 0) ? 100 - (count0 * 100 / _maxIdleCore0) : 0;
+  uint8_t raw1 = (_maxIdleCore1 > 0) ? 100 - (count1 * 100 / _maxIdleCore1) : 0;
+
+  // EMA smoothing: 25% new + 75% old
+  _cpuLoadCore0 = (_cpuLoadCore0 * 3 + raw0 + 2) / 4;
+  _cpuLoadCore1 = (_cpuLoadCore1 * 3 + raw1 + 2) / 4;
 }
 
 // Sensor key → CSV directory name mapping
@@ -702,6 +754,7 @@ void loop() {
   if (bIdle) {
     _idleLoopCount++;
     printIdleStatus();
+    vTaskDelay(1); // Yield to FreeRTOS so idle hooks can fire
   } else {
     _workLoopCount++;
   }

@@ -4,6 +4,9 @@
 #include "TempSensor.h"
 #include "OtaUtils.h"
 
+extern uint8_t getCpuLoadCore0();
+extern uint8_t getCpuLoadCore1();
+
 WebHandler::WebHandler(uint16_t port, Scheduler* ts, GoodmanHP* hpController)
     : _server(port), _ws("/ws"), _ts(ts), _hpController(hpController),
       _config(nullptr), _shouldReboot(false), _tDelayedReboot(nullptr),
@@ -313,6 +316,8 @@ void WebHandler::setupRoutes() {
         json += "\"free heap\":" + String(ESP.getFreeHeap());
         json += ",\"free psram MB\":" + String(ESP.getFreePsram() * MB_MULTIPLIER);
         json += ",\"used psram MB\":" + String((ESP.getPsramSize() - ESP.getFreePsram()) * MB_MULTIPLIER);
+        json += ",\"cpuLoad0\":" + String(getCpuLoadCore0());
+        json += ",\"cpuLoad1\":" + String(getCpuLoadCore1());
         json += "}";
         request->send(200, "application/json", json);
     });
@@ -342,6 +347,9 @@ void WebHandler::setupRoutes() {
         doc["startupLockout"] = _hpController->isStartupLockoutActive();
         doc["startupLockoutRemainSec"] = _hpController->getStartupLockoutRemainingMs() / 1000;
         doc["shortCycleProtection"] = _hpController->isShortCycleProtectionActive();
+        doc["cpuLoad0"] = getCpuLoadCore0();
+        doc["cpuLoad1"] = getCpuLoadCore1();
+        doc["freeHeap"] = ESP.getFreeHeap();
 
         JsonObject temps = doc["temps"].to<JsonObject>();
         for (const auto& m : _hpController->getTempSensorMap()) {
