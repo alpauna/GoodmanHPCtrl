@@ -8,7 +8,9 @@
 
 set -e
 
-KEY_FILE="efuse_hmac_key.bin"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$SCRIPT_DIR/.."
+KEY_FILE="$PROJECT_DIR/efuse_hmac_key.bin"
 PORT="${1:-/dev/ttyUSB0}"
 CHIP="esp32s3"
 

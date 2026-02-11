@@ -278,7 +278,7 @@ The device runs a secondary HTTPS server (ESP-IDF `esp_https_server`) on port 44
 **Generate a self-signed certificate:**
 
 ```bash
-./generate_cert.sh
+./scripts/generate-cert.sh
 ```
 
 This creates `cert.pem` and `key.pem` (ECC P-256, 10-year validity). Copy both to the SD card root. If no certificates are found, all endpoints fall back to HTTP.
@@ -299,7 +299,7 @@ WiFi and MQTT passwords are encrypted at rest on the SD card using AES-256-GCM. 
 **One-time eFuse key provisioning:**
 
 ```bash
-./burn_efuse_key.sh [/dev/ttyUSB0]
+./scripts/burn-efuse-key.sh [/dev/ttyUSB0]
 ```
 
 This permanently burns a random 256-bit HMAC key to eFuse BLOCK_KEY0. The firmware uses `esp_hmac_calculate()` to derive AES keys from this hardware secret. Plaintext passwords on the SD card are automatically encrypted on the next config save. If no eFuse key is provisioned, passwords are stored in plaintext.
@@ -326,8 +326,9 @@ This script prompts for the device IP and admin password, enables FTP for 10 min
 |--------|-------------|
 | `scripts/configure.sh` | Configure WiFi/MQTT credentials. `--local` writes `config.txt` for SD card; without flag, pushes config to device via HTTPS API |
 | `scripts/update-www.sh` | Upload HTML files from `data/www/` to device SD card via FTP (auto-enables FTP for 10 min) |
-| `generate_cert.sh` | Generate self-signed ECC P-256 certificate for HTTPS (`cert.pem` + `key.pem`) |
-| `burn_efuse_key.sh` | Burn random 256-bit HMAC key to ESP32-S3 eFuse BLOCK_KEY0 for AES-256-GCM encryption (irreversible) |
+| `scripts/ota-update.sh` | OTA firmware update via HTTPS: upload to SD, verify, apply, wait for reboot. `--revert` to roll back |
+| `scripts/generate-cert.sh` | Generate self-signed ECC P-256 certificate for HTTPS (`cert.pem` + `key.pem`) |
+| `scripts/burn-efuse-key.sh` | Burn random 256-bit HMAC key to ESP32-S3 eFuse BLOCK_KEY0 for AES-256-GCM encryption (irreversible) |
 
 ## API Endpoints
 
