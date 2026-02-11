@@ -324,6 +324,9 @@ void setup() {
   sprintf((char *)acc_data_all, "Test %d", millis());
   sensors.begin();
 
+  // Set obfuscation key before loading config so passwords are properly decoded
+  Config::setObfuscationKey("GoodmanHP-ESP32-ObfKey");
+
   // Initialize config and load from SD card
   config.setTempSensorDiscoveryCallback([](TempSensorMap& tempMap) {
     getTempSensors(tempMap);
@@ -353,7 +356,6 @@ void setup() {
   connectToWifi();
 
   config.setProjectInfo(&proj);
-  Config::setObfuscationKey(compile_date);
   webHandler.setConfig(&config);
   webHandler.setTimezone(proj.gmtOffsetSec, proj.daylightOffsetSec);
 
