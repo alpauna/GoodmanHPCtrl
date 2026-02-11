@@ -2,6 +2,15 @@
 
 ESP32-based controller for Goodman heatpumps with support for cooling, heating, and defrost modes.
 
+## Web Interface
+
+| Page | Screenshot |
+|------|-----------|
+| Home | ![Home](docs/screenshots/home.png) |
+| Dashboard | ![Dashboard](docs/screenshots/dashboard.png) |
+| Configuration | ![Configuration](docs/screenshots/config.png) |
+| OTA Update | ![OTA Update](docs/screenshots/update.png) |
+
 ## Features
 
 - **Relay control** — 4 output pins (FAN, Contactor, W-Heat, Reversing Valve) driven by 4 input signals (Low Pressure Switch, Defrost, Y-Cool, O-Heat)
@@ -10,9 +19,11 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **HTTPS/SSL** — Self-signed ECC P-256 certificate on port 443 for secure `/config`, `/update`, and `/ftp` endpoints. Graceful fallback to HTTP-only if no certs found on SD card
 - **Admin password protection** — Salted SHA-256 hashed admin password with HTTP Basic Auth on sensitive endpoints (`/config`, `/update`, `/ftp`). No password = open access
 - **AES-256-GCM password encryption** — WiFi and MQTT passwords encrypted at rest on SD card using hardware-derived keys from ESP32 eFuse HMAC peripheral. Auto-migrates from legacy XOR format
+- **Live dashboard** — Real-time dashboard at `/dashboard` with state banner, protection status pills (startup lockout countdown, short cycle), input/output grid, temperatures, and reboot button
+- **Temperature history** — CSV logging every 30s per sensor to SD card (`/temps/<sensor>/YYYY-MM-DD.csv`), rolling Canvas line charts on dashboard with 1h/6h/24h/7d timeframe selector, auto-purge after 31 days
 - **Web-based configuration** — HTML pages served from `/www/` on SD card for configuration, OTA updates, and monitoring
 - **FTP server** — SimpleFTPServer with timed enable/disable (10/30/60 min) from config page. Defaults to OFF; auto-disables after timeout
-- **OTA updates** — Firmware upload via web interface
+- **OTA updates** — Firmware upload saves to SD card (`/firmware.new`), then apply to flash. Supports revert to previous firmware from SD backup
 - **SD card configuration** — WiFi, MQTT, and sensor settings stored as JSON on SD card
 - **Multi-output logging** — Serial, MQTT, SD card with tar.gz compressed log rotation, and WebSocket streaming
 - **In-memory log buffer** — 500-entry ring buffer in PSRAM, accessible via `/log` API endpoint
@@ -183,12 +194,14 @@ pio run -t monitor -e freenove_esp32_s3_wroom
 The SD card should contain:
 
 ```
-/config.txt          — Device configuration (WiFi, MQTT, sensors, admin password)
-/www/index.html      — Home page
-/www/config.html     — Configuration page
-/www/update.html     — OTA update page
-/cert.pem            — HTTPS certificate (optional, see below)
-/key.pem             — HTTPS private key (optional, see below)
+/config.txt              — Device configuration (WiFi, MQTT, sensors, admin password)
+/www/index.html          — Home page
+/www/dashboard.html      — Live dashboard with charts
+/www/config.html         — Configuration page
+/www/update.html         — OTA update page
+/cert.pem                — HTTPS certificate (optional, see below)
+/key.pem                 — HTTPS private key (optional, see below)
+/temps/<sensor>/*.csv    — Temperature history CSVs (auto-created)
 ```
 
 **Generate config.txt interactively:**
@@ -269,6 +282,14 @@ This prompts for WiFi and MQTT credentials and writes `data/config.txt`. Copy it
 - Message format: `{"type":"log","message":"[2026/02/10 14:32:01] [INFO ] [HP] ..."}`
 - Enabled by default; toggle via `POST /log/config?websocket=true|false`
 
+**Temperature history CSV logging:**
+- Logs all 5 temperature sensors (ambient, compressor, suction, condenser, liquid) every 30 seconds
+- Per-sensor CSV files: `/temps/<sensor>/YYYY-MM-DD.csv` (e.g., `/temps/ambient/2026-02-11.csv`)
+- CSV format (no header): `epoch_seconds,temperature_fahrenheit`
+- ~56 KB/day per sensor, ~8.5 MB/month total across all sensors
+- Auto-purges CSV files older than 31 days
+- Access via `GET /temps/history?sensor=<name>` API endpoint
+
 Sensor addresses are discovered automatically on startup and can be mapped to names via this config.
 
 ### HTTPS / SSL
@@ -335,7 +356,10 @@ This script prompts for the device IP and admin password, enables FTP for 10 min
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/` | | Home page (served from SD `/www/index.html`) |
+| GET | `/dashboard` | | Live dashboard with state, I/O, temps, and charts |
+| GET | `/state` | | Full controller state as JSON (see below) |
 | GET | `/temps` | | Current temperature readings |
+| GET | `/temps/history` | | Temperature history CSV data (`?sensor=<name>`, optional `&date=YYYY-MM-DD`) |
 | GET | `/heap` | | Memory/heap statistics |
 | GET | `/scan` | | WiFi network scan |
 | GET | `/log` | | Recent log entries from ring buffer (`?limit=N`) |
@@ -347,12 +371,72 @@ This script prompts for the device IP and admin password, enables FTP for 10 min
 | GET | `/config` | Yes | Configuration page / JSON (`?format=json`) |
 | POST | `/config` | Yes | Update configuration (JSON body) |
 | GET | `/update` | Yes | OTA firmware update page |
-| POST | `/update` | Yes | Upload new firmware |
+| POST | `/update` | Yes | Upload new firmware (saved to SD as `/firmware.new`) |
+| GET | `/apply` | Yes | Check if uploaded firmware exists (`{"exists":bool,"size":N}`) |
+| POST | `/apply` | Yes | Flash firmware from `/firmware.new`, reboots on success |
+| GET | `/revert` | Yes | Check if firmware backup exists (`{"exists":bool,"size":N}`) |
+| POST | `/revert` | Yes | Revert to previous firmware from SD backup, reboots on success |
+| POST | `/reboot` | Yes | Reboot the device (2s delay) |
 | GET | `/ftp` | Yes | FTP server status (`{"active":bool,"remainingMinutes":N}`) |
 | POST | `/ftp` | Yes | Enable/disable FTP (`{"duration":N}` minutes, 0=off) |
 | WS | `/ws` | | WebSocket for real-time data and log streaming |
 
 **Auth** = Requires HTTP Basic Auth when admin password is set. Endpoints marked with "Yes" redirect to HTTPS (port 443) when SSL certificates are available.
+
+### `GET /state`
+
+Returns the full controller state as JSON. Used by the dashboard for real-time polling.
+
+```json
+{
+  "state": "HEAT",
+  "inputs": { "LPS": true, "DFT": false, "Y": true, "O": false },
+  "outputs": { "FAN": true, "CNT": true, "W": false, "RV": false },
+  "heatRuntimeMin": 42,
+  "defrost": false,
+  "lpsFault": false,
+  "lowTemp": false,
+  "compressorOverTemp": false,
+  "suctionLowTemp": false,
+  "startupLockout": false,
+  "startupLockoutRemainSec": 0,
+  "shortCycleProtection": false,
+  "temps": { "AMBIENT_TEMP": 48.1, "COMPRESSOR_TEMP": 72.5, "SUCTION_TEMP": 65.2, "CONDENSER_TEMP": 38.7, "LIQUID_TEMP": 185.3 }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `startupLockout` | bool | Whether the 5-minute startup lockout is active |
+| `startupLockoutRemainSec` | number | Seconds remaining in startup lockout (0 when inactive) |
+| `shortCycleProtection` | bool | Whether short-cycle protection delay is active on CNT |
+
+### `GET /temps/history`
+
+Returns temperature history CSV data for a specific sensor. Requires `?sensor=` parameter.
+
+**List available files:**
+```
+GET /temps/history?sensor=ambient
+→ {"files":[{"date":"2026-02-11","size":56000},{"date":"2026-02-10","size":55800}]}
+```
+
+**Download a day's CSV:**
+```
+GET /temps/history?sensor=ambient&date=2026-02-11
+→ 1739318400,48.1
+  1739318430,48.2
+  ...
+```
+
+Valid sensor names: `ambient`, `compressor`, `suction`, `condenser`, `liquid`
+
+### OTA Firmware Update Workflow
+
+1. `POST /update` — Upload firmware binary (saved to SD card as `/firmware.new`)
+2. `GET /apply` — Verify uploaded firmware exists and check size
+3. `POST /apply` — Flash firmware from SD to ESP32, reboots automatically
+4. `POST /revert` — Roll back to previous firmware (backup created during apply)
 
 ## MQTT Topics
 
@@ -406,7 +490,10 @@ Full controller state, published on every state transition, fault event, and com
   "lpsFault": false,
   "lowTemp": false,
   "compressorOverTemp": false,
-  "suctionLowTemp": false
+  "suctionLowTemp": false,
+  "startupLockout": false,
+  "startupLockoutRemainSec": 0,
+  "shortCycleProtection": false
 }
 ```
 
@@ -421,6 +508,9 @@ Full controller state, published on every state transition, fault event, and com
 | `lowTemp` | bool | Whether ambient temperature is below the low-temp threshold |
 | `compressorOverTemp` | bool | Whether compressor temperature exceeds 240°F threshold |
 | `suctionLowTemp` | bool | Whether suction temperature is critically low in COOL mode (< 32°F) |
+| `startupLockout` | bool | Whether the 5-minute startup lockout is active |
+| `startupLockoutRemainSec` | number | Seconds remaining in startup lockout (0 when inactive) |
+| `shortCycleProtection` | bool | Whether short-cycle protection delay is active on CNT |
 
 ### `goodman/fault`
 
