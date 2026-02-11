@@ -529,10 +529,10 @@ void WebHandler::setupRoutes() {
             AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", _shouldReboot ? "OK" : "FAIL");
             response->addHeader("Connection", "close");
             request->send(response);
-        }, [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-            if (!index) {
-                Log.info("OTA", "Update Start: %s", filename.c_str());
-                if (!Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000)) {
+        }, nullptr, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+            if (index == 0) {
+                Log.info("OTA", "Update Start: %u bytes", total);
+                if (!Update.begin(total)) {
                     Log.error("OTA", "Update.begin failed");
                     Update.printError(Serial);
                 }
@@ -542,7 +542,7 @@ void WebHandler::setupRoutes() {
                     Update.printError(Serial);
                 }
             }
-            if (final) {
+            if (index + len == total) {
                 if (Update.end(true)) {
                     Log.info("OTA", "OTA Update Successful");
                 } else {
