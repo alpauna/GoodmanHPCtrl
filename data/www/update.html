@@ -126,6 +126,10 @@ uploadBtn.addEventListener('click',function(){
     }
   };
 
+  xhr.upload.onload=function(){
+    status.textContent='Backing up and flashing firmware...';
+  };
+
   xhr.onload=function(){
     if(xhr.status===200&&xhr.responseText==='OK'){
       progress.value=100;
