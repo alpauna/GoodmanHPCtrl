@@ -87,6 +87,28 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - Runtime persists to SD card every 5 minutes, restored on boot
   - If Y drops during defrost, all outputs turn off but defrost resumes when Y reactivates in HEAT mode
 
+### State Table
+
+| State | Condition | FAN | CNT | RV | W | Notes |
+|-------|-----------|-----|-----|----|---|-------|
+| `OFF` | Y inactive | OFF | OFF | OFF | OFF | All outputs off |
+| `HEAT` | Y active, O inactive | ON | ON | OFF | OFF | CNT has 30s short-cycle protection |
+| `COOL` | Y active, O active | ON | ON | ON | OFF | Will not operate below 20°F |
+| `DEFROST` | Software defrost active, Y active | OFF | ON | ON | ON | 3-min minimum, exits at condenser > 60°F or 15-min timeout |
+| `ERROR` | LPS fault (low pressure) | OFF | OFF | OFF | ON* | *W on only in HEAT mode (Y active, O inactive) |
+| `LOW_TEMP` | Ambient < 20°F | OFF | OFF | OFF | ON* | *W on only in HEAT mode; W turns off if thermostat switches to COOL (Y+O) |
+
+**Fault Conditions** (overlay on current state, block CNT activation):
+
+| Fault | Condition | Trigger | Recovery | FAN | CNT | Priority |
+|-------|-----------|---------|----------|-----|-----|----------|
+| Compressor overtemp | COMPRESSOR_TEMP ≥ 240°F | Any mode | Temp < 190°F | ON | OFF | 1 (highest) |
+| Suction low temp | SUCTION_TEMP < 32°F | COOL mode only | Temp > 40°F | ON | OFF | 2 |
+| LPS fault | LPS input LOW | Any mode | LPS goes HIGH | OFF | OFF | 3 |
+| Low ambient temp | AMBIENT_TEMP < 20°F | Any mode | Temp ≥ 20°F | OFF | OFF | 4 |
+
+**Fault Priority:** Compressor overtemp > Suction low temp > LPS fault > Low ambient temp. Higher-priority faults take precedence; lower-priority checks are skipped while a higher-priority fault is active.
+
 ### Class Structure
 
 | Class | Purpose |
