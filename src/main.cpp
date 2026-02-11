@@ -373,23 +373,28 @@ void setup() {
   webHandler.setConfig(&config);
   webHandler.setTimezone(proj.gmtOffsetSec, proj.daylightOffsetSec);
 
-  // Initialize Arduino's SD library alongside SdFat for FTP (both share the same SPI card)
-  bool sdForFtp = config.isSDCardInitialized() && SD.begin(SS);
+  // FTP uses Arduino's SD library; SD.begin()/end() called on demand to avoid
+  // conflicting with SdFat which owns the SPI bus for normal file serving.
+  bool sdCardReady = config.isSDCardInitialized();
 
   // FTP control callbacks
   webHandler.setFtpControl(
-    // Enable callback
-    [sdForFtp](int durationMin) {
-      if (!sdForFtp) return;
+    // Enable callback — release SdFat, start Arduino SD + FTP
+    [sdCardReady](int durationMin) {
+      if (!sdCardReady) return;
+      config.getSd()->end();
+      SD.begin(SS);
       ftpSrv.begin("admin", "admin");
       ftpActive = true;
       ftpStopTime = millis() + ((unsigned long)durationMin * 60000UL);
       Log.info("FTP", "FTP enabled for %d minutes", durationMin);
     },
-    // Disable callback
+    // Disable callback — stop FTP + release SD, re-init SdFat
     []() {
       if (ftpActive) {
         ftpSrv.end();
+        SD.end();
+        config.getSd()->begin(SS, SD_SCK_MHZ(25));
         ftpActive = false;
         ftpStopTime = 0;
         Log.info("FTP", "FTP disabled");
@@ -419,7 +424,11 @@ void setup() {
   webHandler.begin();
 
   // Conditional FTP startup: only auto-start if no admin password is set
-  if (sdForFtp && !config.hasAdminPassword()) {
+  // NOTE: While FTP is active, SD card web pages won't load (SPI bus conflict).
+  // Set an admin password to disable FTP and restore web page serving.
+  if (sdCardReady && !config.hasAdminPassword()) {
+    config.getSd()->end();
+    SD.begin(SS);
     ftpSrv.begin("admin", "admin");
     ftpActive = true;
     ftpStopTime = 0;  // Unlimited until admin password is set
@@ -590,6 +599,8 @@ void loop() {
 
   if (ftpActive && ftpStopTime > 0 && millis() >= ftpStopTime) {
     ftpSrv.end();
+    SD.end();
+    config.getSd()->begin(SS, SD_SCK_MHZ(25));
     ftpActive = false;
     ftpStopTime = 0;
     Log.info("FTP", "FTP auto-disabled (timeout)");
