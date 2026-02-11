@@ -461,6 +461,76 @@ static esp_err_t ftpPostHandler(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// --- Heap handler ---
+
+static esp_err_t heapGetHandler(httpd_req_t* req) {
+    static constexpr float MB = 1.0f / (1024.0f * 1024.0f);
+    String json = "{";
+    json += "\"free heap\":" + String(ESP.getFreeHeap());
+    json += ",\"free psram MB\":" + String(ESP.getFreePsram() * MB);
+    json += ",\"used psram MB\":" + String((ESP.getPsramSize() - ESP.getFreePsram()) * MB);
+    json += "}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
+// --- Root/index handler ---
+
+static esp_err_t rootGetHandler(httpd_req_t* req) {
+    return serveFileHttps(req, "/www/index.html");
+}
+
+// --- Log handler (proxy to ring buffer) ---
+
+static esp_err_t logGetHandler(httpd_req_t* req) {
+    size_t count = Log.getRingBufferCount();
+    size_t limit = count;
+
+    size_t qLen = httpd_req_get_url_query_len(req);
+    if (qLen > 0) {
+        char* qBuf = (char*)malloc(qLen + 1);
+        if (qBuf && httpd_req_get_url_query_str(req, qBuf, qLen + 1) == ESP_OK) {
+            char val[16] = {};
+            if (httpd_query_key_value(qBuf, "limit", val, sizeof(val)) == ESP_OK) {
+                size_t l = atoi(val);
+                if (l < limit) limit = l;
+            }
+        }
+        free(qBuf);
+    }
+
+    const auto& buffer = Log.getRingBuffer();
+    size_t head = Log.getRingBufferHead();
+    size_t bufSize = buffer.size();
+    size_t startOffset = count - limit;
+
+    String json = "{\"count\":" + String(limit) + ",\"entries\":[";
+    for (size_t i = 0; i < limit; i++) {
+        size_t idx = (head + bufSize - count + startOffset + i) % bufSize;
+        if (i > 0) json += ",";
+        json += "\"";
+        const String& entry = buffer[idx];
+        for (size_t j = 0; j < entry.length(); j++) {
+            char c = entry[j];
+            switch (c) {
+                case '"':  json += "\\\""; break;
+                case '\\': json += "\\\\"; break;
+                case '\n': json += "\\n"; break;
+                case '\r': json += "\\r"; break;
+                case '\t': json += "\\t"; break;
+                default:   json += c; break;
+            }
+        }
+        json += "\"";
+    }
+    json += "]}";
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
 // --- Public API ---
 
 HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
@@ -472,6 +542,7 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
     cfg.prvtkey_pem = key;
     cfg.prvtkey_len = keyLen + 1;
     cfg.port_secure = 443;
+    cfg.httpd.max_uri_handlers = 16;
 
     httpd_handle_t server = nullptr;
     esp_err_t err = httpd_ssl_start(&server, &cfg);
@@ -481,6 +552,14 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
     }
 
     // Register URI handlers
+    httpd_uri_t rootGet = {
+        .uri = "/",
+        .method = HTTP_GET,
+        .handler = rootGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &rootGet);
+
     httpd_uri_t cfgGet = {
         .uri = "/config",
         .method = HTTP_GET,
@@ -528,6 +607,22 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &ftpPost);
+
+    httpd_uri_t logGet = {
+        .uri = "/log",
+        .method = HTTP_GET,
+        .handler = logGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &logGet);
+
+    httpd_uri_t heapGet = {
+        .uri = "/heap",
+        .method = HTTP_GET,
+        .handler = heapGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &heapGet);
 
     Log.info("HTTPS", "HTTPS server started on port 443");
     return (HttpsServerHandle)server;

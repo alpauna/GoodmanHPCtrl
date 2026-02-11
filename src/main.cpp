@@ -394,10 +394,13 @@ void setup() {
       if (ftpActive) {
         ftpSrv.end();
         SD.end();
-        config.getSd()->begin(SS, SD_SCK_MHZ(25));
         ftpActive = false;
         ftpStopTime = 0;
-        Log.info("FTP", "FTP disabled");
+        if (!config.getSd()->begin(SS, SD_SCK_MHZ(SD_SPI_SPEED))) {
+          Log.error("FTP", "SdFat re-init failed after FTP disable");
+        } else {
+          Log.info("FTP", "FTP disabled, SdFat restored");
+        }
       }
     },
     // Status callback
@@ -591,10 +594,13 @@ void loop() {
   if (ftpActive && ftpStopTime > 0 && millis() >= ftpStopTime) {
     ftpSrv.end();
     SD.end();
-    config.getSd()->begin(SS, SD_SCK_MHZ(25));
     ftpActive = false;
     ftpStopTime = 0;
-    Log.info("FTP", "FTP auto-disabled (timeout)");
+    if (!config.getSd()->begin(SS, SD_SCK_MHZ(SD_SPI_SPEED))) {
+      Log.error("FTP", "SdFat re-init failed after FTP timeout");
+    } else {
+      Log.info("FTP", "FTP auto-disabled, SdFat restored");
+    }
   }
   if (ftpActive) ftpSrv.handleFTP();
 
