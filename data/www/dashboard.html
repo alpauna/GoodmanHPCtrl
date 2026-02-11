@@ -28,6 +28,9 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 .temp-name{color:#555;font-size:14px;}
 .temp-value{font-weight:bold;color:#333;font-size:14px;}
 .footer{text-align:center;color:#999;font-size:12px;margin-top:10px;}
+.sc-group{margin-left:auto;display:flex;align-items:center;gap:4px;}
+.sc-pill{padding:2px 6px;font-size:10px;}
+.sep{color:#ccc;font-size:14px;}
 .footer.error{color:#d32f2f;}
 </style></head><body>
 <nav><span class='brand'>Goodman HP</span>
@@ -49,7 +52,6 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <h3>Protection Status</h3>
 <div class='fault-row'>
 <span class='pill ok' id='fStartup'>Startup</span>
-<span class='pill ok' id='fShortCycle'>Short Cycle</span>
 <span class='pill ok' id='fDefrost'>Defrost</span>
 <span class='pill ok' id='fLPS'>LPS Fault</span>
 <span class='pill ok' id='fLowTemp'>Low Temp</span>
@@ -72,7 +74,7 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <h3>Outputs</h3>
 <div class='grid'>
 <div class='indicator'><span class='dot off' id='dFAN'></span><span class='label'>FAN</span><span class='val' id='vFAN'>--</span></div>
-<div class='indicator'><span class='dot off' id='dCNT'></span><span class='label'>CNT</span><span class='val' id='vCNT'>--</span></div>
+<div class='indicator'><span class='dot off' id='dCNT'></span><span class='label'>CNT</span><div class='sc-group'><span class='pill ok sc-pill' id='fShortCycle'>SC</span><span class='sep'>|</span><span class='val' id='vCNT'>--</span></div></div>
 <div class='indicator'><span class='dot off' id='dW'></span><span class='label'>W</span><span class='val' id='vW'>--</span></div>
 <div class='indicator'><span class='dot off' id='dRV'></span><span class='label'>RV</span><span class='val' id='vRV'>--</span></div>
 </div>
