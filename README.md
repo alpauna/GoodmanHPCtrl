@@ -457,8 +457,6 @@ When the fault clears:
 
 - **HTTPS server separation** — `HttpsServer.cpp` is in a separate translation unit because `esp_https_server.h` (ESP-IDF) and `ESPAsyncWebServer.h` both define `HTTP_PUT`, `HTTP_OPTIONS`, and `HTTP_PATCH` enums and cannot coexist in the same TU. Logger.h forward-declares `AsyncWebSocket` to avoid pulling in the ESPAsyncWebServer header chain.
 
-- **SPI bus arbitration** — SdFat and Arduino SD library cannot coexist on the same SPI bus simultaneously. FTP uses Arduino SD (STORAGE_SD mode). When FTP starts, SdFat is ended and SD.begin() is called. When FTP stops, SD.end() is called and SdFat is re-initialized.
-
 ## Dependencies
 
 Managed automatically by PlatformIO. Key libraries:
@@ -468,7 +466,7 @@ Managed automatically by PlatformIO. Key libraries:
 - [ESPAsyncWebServer](https://github.com/ESP32Async/ESPAsyncWebServer) — Async HTTP/WebSocket server
 - [AsyncMqttClient](https://github.com/marvinroger/async-mqtt-client) — MQTT client
 - [ArduinoJson](https://github.com/bblanchon/ArduinoJson) — JSON parsing/serialization
-- [SdFat](https://github.com/adafruit/SdFat) — SD card filesystem
 - [ESP32-targz](https://github.com/tobozo/ESP32-targz) — tar.gz compression for log rotation
 - [Adafruit MCP9600](https://github.com/adafruit/Adafruit_MCP9600) — I2C thermocouple amplifier driver
+- [SD](https://github.com/espressif/arduino-esp32/tree/master/libraries/SD) — Arduino SD card library (used for all file operations)
 - [SimpleFTPServer](https://github.com/xreef/SimpleFTPServer) — FTP server for SD card file uploads (STORAGE_SD mode)

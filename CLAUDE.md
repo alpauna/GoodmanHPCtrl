@@ -138,7 +138,7 @@ struct ProjectInfo {
 ```
 
 **SD Card Methods:**
-- `initSDCard()` — Initialize SdFat filesystem
+- `initSDCard()` — Initialize SD card filesystem
 - `openConfigFile(filename, config, proj)` — Open or create config file
 - `loadTempConfig(filename, config, proj)` — Load JSON config into TempSensorMap and ProjectInfo
 - `saveConfiguration(filename, config, proj)` — Write config to SD card
@@ -148,7 +148,7 @@ struct ProjectInfo {
 **Config Getters/Setters:**
 - WiFi: `getWifiSSID()`, `getWifiPassword()`, `setWifiSSID()`, `setWifiPassword()`
 - MQTT: `getMqttHost()`, `getMqttPort()`, `getMqttUser()`, `getMqttPassword()` (and setters)
-- SD access: `getSd()` returns `SdFs*` for Logger and other components
+- SD access: Uses global `SD` object (Arduino SD library)
 
 **Usage:**
 ```cpp
@@ -163,10 +163,10 @@ if (config.initSDCard()) {
         _MQTT_HOST = config.getMqttHost();
     }
 }
-Log.setLogFile(config.getSd(), "/log.txt", proj.maxLogSize, proj.maxOldLogCount);
+Log.setLogFile("/log.txt", proj.maxLogSize, proj.maxOldLogCount);
 ```
 
-JSON config stored on SD card at `/config.txt` (SdFat library, SPI interface). Contains WiFi credentials, MQTT settings, log rotation settings, timezone settings, and temperature sensor address-to-name mappings. Loaded during `setup()`, writable via API.
+JSON config stored on SD card at `/config.txt` (Arduino SD library, SPI interface). Contains WiFi credentials, MQTT settings, log rotation settings, timezone settings, and temperature sensor address-to-name mappings. Loaded during `setup()`, writable via API.
 
 **JSON structure:**
 ```json
@@ -202,8 +202,6 @@ Multi-output logging (Serial, MQTT topic, SD card with file rotation, WebSocket)
 - Rotation triggers when log file exceeds `maxLogSize` (default 50MB, configurable via ProjectInfo)
 - Number of old logs kept is `maxOldLogCount` (default 10, configurable via ProjectInfo)
 - Falls back to plain rename (`.txt`) if compression fails
-
-**SdFat/SD library swap**: The project uses SdFat (Adafruit fork) for normal SD card operations, but ESP32-targz requires Arduino's `SD` library (`fs::FS` interface). During log rotation, Logger temporarily calls `_sd->end()`, initializes Arduino `SD` for compression, then restores SdFat via `_sd->begin()`. This swap is isolated to `compressFile()` in `Logger.cpp`.
 
 ### NTP Time Sync
 
@@ -243,5 +241,4 @@ hpController.begin();
 - `BOARD_HAS_PSRAM`: Enables PSRAM allocation path
 - `_TASK_TIMEOUT`, `_TASK_STD_FUNCTION`, `_TASK_HEADER_AND_CPP`: TaskScheduler features
 - `CIRCULAR_BUFFER_INT_SAFE`: Required; enforced by `#error` directive
-- `SD_FAT_TYPE=3`: Uses SdFs (supports FAT16/FAT32/exFAT)
 - `DEST_FS_USES_SD`: Required by ESP32-targz to use Arduino SD filesystem
