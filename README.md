@@ -42,6 +42,15 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - **W** (auxiliary heat): ON only in DEFROST, OFF in all other modes
   - **CNT** (contactor): auto-activates when Y input becomes active, with short cycle protection: if CNT was off for less than 5 minutes, a 30-second delay is enforced before reactivation; if off for 5+ minutes, CNT activates immediately
 
+- **Compressor Over-Temperature Protection** — When COMPRESSOR_TEMP reaches 240°F or above:
+  - Immediately shuts down CNT to stop compressor
+  - Keeps FAN running to cool the compressor
+  - Blocks CNT activation while overtemp is active
+  - Rechecks compressor temp every 1 minute
+  - Auto-recovers when temp drops below 190°F (50°F hysteresis gap)
+  - Logs fault condition and resolution time
+  - Highest priority fault — checked before LPS and ambient temp
+
 - **LPS Fault Protection** — When the LPS (Low Pressure Switch) input goes LOW:
   - Immediately shuts down CNT if running
   - Sets state to `ERROR`, blocking all state updates
@@ -59,6 +68,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 
 - **Automatic Defrost** — After 90 minutes of accumulated CNT runtime in HEAT mode, initiates software defrost (turns off CNT, turns on RV, turns on CNT):
   - Runs for at least 3 minutes before checking exit conditions
+  - Rechecks CONDENSER_TEMP every 1 minute during defrost with logging
   - Exits when CONDENSER_TEMP > 41°F or 15-minute safety timeout
   - Switching to COOL mode resets accumulated runtime
   - Runtime persists to SD card every 5 minutes, restored on boot
@@ -75,7 +85,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 |-------|---------|
 | `GoodmanHP` | Central controller with pin maps, temp sensors, and state machine |
 | `InputPin` | Digital/analog input with ISR, debouncing, callbacks |
-| `OutPin` | Output relay with delay, PWM support, state tracking |
+| `OutPin` | Output relay with delay, PWM support, state tracking, hardware state validation |
 | `TempSensor` | Temperature sensor with callbacks; supports OneWire (DS18B20) and I2C (MCP9600) |
 | `Config` | SD card and JSON configuration management |
 | `Logger` | Multi-output logging with tar.gz rotation, ring buffer, and WebSocket streaming |
@@ -246,7 +256,7 @@ Only sensors with valid readings are included. Values are in Fahrenheit.
 
 ### `goodman/state`
 
-Full controller state, published on every state transition and fault event.
+Full controller state, published on every state transition, fault event, and compressor overtemp change.
 
 ```json
 {
@@ -266,7 +276,8 @@ Full controller state, published on every state transition and fault event.
   "heatRuntimeMin": 42,
   "defrost": false,
   "lpsFault": false,
-  "lowTemp": false
+  "lowTemp": false,
+  "compressorOverTemp": false
 }
 ```
 
@@ -279,6 +290,7 @@ Full controller state, published on every state transition and fault event.
 | `defrost` | bool | Whether a software defrost cycle is active |
 | `lpsFault` | bool | Whether an LPS low-pressure fault is active |
 | `lowTemp` | bool | Whether ambient temperature is below the low-temp threshold |
+| `compressorOverTemp` | bool | Whether compressor temperature exceeds 240°F threshold |
 
 ### `goodman/fault`
 

@@ -486,7 +486,7 @@ void printIdleStatus() {
   for (auto& out : hpController.getOutputMap()) {
     cout << "Out Pin: " << out.first << " On Count: " << out.second->getOnCount()  << " State: " << out.second->isPinOn()  << endl;
   }
-  _nextIdlePrintTime = millis() + 10000;
+  _nextIdlePrintTime = millis() + 60000;
   Serial.print(": Idle count:");
   Serial.print(_idleLoopCount);
   Serial.print("\tWC: ");

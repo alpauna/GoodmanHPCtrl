@@ -98,8 +98,9 @@ void MQTTHandler::publishState() {
     doc["defrost"] = _controller->isSoftwareDefrostActive();
     doc["lpsFault"] = _controller->isLPSFaultActive();
     doc["lowTemp"] = _controller->isLowTempActive();
+    doc["compressorOverTemp"] = _controller->isCompressorOverTempActive();
 
-    char buf[384];
+    char buf[512];
     size_t len = serializeJson(doc, buf, sizeof(buf));
     _client.publish("goodman/state", 0, false, buf, len);
 }

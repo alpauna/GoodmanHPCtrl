@@ -16,9 +16,13 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _heatRuntimeLastLogMs(0)
     , _softwareDefrost(false)
     , _defrostStartTick(0)
+    , _defrostLastCondCheckTick(0)
     , _lpsFault(false)
     , _lowTemp(false)
     , _lowTempThreshold(DEFAULT_LOW_TEMP_F)
+    , _compressorOverTemp(false)
+    , _compressorOverTempStartTick(0)
+    , _compressorOverTempLastCheckTick(0)
 {
     _instance = this;
     _tskUpdate = new Task(500, TASK_FOREVER, [this]() {
@@ -120,6 +124,7 @@ void GoodmanHP::clearTempSensors() {
 }
 
 void GoodmanHP::update() {
+    checkCompressorTemp();
     checkLPSFault();
     checkAmbientTemp();
     checkYAndActivateCNT();
@@ -129,6 +134,9 @@ void GoodmanHP::update() {
 }
 
 void GoodmanHP::checkLPSFault() {
+    // Don't override compressor overtemp
+    if (_compressorOverTemp) return;
+
     if (!isLPSActive() && !_lpsFault) {
         _lpsFault = true;
         State oldState = _state;
@@ -167,8 +175,8 @@ void GoodmanHP::checkLPSFault() {
 }
 
 void GoodmanHP::checkAmbientTemp() {
-    // Don't override LPS fault
-    if (_lpsFault) return;
+    // Don't override higher-priority faults
+    if (_compressorOverTemp || _lpsFault) return;
 
     TempSensor* ambient = getTempSensor("AMBIENT_TEMP");
     if (ambient == nullptr || !ambient->isValid()) return;
@@ -217,6 +225,64 @@ void GoodmanHP::checkAmbientTemp() {
     }
 }
 
+void GoodmanHP::checkCompressorTemp() {
+
+    uint32_t now = millis();
+
+    // If already in overtemp, recheck every 1 minute for recovery
+    if (_compressorOverTemp) {
+        if (now - _compressorOverTempLastCheckTick < COMPRESSOR_OVERTEMP_CHECK_MS) return;
+        _compressorOverTempLastCheckTick = now;
+
+        TempSensor* comp = getTempSensor("COMPRESSOR_TEMP");
+        if (comp == nullptr || !comp->isValid()) return;
+
+        float temp = comp->getValue();
+        Log.info("HP", "Compressor overtemp recheck: %.1fF (recovery < %.1fF)", temp, COMPRESSOR_OVERTEMP_OFF_F);
+
+        if (temp < COMPRESSOR_OVERTEMP_OFF_F) {
+            uint32_t elapsed = now - _compressorOverTempStartTick;
+            Log.warn("HP", "Compressor overtemp cleared: %.1fF < %.1fF, resolved in %lu min %lu sec",
+                     temp, COMPRESSOR_OVERTEMP_OFF_F, elapsed / 60000UL, (elapsed / 1000UL) % 60);
+            _compressorOverTemp = false;
+            if (_stateChangeCb) _stateChangeCb(_state, _state);
+        }
+        return;
+    }
+
+    // Only check every 1 minute for new overtemp condition
+    if (now - _compressorOverTempLastCheckTick < COMPRESSOR_OVERTEMP_CHECK_MS) return;
+    _compressorOverTempLastCheckTick = now;
+
+    TempSensor* comp = getTempSensor("COMPRESSOR_TEMP");
+    if (comp == nullptr || !comp->isValid()) return;
+
+    float temp = comp->getValue();
+
+    if (temp >= COMPRESSOR_OVERTEMP_ON_F) {
+        _compressorOverTemp = true;
+        _compressorOverTempStartTick = now;
+        Log.error("HP", "Compressor overtemp: %.1fF >= %.1fF, shutting down CNT (FAN stays on)",
+                  temp, COMPRESSOR_OVERTEMP_ON_F);
+
+        // Shut down CNT
+        OutPin* cnt = getOutput("CNT");
+        if (cnt != nullptr && cnt->isOn()) {
+            cnt->turnOff();
+            _cntActivated = false;
+        }
+
+        // Keep FAN on to cool the compressor
+        OutPin* fan = getOutput("FAN");
+        if (fan != nullptr && !fan->isOn()) {
+            fan->turnOn();
+            Log.info("HP", "FAN turned ON to cool compressor");
+        }
+
+        if (_stateChangeCb) _stateChangeCb(_state, _state);
+    }
+}
+
 void GoodmanHP::checkYAndActivateCNT() {
     InputPin* y = getInput("Y");
     OutPin* cnt = getOutput("CNT");
@@ -261,7 +327,7 @@ void GoodmanHP::checkYAndActivateCNT() {
             Log.info("HP", "Y dropped during defrost, system shutdown (defrost pending)");
         }
     } else if (yActive && _yWasActive && !_cntActivated) {
-        if (_lpsFault || _lowTemp) return;
+        if (_lpsFault || _lowTemp || _compressorOverTemp) return;
         // Check if CNT was off for less than 5 minutes - if so, enforce 30s delay
         uint32_t offElapsed = millis() - cnt->getOffTick();
         if (cnt->getOffTick() > 0 && offElapsed < 5 * 60 * 1000UL) {
@@ -448,6 +514,10 @@ bool GoodmanHP::isLowTempActive() const {
     return _lowTemp;
 }
 
+bool GoodmanHP::isCompressorOverTempActive() const {
+    return _compressorOverTemp;
+}
+
 void GoodmanHP::setLowTempThreshold(float threshold) {
     _lowTempThreshold = threshold;
     Log.info("HP", "Low temp threshold set to %.1fF", threshold);
@@ -505,19 +575,28 @@ void GoodmanHP::checkDefrostNeeded() {
             return;
         }
 
-        TempSensor* condenser = getTempSensor("CONDENSER_TEMP");
-        if (condenser != nullptr && condenser->isValid() && condenser->getValue() >= DEFROST_EXIT_F) {
-            Log.info("HP", "Defrost complete: condenser %.1fF >= %.1fF after %lu sec",
-                     condenser->getValue(), DEFROST_EXIT_F, elapsed / 1000UL);
-            stopSoftwareDefrost();
-            return;
-        }
-
         // Safety timeout
         if (elapsed >= DEFROST_TIMEOUT_MS) {
             Log.error("HP", "Defrost timeout (%lu min), forcing stop", DEFROST_TIMEOUT_MS / 60000UL);
             stopSoftwareDefrost();
             return;
+        }
+
+        // Check condenser temp every 1 minute
+        if (now - _defrostLastCondCheckTick >= DEFROST_COND_CHECK_MS) {
+            _defrostLastCondCheckTick = now;
+            TempSensor* condenser = getTempSensor("CONDENSER_TEMP");
+            if (condenser != nullptr && condenser->isValid()) {
+                float condTemp = condenser->getValue();
+                Log.info("HP", "Defrost condenser check: %.1fF (target > %.1fF, elapsed %lu sec)",
+                         condTemp, DEFROST_EXIT_F, elapsed / 1000UL);
+                if (condTemp >= DEFROST_EXIT_F) {
+                    Log.info("HP", "Defrost complete: condenser %.1fF >= %.1fF",
+                             condTemp, DEFROST_EXIT_F);
+                    stopSoftwareDefrost();
+                    return;
+                }
+            }
         }
         return;
     }
@@ -556,6 +635,7 @@ void GoodmanHP::startSoftwareDefrost() {
 
     _softwareDefrost = true;
     _defrostStartTick = millis();
+    _defrostLastCondCheckTick = _defrostStartTick;
 }
 
 void GoodmanHP::stopSoftwareDefrost() {

@@ -21,7 +21,13 @@ class GoodmanHP {
     static const uint32_t DEFROST_MIN_RUNTIME_MS = 3UL * 60 * 1000;      // 3 min minimum defrost
     static const uint32_t DEFROST_TIMEOUT_MS = 15UL * 60 * 1000;         // 15 min safety timeout
     static constexpr float DEFROST_EXIT_F = 41.0f;
+    static const uint32_t DEFROST_COND_CHECK_MS = 60UL * 1000;            // 1 min condenser recheck
     static constexpr float DEFAULT_LOW_TEMP_F = 20.0f;
+
+    // Compressor over-temperature protection
+    static constexpr float COMPRESSOR_OVERTEMP_ON_F = 240.0f;   // Shut down CNT above this
+    static constexpr float COMPRESSOR_OVERTEMP_OFF_F = 190.0f;  // Resume CNT below this
+    static const uint32_t COMPRESSOR_OVERTEMP_CHECK_MS = 60UL * 1000;  // 1 min recheck
 
     GoodmanHP(Scheduler *ts);
 
@@ -60,6 +66,7 @@ class GoodmanHP {
     bool isSoftwareDefrostActive() const;
     bool isLPSFaultActive() const;
     bool isLowTempActive() const;
+    bool isCompressorOverTempActive() const;
     void setLowTempThreshold(float threshold);
     float getLowTempThreshold() const;
 
@@ -89,14 +96,19 @@ class GoodmanHP {
     uint32_t _heatRuntimeLastLogMs;
     bool _softwareDefrost;
     uint32_t _defrostStartTick;
+    uint32_t _defrostLastCondCheckTick;
     bool _lpsFault;
     bool _lowTemp;
     float _lowTempThreshold;
+    bool _compressorOverTemp;
+    uint32_t _compressorOverTempStartTick;
+    uint32_t _compressorOverTempLastCheckTick;
     StateChangeCallback _stateChangeCb;
     LPSFaultCallback _lpsFaultCb;
 
     void checkLPSFault();
     void checkAmbientTemp();
+    void checkCompressorTemp();
     void checkYAndActivateCNT();
     void updateState();
     void accumulateHeatRuntime();

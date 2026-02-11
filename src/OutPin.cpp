@@ -1,4 +1,5 @@
 #include "OutPin.h"
+#include "Logger.h"
 
 uint8_t OutPin::percent_to_byte_float(float percent) {
   // Ensure the input is within the valid range [0.0, 100.0]
@@ -144,7 +145,18 @@ uint32_t OutPin::getOnCount() { return _onCount; }
 void OutPin::resetOnCount() { _onCount = 0; }
 float OutPin::getOnPercent() {return _percentOn;}
 Task * OutPin::getTask() {return _tsk;}
-bool OutPin::isOn() { return _percentOn > 0.0;}
+bool OutPin::isOn() {
+  bool softwareOn = _percentOn > 0.0;
+  if (_transitioning) return softwareOn;
+  bool hardwareOn = isPinOn();
+  if (softwareOn != hardwareOn) {
+    Log.warn("OutPin", "%s state mismatch: software=%s hardware=%s, correcting to hardware state",
+             _name.c_str(), softwareOn ? "ON" : "OFF", hardwareOn ? "ON" : "OFF");
+    _percentOn = hardwareOn ? 100.0f : 0.0f;
+    return hardwareOn;
+  }
+  return softwareOn;
+}
 bool OutPin::isPinOn() { 
   if(!_pwm){ 
     if(!_inverse)
@@ -171,8 +183,10 @@ void OutPin::initPin(){
 void OutPin::turnOff(){
   float origPercent = _percentOn;
   _percentOn = 0.0;
+  _transitioning = true;
   if(_clbk != nullptr){
     if(!_clbk(this, isOn(), false, _percentOn, origPercent)){
+      _transitioning = false;
       return;
     }
   }
@@ -180,13 +194,16 @@ void OutPin::turnOff(){
   _tsk->disable();
   _tskRuntime->disable();
   digitalWrite(_pin, _inverse ? HIGH : LOW);
+  _transitioning = false;
 }
 
 void OutPin::turnOn(){
   float origPercent = _percentOn;
   _percentOn = 100.0;
+  _transitioning = true;
   if(_clbk != nullptr){
     if(!_clbk(this, isOn(), false, _percentOn, origPercent)){
+      _transitioning = false;
       return;
     }
   }
@@ -197,13 +214,16 @@ void OutPin::turnOn(){
     _tskRuntime->restartDelayed();
   }
   digitalWrite(_pin, _inverse ? LOW : HIGH);
+  _transitioning = false;
 }
 
 void OutPin::turnOn(float percent){
   float origPercent = _percentOn;
   _percentOn = percent;
+  _transitioning = true;
   if(_clbk != nullptr){
     if(!_clbk(this, isOn(), false, _percentOn, origPercent)){
+      _transitioning = false;
       return;
     }
   }
@@ -213,6 +233,7 @@ void OutPin::turnOn(float percent){
     _tskRuntime->enableIfNot();
     _tskRuntime->restartDelayed();
   }
+  _transitioning = false;
 }
 
 void OutPin::setRuntimeCallback(RuntimeCallback clbk, uint32_t intervalMs){
