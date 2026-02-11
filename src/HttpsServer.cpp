@@ -8,10 +8,73 @@
 #include <ArduinoJson.h>
 #include <TaskSchedulerDeclarations.h>
 #include "SdFat.h"
+#include "mbedtls/base64.h"
 #include "HttpsServer.h"
 #include "Config.h"
 #include "GoodmanHP.h"
 #include "Logger.h"
+
+// --- HTTPS Basic Auth helper ---
+
+static bool checkHttpsAuth(httpd_req_t* req) {
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+    if (!ctx->config || !ctx->config->hasAdminPassword()) return true;
+
+    size_t authLen = httpd_req_get_hdr_value_len(req, "Authorization");
+    if (authLen == 0) {
+        httpd_resp_set_status(req, "401 Unauthorized");
+        httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"GoodmanHP\"");
+        httpd_resp_send(req, "Unauthorized", HTTPD_RESP_USE_STRLEN);
+        return false;
+    }
+
+    char* authBuf = (char*)malloc(authLen + 1);
+    if (!authBuf) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return false;
+    }
+    httpd_req_get_hdr_value_str(req, "Authorization", authBuf, authLen + 1);
+
+    // Expect "Basic <base64>"
+    if (strncmp(authBuf, "Basic ", 6) != 0) {
+        free(authBuf);
+        httpd_resp_set_status(req, "401 Unauthorized");
+        httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"GoodmanHP\"");
+        httpd_resp_send(req, "Unauthorized", HTTPD_RESP_USE_STRLEN);
+        return false;
+    }
+
+    const char* b64 = authBuf + 6;
+    size_t b64Len = strlen(b64);
+    size_t decodedLen = 0;
+    mbedtls_base64_decode(nullptr, 0, &decodedLen, (const uint8_t*)b64, b64Len);
+    uint8_t* decoded = (uint8_t*)malloc(decodedLen + 1);
+    if (!decoded) { free(authBuf); return false; }
+    mbedtls_base64_decode(decoded, decodedLen + 1, &decodedLen, (const uint8_t*)b64, b64Len);
+    decoded[decodedLen] = '\0';
+    free(authBuf);
+
+    // Split at ':'
+    char* colon = strchr((char*)decoded, ':');
+    if (!colon) {
+        free(decoded);
+        httpd_resp_set_status(req, "401 Unauthorized");
+        httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"GoodmanHP\"");
+        httpd_resp_send(req, "Unauthorized", HTTPD_RESP_USE_STRLEN);
+        return false;
+    }
+    String password = String(colon + 1);
+    free(decoded);
+
+    if (ctx->config->verifyAdminPassword(password)) {
+        return true;
+    }
+
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"GoodmanHP\"");
+    httpd_resp_send(req, "Unauthorized", HTTPD_RESP_USE_STRLEN);
+    return false;
+}
 
 // --- SD card file serving helper ---
 
@@ -46,6 +109,7 @@ static esp_err_t serveFileHttps(httpd_req_t* req, const char* sdPath) {
 // --- ESP-IDF httpd handler callbacks ---
 
 static esp_err_t configGetHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
     HttpsContext* ctx = (HttpsContext*)req->user_ctx;
 
     // Check for ?format=json
@@ -81,6 +145,7 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["lowTempThreshold"] = proj->lowTempThreshold;
         doc["maxLogSize"] = proj->maxLogSize;
         doc["maxOldLogCount"] = proj->maxOldLogCount;
+        doc["adminPasswordSet"] = ctx->config->hasAdminPassword();
         String json;
         serializeJson(doc, json);
         httpd_resp_set_type(req, "application/json");
@@ -92,6 +157,7 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
 }
 
 static esp_err_t configPostHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
     HttpsContext* ctx = (HttpsContext*)req->user_ctx;
 
     int remaining = req->content_len;
@@ -192,6 +258,24 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         }
     }
 
+    // Admin password
+    String adminPw = data["adminPassword"] | String("");
+    if (adminPw.length() > 0) {
+        if (!ctx->config->hasAdminPassword()) {
+            ctx->config->setAdminPassword(adminPw);
+            if (ctx->ftpDisableCb) ctx->ftpDisableCb();
+            Log.info("AUTH", "Admin password set for first time (HTTPS)");
+        } else {
+            String curAdminPw = data["curAdminPw"] | String("");
+            if (ctx->config->verifyAdminPassword(curAdminPw)) {
+                ctx->config->setAdminPassword(adminPw);
+                Log.info("AUTH", "Admin password changed (HTTPS)");
+            } else {
+                errors += "Admin password: current password incorrect. ";
+            }
+        }
+    }
+
     // Timezone (live)
     float gmtHrs = data["gmtOffsetHrs"] | (proj->gmtOffsetSec / 3600.0f);
     float dstHrs = data["daylightOffsetHrs"] | (proj->daylightOffsetSec / 3600.0f);
@@ -252,10 +336,12 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
 }
 
 static esp_err_t updateGetHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
     return serveFileHttps(req, "/www/update.html");
 }
 
 static esp_err_t updatePostHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
     HttpsContext* ctx = (HttpsContext*)req->user_ctx;
 
     int remaining = req->content_len;
@@ -299,6 +385,78 @@ static esp_err_t updatePostHandler(httpd_req_t* req) {
         Log.error("OTA", "HTTPS OTA Update Failed");
         Update.printError(Serial);
         httpd_resp_send(req, "FAIL", HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+}
+
+// --- FTP control handlers ---
+
+static esp_err_t ftpGetHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+
+    bool active = ctx->ftpActive ? *(ctx->ftpActive) : false;
+    unsigned long stopTime = ctx->ftpStopTime ? *(ctx->ftpStopTime) : 0;
+    int remainingMin = 0;
+    if (active && stopTime > 0) {
+        unsigned long now = millis();
+        if (stopTime > now) {
+            remainingMin = (int)((stopTime - now) / 60000) + 1;
+        }
+    }
+
+    String json = "{\"active\":" + String(active ? "true" : "false") +
+                  ",\"remainingMinutes\":" + String(remainingMin) + "}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
+static esp_err_t ftpPostHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+
+    int remaining = req->content_len;
+    if (remaining <= 0 || remaining > 256) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Invalid body\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    char* body = (char*)malloc(remaining + 1);
+    if (!body) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Out of memory\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    int received = 0;
+    while (received < remaining) {
+        int ret = httpd_req_recv(req, body + received, remaining - received);
+        if (ret <= 0) { free(body); return ESP_OK; }
+        received += ret;
+    }
+    body[received] = '\0';
+
+    JsonDocument data;
+    if (deserializeJson(data, body)) {
+        free(body);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Invalid JSON\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+    free(body);
+
+    int duration = data["duration"] | 0;
+    httpd_resp_set_type(req, "application/json");
+    if (duration > 0 && ctx->ftpEnableCb) {
+        ctx->ftpEnableCb(duration);
+        httpd_resp_send(req, "{\"status\":\"ok\",\"message\":\"FTP enabled\"}", HTTPD_RESP_USE_STRLEN);
+    } else if (ctx->ftpDisableCb) {
+        ctx->ftpDisableCb();
+        httpd_resp_send(req, "{\"status\":\"ok\",\"message\":\"FTP disabled\"}", HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_send(req, "{\"error\":\"FTP control not available\"}", HTTPD_RESP_USE_STRLEN);
     }
     return ESP_OK;
 }
@@ -354,6 +512,22 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &updPost);
+
+    httpd_uri_t ftpGet = {
+        .uri = "/ftp",
+        .method = HTTP_GET,
+        .handler = ftpGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &ftpGet);
+
+    httpd_uri_t ftpPost = {
+        .uri = "/ftp",
+        .method = HTTP_POST,
+        .handler = ftpPostHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &ftpPost);
 
     Log.info("HTTPS", "HTTPS server started on port 443");
     return (HttpsServerHandle)server;

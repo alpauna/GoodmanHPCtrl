@@ -8,6 +8,7 @@
 #include <WiFi.h>
 #include <Wire.h>
 #include <time.h>
+#include <functional>
 #include <TaskSchedulerDeclarations.h>
 #include "GoodmanHP.h"
 #include "Logger.h"
@@ -24,6 +25,12 @@ class WebHandler {
     void setConfig(Config* config) { _config = config; }
     bool shouldReboot() const { return _shouldReboot; }
     const char * getWiFiIP();
+
+    typedef std::function<void(int)> FtpEnableCallback;
+    typedef std::function<void()> FtpDisableCallback;
+    typedef std::function<String()> FtpStatusCallback;
+    void setFtpControl(FtpEnableCallback enableCb, FtpDisableCallback disableCb, FtpStatusCallback statusCb);
+    void setFtpState(bool* activePtr, unsigned long* stopTimePtr);
 
   private:
     AsyncWebServer _server;
@@ -50,6 +57,13 @@ class WebHandler {
     static constexpr const char* NOT_AVAILABLE = "NA";
     String _wifiIPStr;
 
+    FtpEnableCallback _ftpEnableCb;
+    FtpDisableCallback _ftpDisableCb;
+    FtpStatusCallback _ftpStatusCb;
+    bool* _ftpActivePtr = nullptr;
+    unsigned long* _ftpStopTimePtr = nullptr;
+
+    bool checkAuth(AsyncWebServerRequest* request);
     void syncNtpTime();
     void setupRoutes();
     void serveFile(AsyncWebServerRequest* request, const String& path);

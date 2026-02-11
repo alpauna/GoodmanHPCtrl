@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <functional>
 
 // Forward declarations — avoid including esp_https_server.h here
 // to prevent enum conflicts with ESPAsyncWebServer
@@ -19,6 +20,10 @@ struct HttpsContext {
     Task** delayedReboot;
     int32_t* gmtOffsetSec;
     int32_t* daylightOffsetSec;
+    std::function<void(int)> ftpEnableCb;
+    std::function<void()> ftpDisableCb;
+    bool* ftpActive;
+    unsigned long* ftpStopTime;
 };
 
 // Opaque handle

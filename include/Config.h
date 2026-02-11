@@ -8,6 +8,7 @@
 #include "TempSensor.h"
 #include "mbedtls/base64.h"
 #include "mbedtls/gcm.h"
+#include "mbedtls/sha256.h"
 
 struct ProjectInfo {
     String name;
@@ -52,6 +53,13 @@ class Config {
     void setMqttUser(const String& user) { _mqttUser = user; }
     void setMqttPassword(const String& password) { _mqttPassword = password; }
 
+    // Admin password (salted SHA-256 hash)
+    bool hasAdminPassword() const { return _adminPasswordHash.length() > 0; }
+    void setAdminPassword(const String& plaintext);
+    bool verifyAdminPassword(const String& plaintext) const;
+    static String hashPassword(const String& plaintext);
+    static bool verifyPasswordHash(const String& plaintext, const String& stored);
+
     // Certificate loading for HTTPS
     bool loadCertificates(const char* certFile, const char* keyFile);
     bool hasCertificates() const { return _certBuf != nullptr && _keyBuf != nullptr; }
@@ -92,6 +100,7 @@ class Config {
     uint16_t _mqttPort;
     String _mqttUser;
     String _mqttPassword;
+    String _adminPasswordHash;
 
     // Callback for discovering temp sensors when saving new config
     TempSensorDiscoveryCallback _tempDiscoveryCb;

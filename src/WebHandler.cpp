@@ -8,6 +8,53 @@ WebHandler::WebHandler(uint16_t port, Scheduler* ts, GoodmanHP* hpController)
       _config(nullptr), _shouldReboot(false), _tDelayedReboot(nullptr),
       _ntpSynced(false), _tNtpSync(nullptr) {}
 
+void WebHandler::setFtpControl(FtpEnableCallback enableCb, FtpDisableCallback disableCb, FtpStatusCallback statusCb) {
+    _ftpEnableCb = enableCb;
+    _ftpDisableCb = disableCb;
+    _ftpStatusCb = statusCb;
+}
+
+void WebHandler::setFtpState(bool* activePtr, unsigned long* stopTimePtr) {
+    _ftpActivePtr = activePtr;
+    _ftpStopTimePtr = stopTimePtr;
+}
+
+bool WebHandler::checkAuth(AsyncWebServerRequest* request) {
+    if (!_config || !_config->hasAdminPassword()) return true;
+
+    String authHeader = request->header("Authorization");
+    if (!authHeader.startsWith("Basic ")) {
+        request->requestAuthentication();
+        return false;
+    }
+
+    String b64 = authHeader.substring(6);
+    size_t decodedLen = 0;
+    mbedtls_base64_decode(nullptr, 0, &decodedLen,
+        (const uint8_t*)b64.c_str(), b64.length());
+    uint8_t* decoded = new uint8_t[decodedLen + 1];
+    mbedtls_base64_decode(decoded, decodedLen + 1, &decodedLen,
+        (const uint8_t*)b64.c_str(), b64.length());
+    decoded[decodedLen] = '\0';
+
+    String credentials = String((char*)decoded);
+    delete[] decoded;
+
+    int colonIdx = credentials.indexOf(':');
+    if (colonIdx < 0) {
+        request->requestAuthentication();
+        return false;
+    }
+
+    String password = credentials.substring(colonIdx + 1);
+    if (_config->verifyAdminPassword(password)) {
+        return true;
+    }
+
+    request->requestAuthentication();
+    return false;
+}
+
 void WebHandler::begin() {
     // NTP sync task - enabled on WiFi connect, then repeats every 2 hours
     _tNtpSync = new Task(2 * TASK_HOUR, TASK_FOREVER, [this]() {
@@ -312,10 +359,12 @@ void WebHandler::setupRoutes() {
     if (!_httpsServer) {
         // No HTTPS — serve /update and /config directly on HTTP (fallback)
         _server.on("/update", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
             serveFile(request, "/update.html");
         });
 
         _server.on("/config", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
             if (request->hasParam("format") && request->getParam("format")->value() == "json") {
                 if (!_config || !_config->getProjectInfo()) {
                     request->send(500, "application/json", "{\"error\":\"Config not available\"}");
@@ -334,6 +383,7 @@ void WebHandler::setupRoutes() {
                 doc["lowTempThreshold"] = proj->lowTempThreshold;
                 doc["maxLogSize"] = proj->maxLogSize;
                 doc["maxOldLogCount"] = proj->maxOldLogCount;
+                doc["adminPasswordSet"] = _config->hasAdminPassword();
                 String json;
                 serializeJson(doc, json);
                 request->send(200, "application/json", json);
@@ -343,6 +393,7 @@ void WebHandler::setupRoutes() {
         });
 
         auto* configPostHandler = new AsyncCallbackJsonWebHandler("/config", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+            if (!checkAuth(request)) return;
             if (!_config || !_config->getProjectInfo()) {
                 request->send(500, "application/json", "{\"error\":\"Config not available\"}");
                 return;
@@ -400,6 +451,25 @@ void WebHandler::setupRoutes() {
                 }
             }
 
+            // Admin password
+            String adminPw = data["adminPassword"] | String("");
+            if (adminPw.length() > 0) {
+                if (!_config->hasAdminPassword()) {
+                    // First-time setup — no current password required
+                    _config->setAdminPassword(adminPw);
+                    if (_ftpDisableCb) _ftpDisableCb();
+                    Log.info("AUTH", "Admin password set for first time");
+                } else {
+                    String curAdminPw = data["curAdminPw"] | String("");
+                    if (_config->verifyAdminPassword(curAdminPw)) {
+                        _config->setAdminPassword(adminPw);
+                        Log.info("AUTH", "Admin password changed");
+                    } else {
+                        errors += "Admin password: current password incorrect. ";
+                    }
+                }
+            }
+
             float gmtHrs = data["gmtOffsetHrs"] | (proj->gmtOffsetSec / 3600.0f);
             float dstHrs = data["daylightOffsetHrs"] | (proj->daylightOffsetSec / 3600.0f);
             int32_t gmtOffset = (int32_t)(gmtHrs * 3600);
@@ -454,6 +524,7 @@ void WebHandler::setupRoutes() {
         _server.addHandler(configPostHandler);
 
         _server.on("/update", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
             _shouldReboot = !Update.hasError();
             AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", _shouldReboot ? "OK" : "FAIL");
             response->addHeader("Connection", "close");
@@ -480,6 +551,29 @@ void WebHandler::setupRoutes() {
                 }
             }
         });
+
+        // FTP control endpoints (HTTP fallback)
+        _server.on("/ftp", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            String json = _ftpStatusCb ? _ftpStatusCb() : "{\"active\":false}";
+            request->send(200, "application/json", json);
+        });
+
+        auto* ftpPostHandler = new AsyncCallbackJsonWebHandler("/ftp", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+            if (!checkAuth(request)) return;
+            JsonObject data = json.as<JsonObject>();
+            int duration = data["duration"] | 0;
+            if (duration > 0 && _ftpEnableCb) {
+                _ftpEnableCb(duration);
+                request->send(200, "application/json", "{\"status\":\"ok\",\"message\":\"FTP enabled\"}");
+            } else if (_ftpDisableCb) {
+                _ftpDisableCb();
+                request->send(200, "application/json", "{\"status\":\"ok\",\"message\":\"FTP disabled\"}");
+            } else {
+                request->send(500, "application/json", "{\"error\":\"FTP control not available\"}");
+            }
+        });
+        _server.addHandler(ftpPostHandler);
     } else {
         // HTTPS is active — redirect HTTP /config and /update to HTTPS
         _server.on("/config", HTTP_GET, [this](AsyncWebServerRequest *request) {
@@ -498,6 +592,12 @@ void WebHandler::setupRoutes() {
         _server.on("/update", HTTP_POST, [this](AsyncWebServerRequest *request) {
             request->redirect("https://" + String(getWiFiIP()) + "/update");
         });
+        _server.on("/ftp", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/ftp");
+        });
+        _server.on("/ftp", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/ftp");
+        });
     }
 }
 
@@ -511,6 +611,10 @@ bool WebHandler::beginSecure(const uint8_t* cert, size_t certLen, const uint8_t*
     _httpsCtx.delayedReboot = &_tDelayedReboot;
     _httpsCtx.gmtOffsetSec = &_gmtOffsetSec;
     _httpsCtx.daylightOffsetSec = &_daylightOffsetSec;
+    _httpsCtx.ftpEnableCb = _ftpEnableCb;
+    _httpsCtx.ftpDisableCb = _ftpDisableCb;
+    _httpsCtx.ftpActive = _ftpActivePtr;
+    _httpsCtx.ftpStopTime = _ftpStopTimePtr;
 
     _httpsServer = httpsStart(cert, certLen, key, keyLen, &_httpsCtx);
     return _httpsServer != nullptr;

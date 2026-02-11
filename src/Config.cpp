@@ -28,6 +28,7 @@ Config::Config()
     , _mqttPassword("")
     , _wifiSSID("")
     , _wifiPassword("")
+    , _adminPasswordHash("")
     , _tempDiscoveryCb(nullptr)
     , _proj(nullptr)
 {
@@ -164,6 +165,82 @@ String Config::decryptPassword(const String& encrypted) {
     return encrypted;
 }
 
+String Config::hashPassword(const String& plaintext) {
+    if (plaintext.length() == 0) return "";
+
+    // Generate 16-byte random salt
+    uint8_t salt[16];
+    esp_fill_random(salt, sizeof(salt));
+
+    // SHA-256(salt + password)
+    uint8_t digest[32];
+    mbedtls_sha256_context sha;
+    mbedtls_sha256_init(&sha);
+    mbedtls_sha256_starts(&sha, 0);  // 0 = SHA-256
+    mbedtls_sha256_update(&sha, salt, sizeof(salt));
+    mbedtls_sha256_update(&sha, (const uint8_t*)plaintext.c_str(), plaintext.length());
+    mbedtls_sha256_finish(&sha, digest);
+    mbedtls_sha256_free(&sha);
+
+    // Pack salt[16] + digest[32] = 48 bytes
+    uint8_t packed[48];
+    memcpy(packed, salt, 16);
+    memcpy(packed + 16, digest, 32);
+
+    // Base64 encode
+    size_t b64Len = 0;
+    mbedtls_base64_encode(nullptr, 0, &b64Len, packed, sizeof(packed));
+    uint8_t* b64 = new uint8_t[b64Len + 1];
+    mbedtls_base64_encode(b64, b64Len + 1, &b64Len, packed, sizeof(packed));
+    b64[b64Len] = '\0';
+
+    String result = "$HASH$" + String((char*)b64);
+    delete[] b64;
+    return result;
+}
+
+bool Config::verifyPasswordHash(const String& plaintext, const String& stored) {
+    if (!stored.startsWith("$HASH$")) return false;
+
+    String b64Part = stored.substring(6);
+    size_t decodedLen = 0;
+    mbedtls_base64_decode(nullptr, 0, &decodedLen,
+        (const uint8_t*)b64Part.c_str(), b64Part.length());
+    if (decodedLen != 48) return false;  // salt[16] + digest[32]
+
+    uint8_t decoded[48];
+    mbedtls_base64_decode(decoded, sizeof(decoded), &decodedLen,
+        (const uint8_t*)b64Part.c_str(), b64Part.length());
+
+    // Extract salt, recompute SHA-256(salt + plaintext)
+    uint8_t* salt = decoded;
+    uint8_t* storedDigest = decoded + 16;
+
+    uint8_t computedDigest[32];
+    mbedtls_sha256_context sha;
+    mbedtls_sha256_init(&sha);
+    mbedtls_sha256_starts(&sha, 0);
+    mbedtls_sha256_update(&sha, salt, 16);
+    mbedtls_sha256_update(&sha, (const uint8_t*)plaintext.c_str(), plaintext.length());
+    mbedtls_sha256_finish(&sha, computedDigest);
+    mbedtls_sha256_free(&sha);
+
+    // Constant-time comparison
+    uint8_t diff = 0;
+    for (int i = 0; i < 32; i++) {
+        diff |= computedDigest[i] ^ storedDigest[i];
+    }
+    return diff == 0;
+}
+
+void Config::setAdminPassword(const String& plaintext) {
+    _adminPasswordHash = hashPassword(plaintext);
+}
+
+bool Config::verifyAdminPassword(const String& plaintext) const {
+    return verifyPasswordHash(plaintext, _adminPasswordHash);
+}
+
 bool Config::initSDCard() {
     if (!_sd.begin(SS, SPI_SPEED)) {
         if (_sd.card()->errorCode()) {
@@ -273,6 +350,11 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     proj.lowTempThreshold = lowTemp["threshold"] | 20.0f;
     cout << "Read lowTemp threshold: " << proj.lowTempThreshold << "F" << endl;
 
+    // Load admin password hash (already hashed, no decryption needed)
+    const char* adminPw = doc["admin"]["password"];
+    _adminPasswordHash = (adminPw != nullptr && strlen(adminPw) > 0) ? adminPw : "";
+    cout << "Admin password: " << (_adminPasswordHash.length() > 0 ? "set" : "not set") << endl;
+
     clearConfig(config);
     for (JsonPair sensors_temp_item : doc["sensors"]["temp"].as<JsonObject>()) {
         const char* key = sensors_temp_item.key().c_str();
@@ -354,6 +436,9 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     JsonObject lowTemp = doc["lowTemp"].to<JsonObject>();
     lowTemp["threshold"] = proj.lowTempThreshold;
 
+    JsonObject admin = doc["admin"].to<JsonObject>();
+    admin["password"] = "";
+
     JsonObject sensors = doc["sensors"].to<JsonObject>();
     JsonObject sensors_temp = sensors["temp"].to<JsonObject>();
 
@@ -423,6 +508,9 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
 
     JsonObject lowTemp = doc["lowTemp"].to<JsonObject>();
     lowTemp["threshold"] = proj.lowTempThreshold;
+
+    JsonObject admin = doc["admin"].to<JsonObject>();
+    admin["password"] = _adminPasswordHash;
 
     // Write back
     if (!file.open(filename, O_RDWR | O_TRUNC)) {

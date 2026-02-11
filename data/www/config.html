@@ -17,10 +17,18 @@ input[type=text],input[type=password],input[type=number]{width:100%;padding:8px;
 .tag-live{background:#27ae60;}
 button{background:#4CAF50;color:#fff;padding:10px 24px;border:none;border-radius:4px;cursor:pointer;font-size:16px;margin-top:10px;}
 button:hover{background:#45a049;}
+.btn-sm{background:#4CAF50;color:#fff;padding:6px 16px;border:none;border-radius:4px;cursor:pointer;font-size:13px;margin:4px 4px 4px 0;}
+.btn-sm:hover{background:#45a049;}
+.btn-red{background:#e74c3c;}
+.btn-red:hover{background:#c0392b;}
 #status{margin-top:15px;padding:10px;border-radius:4px;display:none;}
 .ok{background:#d4edda;color:#155724;display:block!important;}
 .err{background:#f8d7da;color:#721c24;display:block!important;}
 .info{background:#d1ecf1;color:#0c5460;display:block!important;}
+#adminPwStatus{margin:8px 0;font-size:13px;padding:6px 10px;border-radius:4px;}
+.pw-unset{background:#fff3cd;color:#856404;}
+.pw-set{background:#d4edda;color:#155724;}
+#ftpStatus{margin:8px 0;font-size:13px;padding:6px 10px;border-radius:4px;background:#e9ecef;color:#333;}
 </style></head><body>
 <nav><span class='brand'>Goodman HP</span>
 <a href='/'>Home</a>
@@ -31,6 +39,14 @@ button:hover{background:#45a049;}
 <div class='container'>
 <h1>Configuration</h1>
 <form id='cf' onsubmit='return save(event)'>
+<fieldset><legend>Admin Password</legend>
+<div id='adminPwStatus'></div>
+<label>New Password</label><input type='password' id='adminPassword'>
+<label>Confirm Password</label><input type='password' id='adminPasswordConfirm'>
+<div id='curAdminPwRow' style='display:none'>
+<label>Current Password (required to change)</label><input type='password' id='curAdminPw'>
+</div>
+</fieldset>
 <fieldset><legend>WiFi <span class='tag tag-reboot'>reboot</span></legend>
 <label>SSID</label><input type='text' id='wifiSSID'>
 <label>Password</label><input type='password' id='wifiPassword'>
@@ -56,18 +72,41 @@ button:hover{background:#45a049;}
 </fieldset>
 <button type='submit'>Save</button>
 </form>
+<fieldset><legend>FTP Server</legend>
+<div id='ftpStatus'>Loading...</div>
+<button class='btn-sm' onclick='ftpControl(10)'>10 min</button>
+<button class='btn-sm' onclick='ftpControl(30)'>30 min</button>
+<button class='btn-sm' onclick='ftpControl(60)'>1 hour</button>
+<button class='btn-sm btn-red' onclick='ftpControl(0)'>Off</button>
+</fieldset>
 <div id='status'></div>
 </div>
 <script>
 var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','maxLogSize','maxOldLogCount'];
+var adminPwSet=false;
 fetch('/config?format=json').then(r=>r.json()).then(d=>{
 fields.forEach(f=>{var e=document.getElementById(f);if(e)e.value=d[f]!=null?d[f]:'';});
+adminPwSet=!!d.adminPasswordSet;
+var st=document.getElementById('adminPwStatus');
+if(adminPwSet){
+st.className='pw-set';st.textContent='Password is set.';
+document.getElementById('curAdminPwRow').style.display='block';
+}else{
+st.className='pw-unset';st.textContent='No password set \u2014 set one to secure this page and disable open FTP.';
+}
 });
 function save(e){
 e.preventDefault();
 var d={};fields.forEach(f=>{var e=document.getElementById(f);d[f]=e?e.value:'';});
 d.curWifiPw=document.getElementById('curWifiPw').value;
 d.curMqttPw=document.getElementById('curMqttPw').value;
+var ap=document.getElementById('adminPassword').value;
+var apc=document.getElementById('adminPasswordConfirm').value;
+if(ap.length>0){
+if(ap!==apc){var s=document.getElementById('status');s.className='err';s.textContent='Admin passwords do not match.';s.style.display='block';return false;}
+d.adminPassword=ap;
+d.curAdminPw=document.getElementById('curAdminPw').value;
+}
 var s=document.getElementById('status');
 fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r=>r.json()).then(r=>{
 s.className=r.reboot?'info':r.error?'err':'ok';
@@ -76,6 +115,30 @@ s.style.display='block';
 if(r.reboot){setTimeout(()=>{s.textContent='Rebooting... page will reload in 5s';setTimeout(()=>location.reload(),5000);},1000);}
 document.getElementById('curWifiPw').value='';
 document.getElementById('curMqttPw').value='';
+document.getElementById('adminPassword').value='';
+document.getElementById('adminPasswordConfirm').value='';
+document.getElementById('curAdminPw').value='';
+if(ap.length>0&&!r.error){adminPwSet=true;document.getElementById('adminPwStatus').className='pw-set';document.getElementById('adminPwStatus').textContent='Password is set.';document.getElementById('curAdminPwRow').style.display='block';loadFtpStatus();}
 }).catch(err=>{s.className='err';s.textContent='Error: '+err;s.style.display='block';});
 return false;}
+function ftpControl(mins){
+fetch('/ftp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({duration:mins})}).then(r=>r.json()).then(r=>{
+if(r.error){alert(r.error);}
+loadFtpStatus();
+}).catch(err=>alert('Error: '+err));
+}
+function loadFtpStatus(){
+fetch('/ftp').then(r=>r.json()).then(d=>{
+var el=document.getElementById('ftpStatus');
+if(d.active){
+el.textContent=d.remainingMinutes>0?'Active ('+d.remainingMinutes+' min remaining)':'Active (unlimited)';
+el.style.background='#d4edda';el.style.color='#155724';
+}else{
+el.textContent='Inactive';
+el.style.background='#e9ecef';el.style.color='#333';
+}
+}).catch(()=>{document.getElementById('ftpStatus').textContent='Error loading status';});
+}
+loadFtpStatus();
+setInterval(loadFtpStatus,30000);
 </script></body></html>

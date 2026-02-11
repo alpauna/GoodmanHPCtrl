@@ -66,6 +66,8 @@ Config config;
 
 // FTP server uses Arduino's SD library (STORAGE_SD mode)
 FtpServer ftpSrv;
+bool ftpActive = false;
+unsigned long ftpStopTime = 0;
 
 
 std::map<String, InputPin*> _isrEvent;
@@ -371,6 +373,43 @@ void setup() {
   webHandler.setConfig(&config);
   webHandler.setTimezone(proj.gmtOffsetSec, proj.daylightOffsetSec);
 
+  // Initialize Arduino's SD library alongside SdFat for FTP (both share the same SPI card)
+  bool sdForFtp = config.isSDCardInitialized() && SD.begin(SS);
+
+  // FTP control callbacks
+  webHandler.setFtpControl(
+    // Enable callback
+    [sdForFtp](int durationMin) {
+      if (!sdForFtp) return;
+      ftpSrv.begin("admin", "admin");
+      ftpActive = true;
+      ftpStopTime = millis() + ((unsigned long)durationMin * 60000UL);
+      Log.info("FTP", "FTP enabled for %d minutes", durationMin);
+    },
+    // Disable callback
+    []() {
+      if (ftpActive) {
+        ftpSrv.end();
+        ftpActive = false;
+        ftpStopTime = 0;
+        Log.info("FTP", "FTP disabled");
+      }
+    },
+    // Status callback
+    []() -> String {
+      int remainingMin = 0;
+      if (ftpActive && ftpStopTime > 0) {
+        unsigned long now = millis();
+        if (ftpStopTime > now) {
+          remainingMin = (int)((ftpStopTime - now) / 60000) + 1;
+        }
+      }
+      return "{\"active\":" + String(ftpActive ? "true" : "false") +
+             ",\"remainingMinutes\":" + String(remainingMin) + "}";
+    }
+  );
+  webHandler.setFtpState(&ftpActive, &ftpStopTime);
+
   // Start HTTPS before HTTP so setupRoutes() knows whether to redirect or serve directly
   if (config.hasCertificates()) {
     webHandler.beginSecure(config.getCert(), config.getCertLen(), config.getKey(), config.getKeyLen());
@@ -379,11 +418,12 @@ void setup() {
   }
   webHandler.begin();
 
-  // Start FTP server for SD card file management (HTML pages in /www/)
-  // Initialize Arduino's SD library alongside SdFat (both share the same SPI card)
-  if (config.isSDCardInitialized() && SD.begin(SS)) {
+  // Conditional FTP startup: only auto-start if no admin password is set
+  if (sdForFtp && !config.hasAdminPassword()) {
     ftpSrv.begin("admin", "admin");
-    Log.info("FTP", "FTP server started on port 21 (admin/admin)");
+    ftpActive = true;
+    ftpStopTime = 0;  // Unlimited until admin password is set
+    Log.info("FTP", "FTP server started (no admin password set)");
   }
 
   mqttHandler.begin(_MQTT_HOST_DEFAULT, _MQTT_PORT, _MQTT_USER, _MQTT_PASSWORD);
@@ -548,7 +588,13 @@ void loop() {
     ESP.restart();
   }
 
-  ftpSrv.handleFTP();
+  if (ftpActive && ftpStopTime > 0 && millis() >= ftpStopTime) {
+    ftpSrv.end();
+    ftpActive = false;
+    ftpStopTime = 0;
+    Log.info("FTP", "FTP auto-disabled (timeout)");
+  }
+  if (ftpActive) ftpSrv.handleFTP();
 
   bool bIdle = ts.execute();
   if (bIdle) {
