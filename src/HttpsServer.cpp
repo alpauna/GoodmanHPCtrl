@@ -700,6 +700,14 @@ static esp_err_t dashboardGetHandler(httpd_req_t* req) {
     return serveFileHttps(req, "/www/dashboard.html");
 }
 
+static esp_err_t logViewGetHandler(httpd_req_t* req) {
+    return serveFileHttps(req, "/www/log.html");
+}
+
+static esp_err_t heapViewGetHandler(httpd_req_t* req) {
+    return serveFileHttps(req, "/www/heap.html");
+}
+
 // --- Root/index handler ---
 
 static esp_err_t rootGetHandler(httpd_req_t* req) {
@@ -843,6 +851,22 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &dashGet);
+
+    httpd_uri_t logViewGet = {
+        .uri = "/log/view",
+        .method = HTTP_GET,
+        .handler = logViewGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &logViewGet);
+
+    httpd_uri_t heapViewGet = {
+        .uri = "/heap/view",
+        .method = HTTP_GET,
+        .handler = heapViewGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &heapViewGet);
 
     httpd_uri_t stateGet = {
         .uri = "/state",
