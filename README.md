@@ -51,6 +51,15 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - Logs fault condition and resolution time
   - Highest priority fault — checked before LPS and ambient temp
 
+- **Suction Low-Temperature Protection** (COOL mode only) — Monitors SUCTION_TEMP for freezing conditions:
+  - Warns when suction temp drops below 34°F
+  - Shuts down CNT below 32°F (critically low), keeps FAN running
+  - Blocks CNT activation while fault is active
+  - Rechecks every 1 minute
+  - Auto-recovers when temp rises above 40°F (8°F hysteresis from critical)
+  - Auto-clears if mode changes away from COOL
+  - Logs fault condition and resolution time
+
 - **LPS Fault Protection** — When the LPS (Low Pressure Switch) input goes LOW:
   - Immediately shuts down CNT if running
   - Sets state to `ERROR`, blocking all state updates
@@ -277,7 +286,8 @@ Full controller state, published on every state transition, fault event, and com
   "defrost": false,
   "lpsFault": false,
   "lowTemp": false,
-  "compressorOverTemp": false
+  "compressorOverTemp": false,
+  "suctionLowTemp": false
 }
 ```
 
@@ -291,6 +301,7 @@ Full controller state, published on every state transition, fault event, and com
 | `lpsFault` | bool | Whether an LPS low-pressure fault is active |
 | `lowTemp` | bool | Whether ambient temperature is below the low-temp threshold |
 | `compressorOverTemp` | bool | Whether compressor temperature exceeds 240°F threshold |
+| `suctionLowTemp` | bool | Whether suction temperature is critically low in COOL mode (< 32°F) |
 
 ### `goodman/fault`
 
