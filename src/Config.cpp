@@ -1,16 +1,10 @@
 #include "Config.h"
-#include "sdios.h"
 #include "esp_hmac.h"
 #include "esp_random.h"
-
-// External references needed for config loading
-extern ArduinoOutStream cout;
 
 // External callbacks for temp sensors
 extern void tempSensorUpdateCallback(TempSensor* sensor);
 extern void tempSensorChangeCallback(TempSensor* sensor);
-
-#define SPI_SPEED SD_SCK_MHZ(SD_SPI_SPEED)
 
 uint8_t Config::_aesKey[32] = {0};
 bool Config::_encryptionReady = false;
@@ -242,56 +236,37 @@ bool Config::verifyAdminPassword(const String& plaintext) const {
 }
 
 bool Config::initSDCard() {
-    if (!_sd.begin(SS, SPI_SPEED)) {
-        if (_sd.card()->errorCode()) {
-            cout <<
-                "\nSD initialization failed.\n"
-                "Do not reformat the card!\n"
-                "Is the card correctly inserted?\n"
-                "Is chipSelect set to the correct value?\n"
-                "Does another SPI device need to be disabled?\n"
-                "Is there a wiring/soldering problem?\n";
-            cout << "\nerrorCode: " << hex << showbase;
-            cout << int(_sd.card()->errorCode());
-            cout << ", errorData: " << int(_sd.card()->errorData());
-            cout << dec << noshowbase << endl;
-            return false;
-        }
-        cout << "\nCard successfully initialized.\n";
-        if (_sd.vol()->fatType() == 0) {
-            cout << "Can't find a valid FAT16/FAT32/exFAT partition.\n";
-            return false;
-        }
-        cout << "Can't determine error type\n";
+    if (!SD.begin(SS, SPI, SD_SPI_SPEED * 1000000UL)) {
+        Serial.println("\nSD initialization failed.");
+        Serial.println("Is the card correctly inserted?");
+        Serial.println("Is chipSelect set to the correct value?");
         return false;
     }
-    cout << "\nCard successfully initialized.\n";
-    cout << endl;
-
-    uint32_t size = _sd.card()->sectorCount();
-    if (size == 0) {
-        cout << "Can't determine the card size.\n";
-        return false;
-    }
+    Serial.println("\nCard successfully initialized.\n");
     _sdInitialized = true;
     return true;
 }
 
 bool Config::openConfigFile(const char* filename, TempSensorMap& config, ProjectInfo& proj) {
-    if (!_sd.exists(filename) || (_configFile.open(filename, O_RDONLY) && _configFile.size() == 0)) {
+    if (!SD.exists(filename)) {
+        return saveConfiguration(filename, config, proj);
+    }
+    _configFile = SD.open(filename, FILE_READ);
+    if (!_configFile || _configFile.size() == 0) {
         _configFile.close();
         return saveConfiguration(filename, config, proj);
     }
     _configFile.close();
 
-    return _configFile.open(filename, O_RDONLY);
+    _configFile = SD.open(filename, FILE_READ);
+    return (bool)_configFile;
 }
 
 bool Config::loadTempConfig(const char* filename, TempSensorMap& config, ProjectInfo& proj) {
-    if (!_configFile.isOpen()) {
+    if (!_configFile) {
         return false;
     }
-    _configFile.rewind();
+    _configFile.seek(0);
 
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, _configFile);
@@ -313,7 +288,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     const char* wifi_password = doc["wifi"]["password"];
     _wifiSSID = wifi_ssid != nullptr ? wifi_ssid : "";
     _wifiPassword = wifi_password != nullptr ? decryptPassword(wifi_password != nullptr ? wifi_password : "") : "";
-    cout << "Read WiFi SSID:" << wifi_ssid << endl;
+    Serial.printf("Read WiFi SSID:%s\n", wifi_ssid ? wifi_ssid : "");
 
     JsonObject mqtt = doc["mqtt"];
     const char* mqtt_user = mqtt["user"];
@@ -324,36 +299,34 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     _mqttUser = mqtt_user != nullptr ? mqtt_user : "";
     _mqttPassword = mqtt_password != nullptr ? decryptPassword(mqtt_password != nullptr ? mqtt_password : "") : "";
     _mqttHost.fromString(mqtt_host != nullptr ? mqtt_host : "192.168.1.2");
-    cout << "Read mqtt Host:" << _mqttHost.toString().c_str() << endl;
+    Serial.printf("Read mqtt Host:%s\n", _mqttHost.toString().c_str());
 
     // Load log rotation settings
     JsonObject logging = doc["logging"];
     proj.maxLogSize = logging["maxLogSize"] | (50 * 1024 * 1024);  // Default 50MB
     proj.maxOldLogCount = logging["maxOldLogCount"] | 10;          // Default 10 files
-    cout << "Read log settings: maxSize=" << proj.maxLogSize
-         << " maxOldCount=" << (int)proj.maxOldLogCount << endl;
+    Serial.printf("Read log settings: maxSize=%u maxOldCount=%d\n", proj.maxLogSize, (int)proj.maxOldLogCount);
 
     // Load heat runtime accumulation
     JsonObject runtime = doc["runtime"];
     proj.heatRuntimeAccumulatedMs = runtime["heatAccumulatedMs"] | 0;
-    cout << "Read heat runtime: " << proj.heatRuntimeAccumulatedMs << " ms" << endl;
+    Serial.printf("Read heat runtime: %u ms\n", proj.heatRuntimeAccumulatedMs);
 
     // Load timezone settings
     JsonObject timezone = doc["timezone"];
     proj.gmtOffsetSec = timezone["gmtOffset"] | (-21600);
     proj.daylightOffsetSec = timezone["daylightOffset"] | 3600;
-    cout << "Read timezone: gmtOffset=" << proj.gmtOffsetSec
-         << " daylightOffset=" << proj.daylightOffsetSec << endl;
+    Serial.printf("Read timezone: gmtOffset=%d daylightOffset=%d\n", proj.gmtOffsetSec, proj.daylightOffsetSec);
 
     // Load low temp threshold
     JsonObject lowTemp = doc["lowTemp"];
     proj.lowTempThreshold = lowTemp["threshold"] | 20.0f;
-    cout << "Read lowTemp threshold: " << proj.lowTempThreshold << "F" << endl;
+    Serial.printf("Read lowTemp threshold: %.1fF\n", proj.lowTempThreshold);
 
     // Load admin password hash (already hashed, no decryption needed)
     const char* adminPw = doc["admin"]["password"];
     _adminPasswordHash = (adminPw != nullptr && strlen(adminPw) > 0) ? adminPw : "";
-    cout << "Admin password: " << (_adminPasswordHash.length() > 0 ? "set" : "not set") << endl;
+    Serial.printf("Admin password: %s\n", _adminPasswordHash.length() > 0 ? "set" : "not set");
 
     clearConfig(config);
     for (JsonPair sensors_temp_item : doc["sensors"]["temp"].as<JsonObject>()) {
@@ -361,16 +334,14 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         const char* desc = sensors_temp_item.value()["description"];
         int last_value = sensors_temp_item.value()["last-value"];
         const char* name = sensors_temp_item.value()["name"];
-        cout << "Key:" << key << "\t";
-        cout << "Description:" << desc << "\t";
-        cout << "Last Value:" << last_value << endl;
-        cout << "Name: " << name << endl;
+        Serial.printf("Key:%s\tDescription:%s\tLast Value:%d\n", key, desc, last_value);
+        Serial.printf("Name: %s\n", name);
 
         TempSensor* sensor = new TempSensor(String(desc));
         config[name] = sensor;
 
         String devaddrStr = String(key);
-        cout << "Devstr:" << devaddrStr << endl;
+        Serial.printf("Devstr:%s\n", devaddrStr.c_str());
         TempSensor::stringToAddress(devaddrStr, sensor->getDeviceAddress());
 
         sensor->setValue(last_value);
@@ -379,9 +350,10 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         sensor->setChangeCallback(tempSensorChangeCallback);
         sensor->setUpdateCallback(tempSensorUpdateCallback);
 
-        cout << "JSON description: " << sensor->getDescription()
-             << "\tID:" << TempSensor::addressToString(sensor->getDeviceAddress())
-             << "\t Value:" << sensor->getValue() << endl;
+        Serial.printf("JSON description: %s\tID:%s\t Value:%.1f\n",
+             sensor->getDescription().c_str(),
+             TempSensor::addressToString(sensor->getDeviceAddress()).c_str(),
+             sensor->getValue());
     }
     _configFile.close();
     return true;
@@ -397,13 +369,17 @@ void Config::clearConfig(TempSensorMap& config) {
 }
 
 bool Config::saveConfiguration(const char* filename, TempSensorMap& config, ProjectInfo& proj) {
-    if (_sd.exists(filename) && _configFile.open(filename, O_RDONLY) && _configFile.size() > 0) {
+    if (SD.exists(filename)) {
+        _configFile = SD.open(filename, FILE_READ);
+        if (_configFile && _configFile.size() > 0) {
+            _configFile.close();
+            return false;
+        }
         _configFile.close();
-        return false;
     }
-    _configFile.close();
-    if (!_configFile.open(filename, O_RDWR | O_TRUNC | O_CREAT)) {
-        cout << "open failed: " << "\"" << filename << "\"" << endl;
+    _configFile = SD.open(filename, FILE_WRITE);
+    if (!_configFile) {
+        Serial.printf("open failed: \"%s\"\n", filename);
         return false;
     }
     JsonDocument doc;
@@ -457,8 +433,8 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     String output;
     serializeJson(doc, _configFile);
     serializeJsonPretty(doc, output);
-    cout << "Temp sensor as json..." << endl;
-    cout << output << endl;
+    Serial.println("Temp sensor as json...");
+    Serial.println(output);
     _configFile.close();
     return true;
 }
@@ -468,8 +444,8 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
         return false;
     }
 
-    FsFile file;
-    if (!file.open(filename, O_RDONLY)) {
+    fs::File file = SD.open(filename, FILE_READ);
+    if (!file) {
         return false;
     }
 
@@ -513,7 +489,8 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     admin["password"] = _adminPasswordHash;
 
     // Write back
-    if (!file.open(filename, O_RDWR | O_TRUNC)) {
+    file = SD.open(filename, FILE_WRITE);
+    if (!file) {
         return false;
     }
     serializeJson(doc, file);
@@ -526,8 +503,8 @@ bool Config::loadCertificates(const char* certFile, const char* keyFile) {
 
     // Helper lambda to read a PEM file into a PSRAM buffer
     auto readFile = [this](const char* path, uint8_t*& buf, size_t& len) -> bool {
-        FsFile f;
-        if (!f.open(path, O_RDONLY)) return false;
+        fs::File f = SD.open(path, FILE_READ);
+        if (!f) return false;
         len = f.size();
         if (len == 0) { f.close(); return false; }
         buf = (uint8_t*)ps_malloc(len + 1);  // +1 for null terminator
@@ -556,8 +533,8 @@ bool Config::updateRuntime(const char* filename, uint32_t heatRuntimeMs) {
         return false;
     }
 
-    FsFile file;
-    if (!file.open(filename, O_RDONLY)) {
+    fs::File file = SD.open(filename, FILE_READ);
+    if (!file) {
         return false;
     }
 
@@ -573,7 +550,8 @@ bool Config::updateRuntime(const char* filename, uint32_t heatRuntimeMs) {
     doc["runtime"]["heatAccumulatedMs"] = heatRuntimeMs;
 
     // Write back
-    if (!file.open(filename, O_RDWR | O_TRUNC)) {
+    file = SD.open(filename, FILE_WRITE);
+    if (!file) {
         return false;
     }
     serializeJson(doc, file);

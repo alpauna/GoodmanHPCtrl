@@ -3,7 +3,7 @@
 
 #include <Arduino.h>
 #include <map>
-#include "SdFat.h"
+#include <SD.h>
 #include "ArduinoJson.h"
 #include "TempSensor.h"
 #include "mbedtls/base64.h"
@@ -69,7 +69,6 @@ class Config {
     size_t getKeyLen() const { return _keyLen; }
 
     // SD card access
-    SdFs* getSd() { return &_sd; }
     bool isSDCardInitialized() const { return _sdInitialized; }
 
     // ProjectInfo access
@@ -89,8 +88,7 @@ class Config {
     void setTempSensorDiscoveryCallback(TempSensorDiscoveryCallback cb) { _tempDiscoveryCb = cb; }
 
   private:
-    SdFs _sd;
-    FsFile _configFile;
+    fs::File _configFile;
     bool _sdInitialized;
 
     // Config values

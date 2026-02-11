@@ -7,7 +7,7 @@
 #include <Update.h>
 #include <ArduinoJson.h>
 #include <TaskSchedulerDeclarations.h>
-#include "SdFat.h"
+#include <SD.h>
 #include "mbedtls/base64.h"
 #include "HttpsServer.h"
 #include "Config.h"
@@ -79,8 +79,8 @@ static bool checkHttpsAuth(httpd_req_t* req) {
 // --- SD card file serving helper ---
 
 static esp_err_t serveFileHttps(httpd_req_t* req, const char* sdPath) {
-    FsFile file;
-    if (!file.open(sdPath, O_RDONLY)) {
+    fs::File file = SD.open(sdPath, FILE_READ);
+    if (!file) {
         httpd_resp_send_404(req);
         return ESP_OK;
     }
@@ -461,6 +461,31 @@ static esp_err_t ftpPostHandler(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// --- Temps handler ---
+
+static esp_err_t tempsGetHandler(httpd_req_t* req) {
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+    String json = "[";
+    bool firstTime = true;
+    for (const auto& m : ctx->hpController->getTempSensorMap()) {
+        if (m.first.length() > 0 && m.second != nullptr) {
+            if (!firstTime) json += ",";
+            json += "{";
+            json += "\"description\":\"" + m.second->getDescription() + "\"";
+            json += ",\"devid\":\"" + TempSensor::addressToString(m.second->getDeviceAddress()) + "\"";
+            json += ",\"value\":" + String(m.second->getValue());
+            json += ",\"previous\":" + String(m.second->getPrevious());
+            json += ",\"valid\":\"" + String(m.second->isValid() ? "true" : "false") + "\"";
+            json += "}";
+        }
+        firstTime = false;
+    }
+    json += "]";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
 // --- Heap handler ---
 
 static esp_err_t heapGetHandler(httpd_req_t* req) {
@@ -615,6 +640,14 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &logGet);
+
+    httpd_uri_t tempsGet = {
+        .uri = "/temps",
+        .method = HTTP_GET,
+        .handler = tempsGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &tempsGet);
 
     httpd_uri_t heapGet = {
         .uri = "/heap",

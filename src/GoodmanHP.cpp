@@ -26,6 +26,8 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _suctionLowTemp(false)
     , _suctionLowTempStartTick(0)
     , _suctionLowTempLastCheckTick(0)
+    , _startupLockout(true)
+    , _startupTick(0)
 {
     _instance = this;
     _tskUpdate = new Task(500, TASK_FOREVER, [this]() {
@@ -60,9 +62,13 @@ void GoodmanHP::begin() {
     }
     _cntActivated = false;
 
+    _startupLockout = true;
+    _startupTick = millis();
+
     _tskUpdate->enable();
     _tskCheckTemps->enable();
-    Log.info("HP", "GoodmanHP controller started, all outputs verified OFF");
+    Log.info("HP", "GoodmanHP controller started, all outputs verified OFF, %lu sec startup lockout",
+             STARTUP_LOCKOUT_MS / 1000UL);
 }
 
 void GoodmanHP::addInput(const String& name, InputPin* pin) {
@@ -127,6 +133,16 @@ void GoodmanHP::clearTempSensors() {
 }
 
 void GoodmanHP::update() {
+    // Startup lockout: keep all outputs OFF until sensors have stabilized
+    if (_startupLockout) {
+        if (millis() - _startupTick >= STARTUP_LOCKOUT_MS) {
+            _startupLockout = false;
+            Log.info("HP", "Startup lockout complete, enabling output control");
+        } else {
+            return;
+        }
+    }
+
     checkCompressorTemp();
     checkSuctionTemp();
     checkLPSFault();

@@ -158,8 +158,8 @@ void WebHandler::serveFile(AsyncWebServerRequest* request, const String& path) {
         return;
     }
     String fullPath = "/www" + path;
-    FsFile file;
-    if (!file.open(fullPath.c_str(), O_RDONLY)) {
+    fs::File file = SD.open(fullPath.c_str(), FILE_READ);
+    if (!file) {
         request->send(404, "text/plain", "Not found: " + path);
         return;
     }

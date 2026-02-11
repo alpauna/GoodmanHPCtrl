@@ -5,11 +5,9 @@
 #include <DallasTemperature.h>
 #include <SPI.h>
 #include <Wire.h>
-#include "SdFat.h"
 #include <SD.h>
 #include <SimpleFTPServer.h>
 #include <StringStream.h>
-#include "sdios.h"
 #include <TaskSchedulerDeclarations.h>
 #include "CircularBuffer.hpp"
 #include "Logger.h"
@@ -22,7 +20,6 @@
 
 
 const char compile_date[] = __DATE__ " " __TIME__;
-ArduinoOutStream cout(Serial);
 IPAddress _MQTT_HOST_DEFAULT = IPAddress(192, 168, 0, 46);
 const char* _filename = "/config.txt";
 const float MB_MULTIPLIER = 1.0/(1024.0*1024.0);
@@ -64,7 +61,6 @@ int freeMemory() { return 0;}
 // Config instance for SD card and configuration management
 Config config;
 
-// FTP server uses Arduino's SD library (STORAGE_SD mode)
 FtpServer ftpSrv;
 bool ftpActive = false;
 unsigned long ftpStopTime = 0;
@@ -175,7 +171,7 @@ bool onOutpin(OutPin *pin, bool on, bool inCallback, float &newPercent, float or
 }
 
 Task tWaitOnWiFi(TASK_SECOND, 60, [](){
-  cout << ".";
+  Serial.print(".");
 }, &ts, false, onWifiWaitEnable, onWifiWaitDisable);
 
 
@@ -228,7 +224,7 @@ bool onWifiWaitEnable(){
 }
 
 void onWifiWaitDisable(){
-  cout << endl;
+  Serial.println();
   if (WiFi.isConnected()) {
     Log.info("WiFi", "IP: %s", WiFi.localIP().toString().c_str());
   } else {
@@ -240,7 +236,7 @@ void onWifiWaitDisable(){
 void printAddress(DeviceAddress temp);
 
 void wifiConnected(){
-  cout << "WiFi Connected within " << millis() - _wifiStartMillis << " ms." << endl;
+  Serial.printf("WiFi Connected within %lu ms.\n", millis() - _wifiStartMillis);
   mqttHandler.startReconnect();
 }
 
@@ -279,12 +275,12 @@ void onCheckInputQueue(){
    
     //auto isInActiveMap = activePins.find(pin->getName());
     if(pin->isActive()){
-      cout << "Activating pin: " << pin->getName() << endl;
+      Serial.printf("Activating pin: %s\n", pin->getName());
       //remove from activePins as it is not active any longer.
       pin->activeNow();
       pin->getTask()->restartDelayed( pin->getTask()->getInterval() );
     }else{
-      cout << "Deactvated pin: " << pin->getName() << endl;
+      Serial.printf("Deactivated pin: %s\n", pin->getName());
       pin->getTask()->disable();
       pin->inactiveNow();
       pin->fireCallback();
@@ -365,7 +361,7 @@ void setup() {
     // Load TLS certificates for HTTPS server
     config.loadCertificates("/cert.pem", "/key.pem");
   }
-  cout << "SD Card is read." << endl;
+  Serial.println("SD Card is read.");
   WiFi.onEvent(onWiFiEvent);
   connectToWifi();
 
@@ -373,34 +369,25 @@ void setup() {
   webHandler.setConfig(&config);
   webHandler.setTimezone(proj.gmtOffsetSec, proj.daylightOffsetSec);
 
-  // FTP uses Arduino's SD library; SD.begin()/end() called on demand to avoid
-  // conflicting with SdFat which owns the SPI bus for normal file serving.
   bool sdCardReady = config.isSDCardInitialized();
 
-  // FTP control callbacks
+  // FTP control callbacks — SD is already initialized, no swap needed
   webHandler.setFtpControl(
-    // Enable callback — release SdFat, start Arduino SD + FTP
+    // Enable callback
     [sdCardReady](int durationMin) {
       if (!sdCardReady) return;
-      config.getSd()->end();
-      SD.begin(SS);
       ftpSrv.begin("admin", "admin");
       ftpActive = true;
       ftpStopTime = millis() + ((unsigned long)durationMin * 60000UL);
       Log.info("FTP", "FTP enabled for %d minutes", durationMin);
     },
-    // Disable callback — stop FTP + release SD, re-init SdFat
+    // Disable callback
     []() {
       if (ftpActive) {
         ftpSrv.end();
-        SD.end();
         ftpActive = false;
         ftpStopTime = 0;
-        if (!config.getSd()->begin(SS, SD_SCK_MHZ(SD_SPI_SPEED))) {
-          Log.error("FTP", "SdFat re-init failed after FTP disable");
-        } else {
-          Log.info("FTP", "FTP disabled, SdFat restored");
-        }
+        Log.info("FTP", "FTP disabled");
       }
     },
     // Status callback
@@ -427,7 +414,6 @@ void setup() {
   webHandler.begin();
 
   // FTP is never auto-started at boot — enable on demand from config page.
-  // While FTP is active, SD card web pages won't load (SPI bus conflict).
 
   mqttHandler.begin(_MQTT_HOST_DEFAULT, _MQTT_PORT, _MQTT_USER, _MQTT_PASSWORD);
   mqttHandler.setController(&hpController);
@@ -435,7 +421,7 @@ void setup() {
   // Initialize Logger
   Log.setLevel(Logger::LOG_INFO);
   Log.setMqttClient(mqttHandler.getClient(), "goodman/log");
-  Log.setLogFile(config.getSd(), "/log.txt", proj.maxLogSize, proj.maxOldLogCount);
+  Log.setLogFile("/log.txt", proj.maxLogSize, proj.maxOldLogCount);
   Log.info("MAIN", "Logger initialized");
 
   // Add input pins to GoodmanHP controller
@@ -559,12 +545,12 @@ void printIdleStatus() {
   if (millis() <= _nextIdlePrintTime) {
     return;
   }
-  cout << "Current WiFi IP:" << webHandler.getWiFiIP() << endl;
-  cout << "Current HP Mode: " << hpController.getStateString() << endl;
-  
+  Serial.printf("Current WiFi IP:%s\n", webHandler.getWiFiIP());
+  Serial.printf("Current HP Mode: %s\n", hpController.getStateString());
+
   // Stats for outpin activation.
   for (auto& out : hpController.getOutputMap()) {
-    cout << "Out Pin: " << out.first << " On Count: " << out.second->getOnCount()  << " State: " << out.second->isPinOn()  << endl;
+    Serial.printf("Out Pin: %s On Count: %d State: %d\n", out.first.c_str(), out.second->getOnCount(), out.second->isPinOn());
   }
   _nextIdlePrintTime = millis() + 60000;
   Serial.print(": Idle count:");
@@ -593,14 +579,9 @@ void loop() {
 
   if (ftpActive && ftpStopTime > 0 && millis() >= ftpStopTime) {
     ftpSrv.end();
-    SD.end();
     ftpActive = false;
     ftpStopTime = 0;
-    if (!config.getSd()->begin(SS, SD_SCK_MHZ(SD_SPI_SPEED))) {
-      Log.error("FTP", "SdFat re-init failed after FTP timeout");
-    } else {
-      Log.info("FTP", "FTP auto-disabled, SdFat restored");
-    }
+    Log.info("FTP", "FTP auto-disabled (timeout)");
   }
   if (ftpActive) ftpSrv.handleFTP();
 

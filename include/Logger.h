@@ -4,7 +4,6 @@
 #include <Arduino.h>
 #include <AsyncMqttClient.h>
 class AsyncWebSocket;  // forward declaration — full include in Logger.cpp
-#include "SdFat.h"
 #include <SD.h>
 #include <ESP32-targz.h>
 #include <vector>
@@ -29,7 +28,7 @@ public:
     void debug(const char* tag, const char* format, ...);
 
     void setMqttClient(AsyncMqttClient* client, const char* topic);
-    void setLogFile(SdFs* sd, const char* filename,
+    void setLogFile(const char* filename,
                     uint32_t maxFileSize = DEFAULT_MAX_FILE_SIZE,
                     uint8_t maxRotatedFiles = DEFAULT_MAX_ROTATED_FILES);
 
@@ -59,9 +58,6 @@ private:
     void rotateLogFiles();
     bool compressFile(const char* srcPath, const char* destPath);
     String getRotatedFilename(uint8_t index);
-    bool initArduinoSD();
-    void deinitArduinoSD();
-    bool reinitSdFat();
 
     Level _level;
     bool _serialEnabled;
@@ -74,7 +70,7 @@ private:
 
     AsyncWebSocket* _ws;
 
-    SdFs* _sd;
+    bool _sdReady;
     String _logFilename;
     uint32_t _maxFileSize;
     uint8_t _maxRotatedFiles;
