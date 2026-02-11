@@ -2,8 +2,8 @@
 # Upload HTML files from data/www/ to SD card /www/ via FTP
 # Usage: ./scripts/update-www.sh <device-ip> [admin-password]
 #
-# If admin password is set on the device, it will authenticate and
-# enable FTP for 10 minutes before uploading files.
+# If admin password is set on the device, it will authenticate via HTTPS
+# and enable FTP for 10 minutes before uploading files.
 
 set -e
 
@@ -19,13 +19,9 @@ if [ ! -d "$WWW_DIR" ]; then
     exit 1
 fi
 
-# Try HTTPS first, fall back to HTTP
+# Always use HTTPS with -k for self-signed certs
 BASE_URL="https://$DEVICE_IP"
-CURL_OPTS="-sk"  # silent + allow self-signed certs
-if ! curl $CURL_OPTS --connect-timeout 3 "$BASE_URL/ftp" -o /dev/null 2>/dev/null; then
-    BASE_URL="http://$DEVICE_IP"
-    CURL_OPTS="-s"
-fi
+CURL_OPTS="-sk"
 
 # Enable FTP for 10 minutes
 if [ -n "$ADMIN_PW" ]; then
@@ -40,22 +36,23 @@ if [ -n "$ADMIN_PW" ]; then
     fi
     echo "FTP enabled: $RESP"
 else
-    echo "No admin password provided, assuming FTP is already active..."
+    echo "No admin password provided, enabling FTP without auth..."
+    RESP=$(curl $CURL_OPTS \
+        -X POST "$BASE_URL/ftp" \
+        -H "Content-Type: application/json" \
+        -d '{"duration":10}')
+    echo "FTP response: $RESP"
 fi
 
-# Wait briefly for FTP to start
-sleep 1
+# Wait for FTP to start
+sleep 2
 
-# Build FTP upload commands
-FTP_CMDS="cd /www"$'\n'
+# Count files to upload
 FILE_COUNT=0
 for f in "$WWW_DIR"/*; do
     [ -f "$f" ] || continue
-    FNAME="$(basename "$f")"
-    FTP_CMDS+="put $f $FNAME"$'\n'
     FILE_COUNT=$((FILE_COUNT + 1))
 done
-FTP_CMDS+="bye"$'\n'
 
 if [ "$FILE_COUNT" -eq 0 ]; then
     echo "No files found in $WWW_DIR"
@@ -64,10 +61,14 @@ fi
 
 echo "Uploading $FILE_COUNT file(s) to $DEVICE_IP:/www/ ..."
 
-# Upload via FTP
-curl -s -T "{$(cd "$WWW_DIR" && ls -1 | tr '\n' ',' | sed 's/,$//')}" \
-    --ftp-create-dirs \
-    "ftp://$FTP_USER:$FTP_PASS@$DEVICE_IP/www/" \
-    2>&1
+# Upload each file via FTP
+for f in "$WWW_DIR"/*; do
+    [ -f "$f" ] || continue
+    FNAME="$(basename "$f")"
+    echo "  $FNAME"
+    curl -s -T "$f" --ftp-create-dirs \
+        "ftp://$FTP_USER:$FTP_PASS@$DEVICE_IP/www/$FNAME"
+done
 
 echo "Done. $FILE_COUNT file(s) uploaded."
+echo "FTP will auto-disable in ~10 minutes."
