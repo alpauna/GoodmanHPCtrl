@@ -436,14 +436,6 @@ void GoodmanHP::updateState() {
 
     State newState = State::OFF;
 
-    // DFT input triggers defrost from HEAT mode only
-    bool dftTrigger = dft->isActive() && _state == State::HEAT && !_softwareDefrost;
-
-    if (dftTrigger) {
-        Log.info("HP", "DFT emergency defrost triggered from HEAT mode");
-        startSoftwareDefrost();
-    }
-
     if (_softwareDefrost && y->isActive()) {
         newState = State::DEFROST;
     } else if (y->isActive() && o->isActive()) {
@@ -617,6 +609,7 @@ void GoodmanHP::setLPSFaultCallback(LPSFaultCallback cb) {
 void GoodmanHP::accumulateHeatRuntime() {
     uint32_t now = millis();
 
+    // COOL, DEFROST, and DFT off (temps > 32°F, no ice) clear accumulated runtime
     if (_state == State::COOL) {
         if (_heatRuntimeMs > 0) {
             Log.info("HP", "Switched to COOL, resetting heat runtime (%lu min accumulated)", _heatRuntimeMs / 60000UL);
@@ -626,8 +619,18 @@ void GoodmanHP::accumulateHeatRuntime() {
         return;
     }
 
+    // DFT off means temps > 32°F — no ice on coils, clear runtime
+    if (!isDFTActive() && _heatRuntimeMs > 0 && !_softwareDefrost) {
+        Log.info("HP", "DFT off (temps > 32F), resetting heat runtime (%lu min accumulated)", _heatRuntimeMs / 60000UL);
+        resetHeatRuntime();
+        _heatRuntimeLastTick = now;
+        return;
+    }
+
+    // Only accumulate in HEAT mode when CNT is on, DFT is active (closed at 32°F),
+    // and not currently in software defrost
     OutPin* cnt = getOutput("CNT");
-    if (_state == State::HEAT && cnt != nullptr && cnt->isOn() && !_softwareDefrost) {
+    if (_state == State::HEAT && cnt != nullptr && cnt->isOn() && !_softwareDefrost && isDFTActive()) {
         uint32_t delta = now - _heatRuntimeLastTick;
         _heatRuntimeMs += delta;
 
@@ -635,7 +638,7 @@ void GoodmanHP::accumulateHeatRuntime() {
         uint32_t logInterval = 5UL * 60 * 1000;
         if (_heatRuntimeMs / logInterval > _heatRuntimeLastLogMs / logInterval) {
             _heatRuntimeLastLogMs = _heatRuntimeMs;
-            Log.info("HP", "Heat runtime accumulated: %lu min", _heatRuntimeMs / 60000UL);
+            Log.info("HP", "Heat runtime accumulated: %lu min (DFT active)", _heatRuntimeMs / 60000UL);
         }
     }
 

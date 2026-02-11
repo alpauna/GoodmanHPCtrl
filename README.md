@@ -76,17 +76,15 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - Threshold is configurable via `lowTemp.threshold` in SD card config
 
 - **Automatic Defrost** — After 90 minutes of accumulated CNT runtime in HEAT mode, initiates software defrost (turns off CNT, turns on RV, turns on CNT):
+  - Heat runtime only accumulates when DFT input is active (closed at 32°F, indicating icing conditions)
+  - DFT turning off (temps > 32°F) clears accumulated runtime — no ice risk
   - Runs for at least 3 minutes before checking exit conditions
   - Rechecks CONDENSER_TEMP every 1 minute during defrost with logging
-  - Exits when CONDENSER_TEMP > 41°F or 15-minute safety timeout
-  - Switching to COOL mode resets accumulated runtime
+  - Exits when CONDENSER_TEMP > 60°F or 15-minute safety timeout
+  - Only COOL and DEFROST modes clear accumulated runtime; Y going off does not
+  - Only HEAT mode adds time to accumulated runtime
   - Runtime persists to SD card every 5 minutes, restored on boot
   - If Y drops during defrost, all outputs turn off but defrost resumes when Y reactivates in HEAT mode
-
-- **DFT Emergency Defrost** — DFT input triggers the same unified defrost cycle from HEAT mode:
-  - Same 3-minute minimum runtime, 41°F exit condition, 15-minute safety timeout
-  - Uses the same software defrost path as automatic defrost
-  - Resets accumulated heat runtime on completion
 
 ### Class Structure
 
