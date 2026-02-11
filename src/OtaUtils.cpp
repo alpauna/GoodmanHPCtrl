@@ -111,6 +111,16 @@ bool revertFirmwareFromSD(const char* path) {
     }
 }
 
+bool applyFirmwareFromSD(const char* path) {
+    backupFirmwareToSD();
+    bool ok = revertFirmwareFromSD(path);
+    if (ok) {
+        SD.remove(path);
+        Log.info("OTA", "Removed %s after successful apply", path);
+    }
+    return ok;
+}
+
 bool firmwareBackupExists(const char* path) {
     return SD.exists(path);
 }

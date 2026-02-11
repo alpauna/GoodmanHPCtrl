@@ -343,7 +343,6 @@ static esp_err_t updateGetHandler(httpd_req_t* req) {
 
 static esp_err_t updatePostHandler(httpd_req_t* req) {
     if (!checkHttpsAuth(req)) return ESP_OK;
-    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
 
     int remaining = req->content_len;
     if (remaining <= 0) {
@@ -351,42 +350,68 @@ static esp_err_t updatePostHandler(httpd_req_t* req) {
         return ESP_OK;
     }
 
-    backupFirmwareToSD();
-
-    if (!Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000)) {
-        Log.error("OTA", "Update.begin failed");
-        Update.printError(Serial);
-        httpd_resp_send(req, "FAIL: begin error", HTTPD_RESP_USE_STRLEN);
+    File fw = SD.open("/firmware.new", FILE_WRITE);
+    if (!fw) {
+        httpd_resp_send(req, "FAIL: SD open error", HTTPD_RESP_USE_STRLEN);
         return ESP_OK;
     }
 
-    Log.info("OTA", "HTTPS OTA Update Start (%d bytes)", remaining);
+    Log.info("OTA", "Saving firmware to SD (%d bytes)", remaining);
 
     char buf[1024];
     while (remaining > 0) {
         int toRead = remaining > (int)sizeof(buf) ? (int)sizeof(buf) : remaining;
         int ret = httpd_req_recv(req, buf, toRead);
         if (ret <= 0) {
-            Update.abort();
+            fw.close();
+            SD.remove("/firmware.new");
             httpd_resp_send(req, "FAIL: receive error", HTTPD_RESP_USE_STRLEN);
             return ESP_OK;
         }
-        if (Update.write((uint8_t*)buf, ret) != (size_t)ret) {
-            Update.printError(Serial);
-            Update.abort();
-            httpd_resp_send(req, "FAIL: write error", HTTPD_RESP_USE_STRLEN);
+        if (fw.write((uint8_t*)buf, ret) != (size_t)ret) {
+            fw.close();
+            SD.remove("/firmware.new");
+            httpd_resp_send(req, "FAIL: SD write error", HTTPD_RESP_USE_STRLEN);
             return ESP_OK;
         }
         remaining -= ret;
     }
 
-    if (Update.end(true)) {
-        Log.info("OTA", "HTTPS OTA Update Successful");
+    fw.close();
+    Log.info("OTA", "Firmware saved to SD");
+    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t applyGetHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    bool exists = firmwareBackupExists("/firmware.new");
+    size_t size = exists ? firmwareBackupSize("/firmware.new") : 0;
+    String json = "{\"exists\":" + String(exists ? "true" : "false") +
+                  ",\"size\":" + String(size) + "}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
+static esp_err_t applyPostHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+
+    if (!firmwareBackupExists("/firmware.new")) {
+        httpd_resp_send(req, "FAIL: no firmware uploaded", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    if (applyFirmwareFromSD()) {
         httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
-        *(ctx->shouldReboot) = true;
+        if (!*(ctx->delayedReboot)) {
+            *(ctx->delayedReboot) = new Task(2 * TASK_SECOND, TASK_ONCE, [ctx]() {
+                *(ctx->shouldReboot) = true;
+            }, ctx->scheduler, false);
+        }
+        (*(ctx->delayedReboot))->restartDelayed(2 * TASK_SECOND);
     } else {
-        Log.error("OTA", "HTTPS OTA Update Failed");
-        Update.printError(Serial);
         httpd_resp_send(req, "FAIL", HTTPD_RESP_USE_STRLEN);
     }
     return ESP_OK;
@@ -583,7 +608,12 @@ static esp_err_t revertPostHandler(httpd_req_t* req) {
 
     if (revertFirmwareFromSD()) {
         httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
-        *(ctx->shouldReboot) = true;
+        if (!*(ctx->delayedReboot)) {
+            *(ctx->delayedReboot) = new Task(2 * TASK_SECOND, TASK_ONCE, [ctx]() {
+                *(ctx->shouldReboot) = true;
+            }, ctx->scheduler, false);
+        }
+        (*(ctx->delayedReboot))->restartDelayed(2 * TASK_SECOND);
     } else {
         httpd_resp_send(req, "FAIL", HTTPD_RESP_USE_STRLEN);
     }
@@ -650,6 +680,22 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &updPost);
+
+    httpd_uri_t appGet = {
+        .uri = "/apply",
+        .method = HTTP_GET,
+        .handler = applyGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &appGet);
+
+    httpd_uri_t appPost = {
+        .uri = "/apply",
+        .method = HTTP_POST,
+        .handler = applyPostHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &appPost);
 
     httpd_uri_t revGet = {
         .uri = "/revert",

@@ -524,33 +524,63 @@ void WebHandler::setupRoutes() {
         });
         _server.addHandler(configPostHandler);
 
+        // Upload saves firmware to SD card (no reboot)
         _server.on("/update", HTTP_POST, [this](AsyncWebServerRequest *request) {
             if (!checkAuth(request)) return;
-            _shouldReboot = !Update.hasError();
-            AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", _shouldReboot ? "OK" : "FAIL");
-            response->addHeader("Connection", "close");
-            request->send(response);
-        }, nullptr, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+            request->send(200, "text/plain", _otaUploadOk ? "OK" : "FAIL: upload error");
+            _otaUploadOk = false;
+        }, nullptr, [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
             if (index == 0) {
-                backupFirmwareToSD();
-                Log.info("OTA", "Update Start: %u bytes", total);
-                if (!Update.begin(total)) {
-                    Log.error("OTA", "Update.begin failed");
-                    Update.printError(Serial);
+                _otaUploadOk = false;
+                _otaFile = SD.open("/firmware.new", FILE_WRITE);
+                if (!_otaFile) {
+                    Log.error("OTA", "Failed to open /firmware.new for writing");
+                    return;
                 }
+                Log.info("OTA", "Saving firmware to SD (%u bytes)", total);
             }
-            if (!Update.hasError()) {
-                if (Update.write(data, len) != len) {
-                    Update.printError(Serial);
+            if (_otaFile) {
+                if (_otaFile.write(data, len) != len) {
+                    Log.error("OTA", "SD write failed at offset %u", index);
+                    _otaFile.close();
+                    SD.remove("/firmware.new");
+                    _otaFile = File();
                 }
             }
             if (index + len == total) {
-                if (Update.end(true)) {
-                    Log.info("OTA", "OTA Update Successful");
-                } else {
-                    Log.error("OTA", "OTA Update Failed");
-                    Update.printError(Serial);
+                if (_otaFile) {
+                    _otaFile.close();
+                    Log.info("OTA", "Firmware saved to SD");
+                    _otaUploadOk = true;
                 }
+            }
+        });
+
+        // Apply: backup current firmware, flash from SD, reboot
+        _server.on("/apply", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            bool exists = firmwareBackupExists("/firmware.new");
+            size_t size = exists ? firmwareBackupSize("/firmware.new") : 0;
+            String json = "{\"exists\":" + String(exists ? "true" : "false") +
+                          ",\"size\":" + String(size) + "}";
+            request->send(200, "application/json", json);
+        });
+
+        _server.on("/apply", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            if (!firmwareBackupExists("/firmware.new")) {
+                request->send(400, "text/plain", "FAIL: no firmware uploaded");
+                return;
+            }
+            bool ok = applyFirmwareFromSD();
+            request->send(200, "text/plain", ok ? "OK" : "FAIL");
+            if (ok) {
+                if (!_tDelayedReboot) {
+                    _tDelayedReboot = new Task(2 * TASK_SECOND, TASK_ONCE, [this]() {
+                        _shouldReboot = true;
+                    }, _ts, false);
+                }
+                _tDelayedReboot->restartDelayed(2 * TASK_SECOND);
             }
         });
 
@@ -571,7 +601,14 @@ void WebHandler::setupRoutes() {
             }
             bool ok = revertFirmwareFromSD();
             request->send(200, "text/plain", ok ? "OK" : "FAIL");
-            if (ok) _shouldReboot = true;
+            if (ok) {
+                if (!_tDelayedReboot) {
+                    _tDelayedReboot = new Task(2 * TASK_SECOND, TASK_ONCE, [this]() {
+                        _shouldReboot = true;
+                    }, _ts, false);
+                }
+                _tDelayedReboot->restartDelayed(2 * TASK_SECOND);
+            }
         });
 
         // FTP control endpoints (HTTP fallback)
@@ -613,6 +650,12 @@ void WebHandler::setupRoutes() {
         });
         _server.on("/update", HTTP_POST, [this](AsyncWebServerRequest *request) {
             request->redirect("https://" + String(getWiFiIP()) + "/update");
+        });
+        _server.on("/apply", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/apply");
+        });
+        _server.on("/apply", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/apply");
         });
         _server.on("/revert", HTTP_GET, [this](AsyncWebServerRequest *request) {
             request->redirect("https://" + String(getWiFiIP()) + "/revert");

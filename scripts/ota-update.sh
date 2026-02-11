@@ -88,15 +88,26 @@ if [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ]; then
     exit 0
 fi
 
-echo "Uploading firmware (previous version will be backed up on device)..."
+# Step 1: Upload to SD card
+echo "Uploading firmware to SD card..."
 RESP=$(curl $CURL_OPTS $AUTH_OPTS \
     -X POST "$BASE_URL/update" \
     -H "Content-Type: application/octet-stream" \
     --data-binary "@$FIRMWARE" 2>/dev/null)
 
-if [ "$RESP" = "OK" ]; then
-    echo "Upload successful. Device is rebooting..."
-else
+if [ "$RESP" != "OK" ]; then
     echo "Upload failed: $RESP"
+    exit 1
+fi
+echo "Firmware uploaded to SD card."
+
+# Step 2: Apply (backup current + flash new + reboot)
+echo "Applying firmware update (backing up current version)..."
+RESP=$(curl $CURL_OPTS $AUTH_OPTS -X POST "$BASE_URL/apply" 2>/dev/null)
+
+if [ "$RESP" = "OK" ]; then
+    echo "Apply successful. Device is rebooting..."
+else
+    echo "Apply failed: $RESP"
     exit 1
 fi

@@ -5,6 +5,7 @@
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
 #include <Update.h>
+#include <SD.h>
 #include <WiFi.h>
 #include <Wire.h>
 #include <time.h>
@@ -62,6 +63,10 @@ class WebHandler {
     FtpStatusCallback _ftpStatusCb;
     bool* _ftpActivePtr = nullptr;
     unsigned long* _ftpStopTimePtr = nullptr;
+
+    // OTA upload state (for chunked body handler)
+    File _otaFile;
+    bool _otaUploadOk = false;
 
     bool checkAuth(AsyncWebServerRequest* request);
     void syncNtpTime();
