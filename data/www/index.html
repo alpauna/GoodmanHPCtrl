@@ -19,8 +19,8 @@ h1{color:#333;}
 <a href='/dashboard'>Dashboard</a>
 <a href='/config'>Config</a>
 <a href='/update'>Update</a>
-<a href='/log'>Log</a>
-<a href='/heap'>Heap</a>
+<a href='/log/view'>Log</a>
+<a href='/heap/view'>Heap</a>
 <a href='#' onclick="if(confirm('Reboot device?')){fetch('/reboot',{method:'POST',headers:{'Authorization':'Basic '+btoa(prompt('user:pass','admin:'))}}).then(r=>r.ok?alert('Rebooting...'):alert('Failed'))};return false" style='margin-left:auto;background:#d32f2f;'>Reboot</a>
 </nav>
 <div class='content'>
@@ -30,7 +30,7 @@ h1{color:#333;}
 <div class='card'><h3>Configuration</h3><p>WiFi, MQTT, timezone, and sensor settings.</p><a href='/config'>Open Config</a></div>
 <div class='card'><h3>OTA Update</h3><p>Upload new firmware over the air.</p><a href='/update'>Open Update</a></div>
 <div class='card'><h3>Temperatures</h3><p>Current sensor readings (JSON).</p><a href='/temps'>View Temps</a></div>
-<div class='card'><h3>System</h3><p>Heap and memory info.</p><a href='/heap'>View Heap</a></div>
+<div class='card'><h3>System</h3><p>Heap and memory info.</p><a href='/heap/view'>View Heap</a></div>
 <div class='card'><h3>Log</h3><p>Recent log entries.</p><a href='/log?limit=50'>View Log</a></div>
 </div>
 <script>document.getElementById('ip').textContent=location.hostname;</script>

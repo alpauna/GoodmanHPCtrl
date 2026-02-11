@@ -199,6 +199,14 @@ void WebHandler::setupRoutes() {
         serveFile(request, "/dashboard.html");
     });
 
+    _server.on("/log/view", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        serveFile(request, "/log.html");
+    });
+
+    _server.on("/heap/view", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        serveFile(request, "/heap.html");
+    });
+
     _server.on("/scan", HTTP_GET, [](AsyncWebServerRequest *request) {
         String json = "[";
         int n = WiFi.scanComplete();

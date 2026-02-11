@@ -43,8 +43,8 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <a href='/dashboard' class='active'>Dashboard</a>
 <a href='/config'>Config</a>
 <a href='/update'>Update</a>
-<a href='/log'>Log</a>
-<a href='/heap'>Heap</a>
+<a href='/log/view'>Log</a>
+<a href='/heap/view'>Heap</a>
 <a href='#' onclick="if(confirm('Reboot device?')){fetch('/reboot',{method:'POST',headers:{'Authorization':'Basic '+btoa(prompt('user:pass','admin:'))}}).then(r=>r.ok?alert('Rebooting...'):alert('Failed'))};return false" style='margin-left:auto;background:#d32f2f;'>Reboot</a>
 </nav>
 <div class='content'>

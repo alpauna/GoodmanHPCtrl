@@ -1,0 +1,66 @@
+<html><head><title>Heap - Goodman HP</title>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<style>
+body{font-family:Arial,sans-serif;margin:0;padding:0;background:#f5f5f5;}
+nav{background:#333;padding:10px 20px;display:flex;align-items:center;gap:18px;}
+nav a{color:#fff;text-decoration:none;font-size:14px;padding:6px 12px;border-radius:4px;}
+nav a:hover,nav a.active{background:#4CAF50;}
+nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
+.content{max-width:600px;margin:20px auto;padding:0 20px;}
+h1{color:#333;}
+.card{background:#fff;border:1px solid #ddd;border-radius:6px;padding:15px;margin-bottom:15px;}
+.card h3{margin-top:0;color:#4CAF50;}
+.row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee;}
+.row:last-child{border-bottom:none;}
+.row .lbl{color:#555;font-size:14px;}
+.row .val{font-weight:bold;color:#333;font-size:14px;}
+.footer{text-align:center;color:#999;font-size:12px;margin-top:10px;}
+</style></head><body>
+<nav><span class='brand'>Goodman HP</span>
+<a href='/'>Home</a>
+<a href='/dashboard'>Dashboard</a>
+<a href='/config'>Config</a>
+<a href='/update'>Update</a>
+<a href='/log'>Log</a>
+<a href='/heap' class='active'>Heap</a>
+<a href='#' onclick="if(confirm('Reboot device?')){fetch('/reboot',{method:'POST',headers:{'Authorization':'Basic '+btoa(prompt('user:pass','admin:'))}}).then(r=>r.ok?alert('Rebooting...'):alert('Failed'))};return false" style='margin-left:auto;background:#d32f2f;'>Reboot</a>
+</nav>
+<div class='content'>
+<h1>System / Heap</h1>
+<div class='card'>
+<h3>Memory</h3>
+<div id='mem'>Loading...</div>
+</div>
+<div class='card'>
+<h3>CPU Load</h3>
+<div id='cpu'>Loading...</div>
+</div>
+<div id='footer' class='footer'></div>
+</div>
+<script>
+function load(){
+  var xhr=new XMLHttpRequest();
+  xhr.open('GET','/heap',true);
+  xhr.onload=function(){
+    if(xhr.status===200){
+      try{
+        var d=JSON.parse(xhr.responseText);
+        var m=document.getElementById('mem');
+        var freeKB=Math.round(d['free heap']/1024);
+        m.innerHTML="<div class='row'><span class='lbl'>Free Heap</span><span class='val'>"+freeKB+" KB</span></div>"
+          +"<div class='row'><span class='lbl'>Free PSRAM</span><span class='val'>"+d['free psram MB'].toFixed(2)+" MB</span></div>"
+          +"<div class='row'><span class='lbl'>Used PSRAM</span><span class='val'>"+d['used psram MB'].toFixed(2)+" MB</span></div>";
+        var c=document.getElementById('cpu');
+        c.innerHTML="<div class='row'><span class='lbl'>Core 0</span><span class='val'>"+(d.cpuLoad0!==undefined?d.cpuLoad0+'%':'--')+"</span></div>"
+          +"<div class='row'><span class='lbl'>Core 1</span><span class='val'>"+(d.cpuLoad1!==undefined?d.cpuLoad1+'%':'--')+"</span></div>";
+        var now=new Date();
+        document.getElementById('footer').textContent='Updated: '+now.toLocaleTimeString();
+      }catch(e){}
+    }
+  };
+  xhr.send();
+}
+load();
+setInterval(load,3000);
+</script>
+</body></html>
