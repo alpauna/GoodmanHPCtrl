@@ -30,6 +30,7 @@ class OutPin
     RuntimeCallback _runtimeClbk = nullptr;
     uint32_t _runtimeInterval = 1000;
     bool _transitioning = false;
+    bool _lastPwmHigh = false;
   protected:
     uint8_t percent_to_byte_float(float percent);
     void turnOnPercent(float percent);

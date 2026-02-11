@@ -105,7 +105,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     _mqttUser = mqtt_user != nullptr ? mqtt_user : "";
     _mqttPassword = mqtt_password != nullptr ? mqtt_password : "";
     _mqttHost.fromString(mqtt_host != nullptr ? mqtt_host : "192.168.1.2");
-    cout << "Read mqtt Host:" << _mqttHost << endl;
+    cout << "Read mqtt Host:" << _mqttHost.toString().c_str() << endl;
 
     // Load log rotation settings
     JsonObject logging = doc["logging"];

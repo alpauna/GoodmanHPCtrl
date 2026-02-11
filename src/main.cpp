@@ -221,7 +221,11 @@ bool onWifiWaitEnable(){
 
 void onWifiWaitDisable(){
   cout << endl;
-  cout << "WiFi IP:" << WiFi.localIP() << endl;
+  if (WiFi.isConnected()) {
+    Log.info("WiFi", "IP: %s", WiFi.localIP().toString().c_str());
+  } else {
+    Log.warn("WiFi", "Connection timed out, no IP assigned");
+  }
   mqttHandler.startReconnect();
 }
 

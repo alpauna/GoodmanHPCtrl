@@ -18,8 +18,10 @@ uint8_t OutPin::percent_to_byte_float(float percent) {
 void OutPin::turnOnPercent(float percent){
   float origPercent = _percentOn;
   _percentOn = percent;
+  _transitioning = true;
   if(_clbk != nullptr){
     if(!_clbk(this, isOn(), true, _percentOn, origPercent)){
+      _transitioning = false;
       return;
     }
   }
@@ -34,6 +36,7 @@ void OutPin::turnOnPercent(float percent){
   }else{
     analogWrite(_pin, percent_to_byte_float(percent));
   }
+  _transitioning = false;
 }
 
 OutPin::OutPin(Scheduler *ts, uint32_t delay, int8_t pin, String name, String boardPin, OutputPinCallback clbk) {
@@ -157,15 +160,17 @@ bool OutPin::isOn() {
   }
   return softwareOn;
 }
-bool OutPin::isPinOn() { 
-  if(!_pwm){ 
-    if(!_inverse)
-      return digitalRead(_pin);
-    else
-      return !digitalRead(_pin);
-  }else{
-    return analogRead(_pin) > 500;
+bool OutPin::isPinOn() {
+  bool pinHigh;
+  if (!_pwm) {
+    pinHigh = digitalRead(_pin);
+  } else {
+    // ESP32 ADC: 0-4095. Hysteresis: must reach 800 to go high, must drop below 400 to go low.
+    int reading = analogRead(_pin);
+    pinHigh = _lastPwmHigh ? (reading >= 400) : (reading >= 800);
+    _lastPwmHigh = pinHigh;
   }
+  return _inverse ? !pinHigh : pinHigh;
 }
 
 void OutPin::initPin(){
