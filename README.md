@@ -7,6 +7,11 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **Relay control** — 4 output pins (FAN, Contactor, W-Heat, Reversing Valve) driven by 4 input signals (Low Pressure Switch, Defrost, Y-Cool, O-Heat)
 - **Temperature monitoring** — 4 OneWire (Dallas DS18B20) sensors (compressor, suction, ambient, condenser) + 1 MCP9600 I2C thermocouple (liquid line)
 - **Remote access** — REST API, WebSocket, and MQTT for monitoring and control
+- **HTTPS/SSL** — Self-signed ECC P-256 certificate on port 443 for secure `/config`, `/update`, and `/ftp` endpoints. Graceful fallback to HTTP-only if no certs found on SD card
+- **Admin password protection** — Salted SHA-256 hashed admin password with HTTP Basic Auth on sensitive endpoints (`/config`, `/update`, `/ftp`). No password = open access
+- **AES-256-GCM password encryption** — WiFi and MQTT passwords encrypted at rest on SD card using hardware-derived keys from ESP32 eFuse HMAC peripheral. Auto-migrates from legacy XOR format
+- **Web-based configuration** — HTML pages served from `/www/` on SD card for configuration, OTA updates, and monitoring
+- **FTP server** — SimpleFTPServer with timed enable/disable (10/30/60 min) from config page. Defaults to OFF; auto-disables after timeout
 - **OTA updates** — Firmware upload via web interface
 - **SD card configuration** — WiFi, MQTT, and sensor settings stored as JSON on SD card
 - **Multi-output logging** — Serial, MQTT, SD card with tar.gz compressed log rotation, and WebSocket streaming
@@ -121,6 +126,9 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | `TempSensor` | Temperature sensor with callbacks; supports OneWire (DS18B20) and I2C (MCP9600) |
 | `Config` | SD card and JSON configuration management |
 | `Logger` | Multi-output logging with tar.gz rotation, ring buffer, and WebSocket streaming |
+| `WebHandler` | AsyncWebServer (port 80) with REST API, WebSocket, and HTTPS redirects |
+| `HttpsServer` | ESP-IDF HTTPS server (port 443) for secure endpoints |
+| `MQTTHandler` | MQTT client with auto-reconnect and topic publishing |
 
 ## Hardware
 
@@ -170,9 +178,28 @@ pio run -t upload -e freenove_esp32_s3_wroom
 pio run -t monitor -e freenove_esp32_s3_wroom
 ```
 
-### SD Card Configuration
+### SD Card Setup
 
-Place a `config.txt` file on the SD card with the following format:
+The SD card should contain:
+
+```
+/config.txt          — Device configuration (WiFi, MQTT, sensors, admin password)
+/www/index.html      — Home page
+/www/config.html     — Configuration page
+/www/update.html     — OTA update page
+/cert.pem            — HTTPS certificate (optional, see below)
+/key.pem             — HTTPS private key (optional, see below)
+```
+
+**Generate config.txt interactively:**
+
+```bash
+./scripts/configure.sh --local
+```
+
+This prompts for WiFi and MQTT credentials and writes `data/config.txt`. Copy it to the SD card root. Passwords are stored in plaintext and encrypted on first boot (if eFuse key is provisioned).
+
+**Manual config.txt format:**
 
 ```json
 {
@@ -202,6 +229,9 @@ Place a `config.txt` file on the SD card with the following format:
   },
   "lowTemp": {
     "threshold": 20.0
+  },
+  "admin": {
+    "password": ""
   },
   "sensors": {
     "temp": {
@@ -241,22 +271,87 @@ Place a `config.txt` file on the SD card with the following format:
 
 Sensor addresses are discovered automatically on startup and can be mapped to names via this config.
 
+### HTTPS / SSL
+
+The device runs a secondary HTTPS server (ESP-IDF `esp_https_server`) on port 443 for sensitive endpoints (`/config`, `/update`, `/ftp`). The AsyncWebServer on port 80 redirects those paths to HTTPS.
+
+**Generate a self-signed certificate:**
+
+```bash
+./generate_cert.sh
+```
+
+This creates `cert.pem` and `key.pem` (ECC P-256, 10-year validity). Copy both to the SD card root. If no certificates are found, all endpoints fall back to HTTP.
+
+### Admin Password
+
+Sensitive endpoints (`/config`, `/update`, `/ftp`) are protected by HTTP Basic Auth when an admin password is set. The password is stored as a salted SHA-256 hash (`$HASH$<base64(salt+digest)>`) in the `admin.password` config field.
+
+- **No password set** — All endpoints are open, no authentication required
+- **Password set** — Browser prompts for Basic Auth (username: `admin`, password: your admin password)
+- Set the admin password from the config page (`/config`) or via the API
+- Setting a password automatically disables FTP if it was running
+
+### Password Encryption
+
+WiFi and MQTT passwords are encrypted at rest on the SD card using AES-256-GCM. The encryption key is derived from a hardware key stored in the ESP32's eFuse HMAC peripheral — the key never leaves the silicon.
+
+**One-time eFuse key provisioning:**
+
+```bash
+./burn_efuse_key.sh [/dev/ttyUSB0]
+```
+
+This permanently burns a random 256-bit HMAC key to eFuse BLOCK_KEY0. The firmware uses `esp_hmac_calculate()` to derive AES keys from this hardware secret. Plaintext passwords on the SD card are automatically encrypted on the next config save. If no eFuse key is provisioned, passwords are stored in plaintext.
+
+### FTP Server
+
+FTP (SimpleFTPServer on port 21) is used for uploading HTML files to the SD card's `/www/` directory. Credentials are always `admin`/`admin`.
+
+- **FTP defaults to OFF** at boot
+- Enable from the config page with timed durations (10/30/60 min), auto-disables after timeout
+- If no admin password is set, FTP can be enabled without authentication
+
+**Upload web pages via FTP:**
+
+```bash
+./scripts/update-www.sh
+```
+
+This script prompts for the device IP and admin password, enables FTP for 10 minutes, and uploads all files from `data/www/` to the device's `/www/` directory.
+
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| `scripts/configure.sh` | Configure WiFi/MQTT credentials. `--local` writes `config.txt` for SD card; without flag, pushes config to device via HTTPS API |
+| `scripts/update-www.sh` | Upload HTML files from `data/www/` to device SD card via FTP (auto-enables FTP for 10 min) |
+| `generate_cert.sh` | Generate self-signed ECC P-256 certificate for HTTPS (`cert.pem` + `key.pem`) |
+| `burn_efuse_key.sh` | Burn random 256-bit HMAC key to ESP32-S3 eFuse BLOCK_KEY0 for AES-256-GCM encryption (irreversible) |
+
 ## API Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/temps` | Current temperature readings |
-| GET | `/heap` | Memory/heap statistics |
-| GET | `/scan` | WiFi network scan |
-| GET | `/log` | Recent log entries from ring buffer |
-| GET | `/log/level` | Current log level |
-| POST | `/log/level` | Set log level |
-| GET | `/log/config` | Logger output configuration |
-| POST | `/log/config` | Configure logger outputs (serial, mqtt, sdcard, websocket) |
-| GET | `/i2c/scan` | Scan I2C bus for connected devices |
-| GET | `/update` | OTA firmware update page |
-| POST | `/update` | Upload new firmware |
-| WS | `/ws` | WebSocket for real-time data and log streaming |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/` | | Home page (served from SD `/www/index.html`) |
+| GET | `/temps` | | Current temperature readings |
+| GET | `/heap` | | Memory/heap statistics |
+| GET | `/scan` | | WiFi network scan |
+| GET | `/log` | | Recent log entries from ring buffer (`?limit=N`) |
+| GET | `/log/level` | | Current log level |
+| POST | `/log/level` | | Set log level |
+| GET | `/log/config` | | Logger output configuration |
+| POST | `/log/config` | | Configure logger outputs (serial, mqtt, sdcard, websocket) |
+| GET | `/i2c/scan` | | Scan I2C bus for connected devices |
+| GET | `/config` | Yes | Configuration page / JSON (`?format=json`) |
+| POST | `/config` | Yes | Update configuration (JSON body) |
+| GET | `/update` | Yes | OTA firmware update page |
+| POST | `/update` | Yes | Upload new firmware |
+| GET | `/ftp` | Yes | FTP server status (`{"active":bool,"remainingMinutes":N}`) |
+| POST | `/ftp` | Yes | Enable/disable FTP (`{"duration":N}` minutes, 0=off) |
+| WS | `/ws` | | WebSocket for real-time data and log streaming |
+
+**Auth** = Requires HTTP Basic Auth when admin password is set. Endpoints marked with "Yes" redirect to HTTPS (port 443) when SSL certificates are available.
 
 ## MQTT Topics
 
@@ -360,6 +455,10 @@ When the fault clears:
 
 - **AsyncTCP watchdog** — The `CONFIG_ASYNC_TCP_USE_WDT=0` build flag is required in `platformio.ini`. Without it, AsyncTCP subscribes its task to the ESP-IDF task watchdog (5s timeout). When the MQTT broker is slow or unreachable, the async_tcp task cannot reset the watchdog in time, causing a panic and reboot. This flag prevents the async_tcp task from registering with the watchdog.
 
+- **HTTPS server separation** — `HttpsServer.cpp` is in a separate translation unit because `esp_https_server.h` (ESP-IDF) and `ESPAsyncWebServer.h` both define `HTTP_PUT`, `HTTP_OPTIONS`, and `HTTP_PATCH` enums and cannot coexist in the same TU. Logger.h forward-declares `AsyncWebSocket` to avoid pulling in the ESPAsyncWebServer header chain.
+
+- **SPI bus arbitration** — SdFat and Arduino SD library cannot coexist on the same SPI bus simultaneously. FTP uses Arduino SD (STORAGE_SD mode). When FTP starts, SdFat is ended and SD.begin() is called. When FTP stops, SD.end() is called and SdFat is re-initialized.
+
 ## Dependencies
 
 Managed automatically by PlatformIO. Key libraries:
@@ -372,3 +471,4 @@ Managed automatically by PlatformIO. Key libraries:
 - [SdFat](https://github.com/adafruit/SdFat) — SD card filesystem
 - [ESP32-targz](https://github.com/tobozo/ESP32-targz) — tar.gz compression for log rotation
 - [Adafruit MCP9600](https://github.com/adafruit/Adafruit_MCP9600) — I2C thermocouple amplifier driver
+- [SimpleFTPServer](https://github.com/xreef/SimpleFTPServer) — FTP server for SD card file uploads (STORAGE_SD mode)
