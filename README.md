@@ -39,7 +39,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 
 - **Output Control by State:**
   - **RV** (reversing valve): ON in COOL, OFF in HEAT/OFF
-  - **W** (auxiliary heat): ON only in DEFROST, OFF in all other modes
+  - **W** (auxiliary heat): ON in DEFROST, ERROR (HEAT mode only), and LOW_TEMP (non-COOL mode only); OFF otherwise
   - **CNT** (contactor): auto-activates when Y input becomes active, with short cycle protection: if CNT was off for less than 5 minutes, a 30-second delay is enforced before reactivation; if off for 5+ minutes, CNT activates immediately
 
 - **Compressor Over-Temperature Protection** — When COMPRESSOR_TEMP reaches 240°F or above:
