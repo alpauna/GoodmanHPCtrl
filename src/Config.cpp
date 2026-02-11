@@ -342,6 +342,36 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     return true;
 }
 
+bool Config::loadCertificates(const char* certFile, const char* keyFile) {
+    if (!_sdInitialized) return false;
+
+    // Helper lambda to read a PEM file into a PSRAM buffer
+    auto readFile = [this](const char* path, uint8_t*& buf, size_t& len) -> bool {
+        FsFile f;
+        if (!f.open(path, O_RDONLY)) return false;
+        len = f.size();
+        if (len == 0) { f.close(); return false; }
+        buf = (uint8_t*)ps_malloc(len + 1);  // +1 for null terminator
+        if (!buf) { f.close(); len = 0; return false; }
+        if ((size_t)f.read(buf, len) != len) {
+            free(buf); buf = nullptr; len = 0; f.close(); return false;
+        }
+        buf[len] = '\0';
+        f.close();
+        return true;
+    };
+
+    bool certOk = readFile(certFile, _certBuf, _certLen);
+    bool keyOk = readFile(keyFile, _keyBuf, _keyLen);
+
+    if (!certOk || !keyOk) {
+        if (_certBuf) { free(_certBuf); _certBuf = nullptr; _certLen = 0; }
+        if (_keyBuf) { free(_keyBuf); _keyBuf = nullptr; _keyLen = 0; }
+        return false;
+    }
+    return true;
+}
+
 bool Config::updateRuntime(const char* filename, uint32_t heatRuntimeMs) {
     if (!_sdInitialized) {
         return false;

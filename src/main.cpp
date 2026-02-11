@@ -345,6 +345,8 @@ void setup() {
       // Set low temp threshold from config
       hpController.setLowTempThreshold(proj.lowTempThreshold);
     }
+    // Load TLS certificates for HTTPS server
+    config.loadCertificates("/cert.pem", "/key.pem");
   }
   cout << "SD Card is read." << endl;
   WiFi.onEvent(onWiFiEvent);
@@ -354,6 +356,13 @@ void setup() {
   Config::setObfuscationKey(compile_date);
   webHandler.setConfig(&config);
   webHandler.setTimezone(proj.gmtOffsetSec, proj.daylightOffsetSec);
+
+  // Start HTTPS before HTTP so setupRoutes() knows whether to redirect or serve directly
+  if (config.hasCertificates()) {
+    webHandler.beginSecure(config.getCert(), config.getCertLen(), config.getKey(), config.getKeyLen());
+  } else {
+    Log.warn("HTTPS", "No certificates on SD card, HTTPS disabled. /config and /update served over HTTP.");
+  }
   webHandler.begin();
 
   mqttHandler.begin(_MQTT_HOST_DEFAULT, _MQTT_PORT, _MQTT_USER, _MQTT_PASSWORD);

@@ -1,4 +1,5 @@
 #include "Logger.h"
+#include <ESPAsyncWebServer.h>
 #include <stdarg.h>
 #include <time.h>
 #include <WiFi.h>

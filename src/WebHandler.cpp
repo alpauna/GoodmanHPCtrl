@@ -279,265 +279,290 @@ void WebHandler::setupRoutes() {
         request->send(200, "application/json", json);
     });
 
-    _server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "text/html",
-            "<html><head><title>ESP32 OTA Update</title></head>"
-            "<body><h1>ESP32 OTA Update</h1>"
-            "<form method='POST' action='/update' enctype='multipart/form-data'>"
-            "<input type='file' name='update'>"
-            "<input type='submit' value='Update'>"
-            "</form>"
-            "</body></html>");
-    });
+    // /config and /update are served via HTTPS when certificates are available.
+    // If HTTPS is active, these redirect HTTP->HTTPS. If no certs, they serve directly on HTTP.
+    // The actual handlers are registered in registerHttpsHandlers() or as fallbacks below.
+    if (!_httpsServer) {
+        // No HTTPS — serve /update and /config directly on HTTP (fallback)
+        _server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
+            request->send(200, "text/html",
+                "<html><head><title>ESP32 OTA Update</title></head>"
+                "<body><h1>ESP32 OTA Update</h1>"
+                "<form method='POST' action='/update' enctype='multipart/form-data'>"
+                "<input type='file' name='update'>"
+                "<input type='submit' value='Update'>"
+                "</form>"
+                "</body></html>");
+        });
 
-    // --- Config page routes ---
-    _server.on("/config", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        if (request->hasParam("format") && request->getParam("format")->value() == "json") {
-            // Serve JSON config data
+        _server.on("/config", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            if (request->hasParam("format") && request->getParam("format")->value() == "json") {
+                if (!_config || !_config->getProjectInfo()) {
+                    request->send(500, "application/json", "{\"error\":\"Config not available\"}");
+                    return;
+                }
+                ProjectInfo* proj = _config->getProjectInfo();
+                JsonDocument doc;
+                doc["wifiSSID"] = _config->getWifiSSID();
+                doc["wifiPassword"] = "******";
+                doc["mqttHost"] = _config->getMqttHost().toString();
+                doc["mqttPort"] = _config->getMqttPort();
+                doc["mqttUser"] = _config->getMqttUser();
+                doc["mqttPassword"] = "******";
+                doc["gmtOffsetHrs"] = proj->gmtOffsetSec / 3600.0f;
+                doc["daylightOffsetHrs"] = proj->daylightOffsetSec / 3600.0f;
+                doc["lowTempThreshold"] = proj->lowTempThreshold;
+                doc["maxLogSize"] = proj->maxLogSize;
+                doc["maxOldLogCount"] = proj->maxOldLogCount;
+                String json;
+                serializeJson(doc, json);
+                request->send(200, "application/json", json);
+                return;
+            }
+            request->send(200, "text/html",
+                "<html><head><title>Configuration</title>"
+                "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                "<style>"
+                "body{font-family:Arial,sans-serif;margin:0;padding:20px;background:#f5f5f5;}"
+                ".container{max-width:600px;margin:0 auto;}"
+                "h1{color:#333;}"
+                "fieldset{background:#fff;border:1px solid #ddd;border-radius:6px;padding:15px;margin-bottom:15px;}"
+                "legend{font-weight:bold;color:#4CAF50;padding:0 8px;}"
+                "label{display:block;margin:8px 0 3px;color:#555;font-size:14px;}"
+                "input[type=text],input[type=password],input[type=number]{width:100%;padding:8px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;}"
+                ".tag{font-size:11px;padding:2px 6px;border-radius:3px;margin-left:6px;color:#fff;}"
+                ".tag-reboot{background:#e67e22;}"
+                ".tag-live{background:#27ae60;}"
+                "button{background:#4CAF50;color:#fff;padding:10px 24px;border:none;border-radius:4px;cursor:pointer;font-size:16px;margin-top:10px;}"
+                "button:hover{background:#45a049;}"
+                "#status{margin-top:15px;padding:10px;border-radius:4px;display:none;}"
+                ".ok{background:#d4edda;color:#155724;display:block!important;}"
+                ".err{background:#f8d7da;color:#721c24;display:block!important;}"
+                ".info{background:#d1ecf1;color:#0c5460;display:block!important;}"
+                "</style></head><body>"
+                "<div class='container'>"
+                "<h1>Configuration</h1>"
+                "<form id='cf' onsubmit='return save(event)'>"
+                "<fieldset><legend>WiFi <span class='tag tag-reboot'>reboot</span></legend>"
+                "<label>SSID</label><input type='text' id='wifiSSID'>"
+                "<label>Password</label><input type='password' id='wifiPassword'>"
+                "<label>Current Password (required to change)</label><input type='password' id='curWifiPw'>"
+                "</fieldset>"
+                "<fieldset><legend>MQTT <span class='tag tag-reboot'>reboot</span></legend>"
+                "<label>Host</label><input type='text' id='mqttHost'>"
+                "<label>Port</label><input type='number' id='mqttPort'>"
+                "<label>User</label><input type='text' id='mqttUser'>"
+                "<label>Password</label><input type='password' id='mqttPassword'>"
+                "<label>Current Password (required to change)</label><input type='password' id='curMqttPw'>"
+                "</fieldset>"
+                "<fieldset><legend>Timezone <span class='tag tag-live'>live</span></legend>"
+                "<label>GMT Offset (hours)</label><input type='number' step='0.5' id='gmtOffsetHrs'>"
+                "<label>Daylight Offset (hours)</label><input type='number' step='0.5' id='daylightOffsetHrs'>"
+                "</fieldset>"
+                "<fieldset><legend>Low Temp Protection <span class='tag tag-live'>live</span></legend>"
+                "<label>Threshold (&deg;F)</label><input type='number' step='0.1' id='lowTempThreshold'>"
+                "</fieldset>"
+                "<fieldset><legend>Logging <span class='tag tag-live'>live</span></legend>"
+                "<label>Max Log Size (bytes)</label><input type='number' id='maxLogSize'>"
+                "<label>Max Old Log Count</label><input type='number' id='maxOldLogCount'>"
+                "</fieldset>"
+                "<button type='submit'>Save</button>"
+                "</form>"
+                "<div id='status'></div>"
+                "</div>"
+                "<script>"
+                "var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','maxLogSize','maxOldLogCount'];"
+                "fetch('/config?format=json').then(r=>r.json()).then(d=>{"
+                "fields.forEach(f=>{var e=document.getElementById(f);if(e)e.value=d[f]!=null?d[f]:'';});"
+                "});"
+                "function save(e){"
+                "e.preventDefault();"
+                "var d={};fields.forEach(f=>{var e=document.getElementById(f);d[f]=e?e.value:'';});"
+                "d.curWifiPw=document.getElementById('curWifiPw').value;"
+                "d.curMqttPw=document.getElementById('curMqttPw').value;"
+                "var s=document.getElementById('status');"
+                "fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r=>r.json()).then(r=>{"
+                "s.className=r.reboot?'info':r.error?'err':'ok';"
+                "s.textContent=r.message||r.error||'Saved';"
+                "s.style.display='block';"
+                "if(r.reboot){setTimeout(()=>{s.textContent='Rebooting... page will reload in 5s';setTimeout(()=>location.reload(),5000);},1000);}"
+                "document.getElementById('curWifiPw').value='';"
+                "document.getElementById('curMqttPw').value='';"
+                "}).catch(err=>{s.className='err';s.textContent='Error: '+err;s.style.display='block';});"
+                "return false;}"
+                "</script></body></html>");
+        });
+
+        auto* configPostHandler = new AsyncCallbackJsonWebHandler("/config", [this](AsyncWebServerRequest *request, JsonVariant &json) {
             if (!_config || !_config->getProjectInfo()) {
                 request->send(500, "application/json", "{\"error\":\"Config not available\"}");
                 return;
             }
             ProjectInfo* proj = _config->getProjectInfo();
-            JsonDocument doc;
-            doc["wifiSSID"] = _config->getWifiSSID();
-            doc["wifiPassword"] = "******";
-            doc["mqttHost"] = _config->getMqttHost().toString();
-            doc["mqttPort"] = _config->getMqttPort();
-            doc["mqttUser"] = _config->getMqttUser();
-            doc["mqttPassword"] = "******";
-            doc["gmtOffsetHrs"] = proj->gmtOffsetSec / 3600.0f;
-            doc["daylightOffsetHrs"] = proj->daylightOffsetSec / 3600.0f;
-            doc["lowTempThreshold"] = proj->lowTempThreshold;
-            doc["maxLogSize"] = proj->maxLogSize;
-            doc["maxOldLogCount"] = proj->maxOldLogCount;
-            String json;
-            serializeJson(doc, json);
-            request->send(200, "application/json", json);
-            return;
-        }
-        // Serve HTML config page
-        request->send(200, "text/html",
-            "<html><head><title>Configuration</title>"
-            "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-            "<style>"
-            "body{font-family:Arial,sans-serif;margin:0;padding:20px;background:#f5f5f5;}"
-            ".container{max-width:600px;margin:0 auto;}"
-            "h1{color:#333;}"
-            "fieldset{background:#fff;border:1px solid #ddd;border-radius:6px;padding:15px;margin-bottom:15px;}"
-            "legend{font-weight:bold;color:#4CAF50;padding:0 8px;}"
-            "label{display:block;margin:8px 0 3px;color:#555;font-size:14px;}"
-            "input[type=text],input[type=password],input[type=number]{width:100%;padding:8px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;}"
-            ".tag{font-size:11px;padding:2px 6px;border-radius:3px;margin-left:6px;color:#fff;}"
-            ".tag-reboot{background:#e67e22;}"
-            ".tag-live{background:#27ae60;}"
-            "button{background:#4CAF50;color:#fff;padding:10px 24px;border:none;border-radius:4px;cursor:pointer;font-size:16px;margin-top:10px;}"
-            "button:hover{background:#45a049;}"
-            "#status{margin-top:15px;padding:10px;border-radius:4px;display:none;}"
-            ".ok{background:#d4edda;color:#155724;display:block!important;}"
-            ".err{background:#f8d7da;color:#721c24;display:block!important;}"
-            ".info{background:#d1ecf1;color:#0c5460;display:block!important;}"
-            "</style></head><body>"
-            "<div class='container'>"
-            "<h1>Configuration</h1>"
-            "<form id='cf' onsubmit='return save(event)'>"
-            "<fieldset><legend>WiFi <span class='tag tag-reboot'>reboot</span></legend>"
-            "<label>SSID</label><input type='text' id='wifiSSID'>"
-            "<label>Password</label><input type='password' id='wifiPassword'>"
-            "<label>Current Password (required to change)</label><input type='password' id='curWifiPw'>"
-            "</fieldset>"
-            "<fieldset><legend>MQTT <span class='tag tag-reboot'>reboot</span></legend>"
-            "<label>Host</label><input type='text' id='mqttHost'>"
-            "<label>Port</label><input type='number' id='mqttPort'>"
-            "<label>User</label><input type='text' id='mqttUser'>"
-            "<label>Password</label><input type='password' id='mqttPassword'>"
-            "<label>Current Password (required to change)</label><input type='password' id='curMqttPw'>"
-            "</fieldset>"
-            "<fieldset><legend>Timezone <span class='tag tag-live'>live</span></legend>"
-            "<label>GMT Offset (hours)</label><input type='number' step='0.5' id='gmtOffsetHrs'>"
-            "<label>Daylight Offset (hours)</label><input type='number' step='0.5' id='daylightOffsetHrs'>"
-            "</fieldset>"
-            "<fieldset><legend>Low Temp Protection <span class='tag tag-live'>live</span></legend>"
-            "<label>Threshold (&deg;F)</label><input type='number' step='0.1' id='lowTempThreshold'>"
-            "</fieldset>"
-            "<fieldset><legend>Logging <span class='tag tag-live'>live</span></legend>"
-            "<label>Max Log Size (bytes)</label><input type='number' id='maxLogSize'>"
-            "<label>Max Old Log Count</label><input type='number' id='maxOldLogCount'>"
-            "</fieldset>"
-            "<button type='submit'>Save</button>"
-            "</form>"
-            "<div id='status'></div>"
-            "</div>"
-            "<script>"
-            "var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','maxLogSize','maxOldLogCount'];"
-            "fetch('/config?format=json').then(r=>r.json()).then(d=>{"
-            "fields.forEach(f=>{var e=document.getElementById(f);if(e)e.value=d[f]!=null?d[f]:'';});"
-            "});"
-            "function save(e){"
-            "e.preventDefault();"
-            "var d={};fields.forEach(f=>{var e=document.getElementById(f);d[f]=e?e.value:'';});"
-            "d.curWifiPw=document.getElementById('curWifiPw').value;"
-            "d.curMqttPw=document.getElementById('curMqttPw').value;"
-            "var s=document.getElementById('status');"
-            "fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r=>r.json()).then(r=>{"
-            "s.className=r.reboot?'info':r.error?'err':'ok';"
-            "s.textContent=r.message||r.error||'Saved';"
-            "s.style.display='block';"
-            "if(r.reboot){setTimeout(()=>{s.textContent='Rebooting... page will reload in 5s';setTimeout(()=>location.reload(),5000);},1000);}"
-            "document.getElementById('curWifiPw').value='';"
-            "document.getElementById('curMqttPw').value='';"
-            "}).catch(err=>{s.className='err';s.textContent='Error: '+err;s.style.display='block';});"
-            "return false;}"
-            "</script></body></html>");
-    });
+            JsonObject data = json.as<JsonObject>();
+            bool needsReboot = false;
+            String errors = "";
 
-    // POST /config - save configuration
-    auto* configPostHandler = new AsyncCallbackJsonWebHandler("/config", [this](AsyncWebServerRequest *request, JsonVariant &json) {
-        if (!_config || !_config->getProjectInfo()) {
-            request->send(500, "application/json", "{\"error\":\"Config not available\"}");
-            return;
-        }
-        ProjectInfo* proj = _config->getProjectInfo();
-        JsonObject data = json.as<JsonObject>();
-        bool needsReboot = false;
-        String errors = "";
-
-        // WiFi
-        String newSSID = data["wifiSSID"] | _config->getWifiSSID();
-        if (newSSID != _config->getWifiSSID()) {
-            _config->setWifiSSID(newSSID);
-            needsReboot = true;
-        }
-
-        // WiFi password
-        String wifiPw = data["wifiPassword"] | String("******");
-        if (wifiPw != "******" && wifiPw.length() > 0) {
-            String curPw = data["curWifiPw"] | String("");
-            if (curPw == _config->getWifiPassword()) {
-                _config->setWifiPassword(wifiPw);
+            String newSSID = data["wifiSSID"] | _config->getWifiSSID();
+            if (newSSID != _config->getWifiSSID()) {
+                _config->setWifiSSID(newSSID);
                 needsReboot = true;
-            } else {
-                errors += "WiFi password: current password incorrect. ";
             }
-        }
 
-        // MQTT
-        String mqttHost = data["mqttHost"] | _config->getMqttHost().toString();
-        IPAddress newMqttHost;
-        newMqttHost.fromString(mqttHost);
-        if (newMqttHost != _config->getMqttHost()) {
-            _config->setMqttHost(newMqttHost);
-            needsReboot = true;
-        }
+            String wifiPw = data["wifiPassword"] | String("******");
+            if (wifiPw != "******" && wifiPw.length() > 0) {
+                String curPw = data["curWifiPw"] | String("");
+                if (curPw == _config->getWifiPassword()) {
+                    _config->setWifiPassword(wifiPw);
+                    needsReboot = true;
+                } else {
+                    errors += "WiFi password: current password incorrect. ";
+                }
+            }
 
-        uint16_t mqttPort = data["mqttPort"] | _config->getMqttPort();
-        if (mqttPort != _config->getMqttPort()) {
-            _config->setMqttPort(mqttPort);
-            needsReboot = true;
-        }
-
-        String mqttUser = data["mqttUser"] | _config->getMqttUser();
-        if (mqttUser != _config->getMqttUser()) {
-            _config->setMqttUser(mqttUser);
-            needsReboot = true;
-        }
-
-        // MQTT password
-        String mqttPw = data["mqttPassword"] | String("******");
-        if (mqttPw != "******" && mqttPw.length() > 0) {
-            String curPw = data["curMqttPw"] | String("");
-            if (curPw == _config->getMqttPassword()) {
-                _config->setMqttPassword(mqttPw);
+            String mqttHost = data["mqttHost"] | _config->getMqttHost().toString();
+            IPAddress newMqttHost;
+            newMqttHost.fromString(mqttHost);
+            if (newMqttHost != _config->getMqttHost()) {
+                _config->setMqttHost(newMqttHost);
                 needsReboot = true;
+            }
+
+            uint16_t mqttPort = data["mqttPort"] | _config->getMqttPort();
+            if (mqttPort != _config->getMqttPort()) {
+                _config->setMqttPort(mqttPort);
+                needsReboot = true;
+            }
+
+            String mqttUser = data["mqttUser"] | _config->getMqttUser();
+            if (mqttUser != _config->getMqttUser()) {
+                _config->setMqttUser(mqttUser);
+                needsReboot = true;
+            }
+
+            String mqttPw = data["mqttPassword"] | String("******");
+            if (mqttPw != "******" && mqttPw.length() > 0) {
+                String curPw = data["curMqttPw"] | String("");
+                if (curPw == _config->getMqttPassword()) {
+                    _config->setMqttPassword(mqttPw);
+                    needsReboot = true;
+                } else {
+                    errors += "MQTT password: current password incorrect. ";
+                }
+            }
+
+            float gmtHrs = data["gmtOffsetHrs"] | (proj->gmtOffsetSec / 3600.0f);
+            float dstHrs = data["daylightOffsetHrs"] | (proj->daylightOffsetSec / 3600.0f);
+            int32_t gmtOffset = (int32_t)(gmtHrs * 3600);
+            int32_t dstOffset = (int32_t)(dstHrs * 3600);
+            if (gmtOffset != proj->gmtOffsetSec || dstOffset != proj->daylightOffsetSec) {
+                proj->gmtOffsetSec = gmtOffset;
+                proj->daylightOffsetSec = dstOffset;
+                setTimezone(gmtOffset, dstOffset);
+                configTime(gmtOffset, dstOffset, "192.168.0.1", "time.nist.gov");
+            }
+
+            float threshold = data["lowTempThreshold"] | proj->lowTempThreshold;
+            if (threshold != proj->lowTempThreshold) {
+                proj->lowTempThreshold = threshold;
+                _hpController->setLowTempThreshold(threshold);
+            }
+
+            uint32_t maxLogSize = data["maxLogSize"] | proj->maxLogSize;
+            uint8_t maxOldLogCount = data["maxOldLogCount"] | proj->maxOldLogCount;
+            proj->maxLogSize = maxLogSize;
+            proj->maxOldLogCount = maxOldLogCount;
+
+            TempSensorMap& tempSensors = _hpController->getTempSensorMap();
+            bool saved = _config->updateConfig("/config.txt", tempSensors, *proj);
+
+            String response;
+            JsonDocument respDoc;
+            if (!saved) {
+                respDoc["error"] = "Failed to save config to SD card";
+                if (errors.length() > 0) respDoc["error"] = errors + "Also failed to save.";
+            } else if (errors.length() > 0) {
+                respDoc["error"] = errors + "Other settings saved.";
+            } else if (needsReboot) {
+                respDoc["message"] = "Settings saved. Rebooting in 2 seconds...";
+                respDoc["reboot"] = true;
             } else {
-                errors += "MQTT password: current password incorrect. ";
+                respDoc["message"] = "Settings saved and applied.";
             }
-        }
+            serializeJson(respDoc, response);
+            request->send(200, "application/json", response);
 
-        // Timezone (live) - form sends hours, convert to seconds
-        float gmtHrs = data["gmtOffsetHrs"] | (proj->gmtOffsetSec / 3600.0f);
-        float dstHrs = data["daylightOffsetHrs"] | (proj->daylightOffsetSec / 3600.0f);
-        int32_t gmtOffset = (int32_t)(gmtHrs * 3600);
-        int32_t dstOffset = (int32_t)(dstHrs * 3600);
-        if (gmtOffset != proj->gmtOffsetSec || dstOffset != proj->daylightOffsetSec) {
-            proj->gmtOffsetSec = gmtOffset;
-            proj->daylightOffsetSec = dstOffset;
-            setTimezone(gmtOffset, dstOffset);
-            configTime(gmtOffset, dstOffset, "192.168.0.1", "time.nist.gov");
-        }
-
-        // Low temp threshold (live)
-        float threshold = data["lowTempThreshold"] | proj->lowTempThreshold;
-        if (threshold != proj->lowTempThreshold) {
-            proj->lowTempThreshold = threshold;
-            _hpController->setLowTempThreshold(threshold);
-        }
-
-        // Logging (live)
-        uint32_t maxLogSize = data["maxLogSize"] | proj->maxLogSize;
-        uint8_t maxOldLogCount = data["maxOldLogCount"] | proj->maxOldLogCount;
-        proj->maxLogSize = maxLogSize;
-        proj->maxOldLogCount = maxOldLogCount;
-
-        // Save to SD card
-        TempSensorMap& tempSensors = _hpController->getTempSensorMap();
-        bool saved = _config->updateConfig("/config.txt", tempSensors, *proj);
-
-        String response;
-        JsonDocument respDoc;
-        if (!saved) {
-            respDoc["error"] = "Failed to save config to SD card";
-            if (errors.length() > 0) respDoc["error"] = errors + "Also failed to save.";
-        } else if (errors.length() > 0) {
-            respDoc["error"] = errors + "Other settings saved.";
-        } else if (needsReboot) {
-            respDoc["message"] = "Settings saved. Rebooting in 2 seconds...";
-            respDoc["reboot"] = true;
-        } else {
-            respDoc["message"] = "Settings saved and applied.";
-        }
-        serializeJson(respDoc, response);
-        request->send(200, "application/json", response);
-
-        if (needsReboot && saved && errors.length() == 0) {
-            Log.info("CONFIG", "Config changed, rebooting in 2s...");
-            if (!_tDelayedReboot) {
-                _tDelayedReboot = new Task(2 * TASK_SECOND, TASK_ONCE, [this]() {
-                    _shouldReboot = true;
-                }, _ts, false);
+            if (needsReboot && saved && errors.length() == 0) {
+                Log.info("CONFIG", "Config changed, rebooting in 2s...");
+                if (!_tDelayedReboot) {
+                    _tDelayedReboot = new Task(2 * TASK_SECOND, TASK_ONCE, [this]() {
+                        _shouldReboot = true;
+                    }, _ts, false);
+                }
+                _tDelayedReboot->restartDelayed(2 * TASK_SECOND);
             }
-            _tDelayedReboot->restartDelayed(2 * TASK_SECOND);
-        }
-    });
-    _server.addHandler(configPostHandler);
+        });
+        _server.addHandler(configPostHandler);
 
-    _server.on("/update", HTTP_POST, [this](AsyncWebServerRequest *request) {
-        _shouldReboot = !Update.hasError();
-        AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", _shouldReboot ? "OK" : "FAIL");
-        response->addHeader("Connection", "close");
-        request->send(response);
-    }, [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-        if (!index) {
-            Log.info("OTA", "Update Start: %s", filename.c_str());
-            if (!Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000)) {
-                Log.error("OTA", "Update.begin failed");
-                Update.printError(Serial);
+        _server.on("/update", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            _shouldReboot = !Update.hasError();
+            AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", _shouldReboot ? "OK" : "FAIL");
+            response->addHeader("Connection", "close");
+            request->send(response);
+        }, [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+            if (!index) {
+                Log.info("OTA", "Update Start: %s", filename.c_str());
+                if (!Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000)) {
+                    Log.error("OTA", "Update.begin failed");
+                    Update.printError(Serial);
+                }
             }
-        }
+            if (!Update.hasError()) {
+                if (Update.write(data, len) != len) {
+                    Update.printError(Serial);
+                }
+            }
+            if (final) {
+                if (Update.end(true)) {
+                    Log.info("OTA", "OTA Update Successful");
+                } else {
+                    Log.error("OTA", "OTA Update Failed");
+                    Update.printError(Serial);
+                }
+            }
+        });
+    } else {
+        // HTTPS is active — redirect HTTP /config and /update to HTTPS
+        _server.on("/config", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            String url = "https://" + String(getWiFiIP()) + "/config";
+            if (request->hasParam("format")) {
+                url += "?format=" + request->getParam("format")->value();
+            }
+            request->redirect(url);
+        });
+        _server.on("/config", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/config");
+        });
+        _server.on("/update", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/update");
+        });
+        _server.on("/update", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/update");
+        });
+    }
+}
 
-        if (!Update.hasError()) {
-            if (Update.write(data, len) != len) {
-                Update.printError(Serial);
-            }
-        }
+// ---- HTTPS server (delegates to HttpsServer.cpp to avoid header conflicts) ----
 
-        if (final) {
-            if (Update.end(true)) {
-                Log.info("OTA", "OTA Update Successful");
-            } else {
-                Log.error("OTA", "OTA Update Failed");
-                Update.printError(Serial);
-            }
-        }
-    });
+bool WebHandler::beginSecure(const uint8_t* cert, size_t certLen, const uint8_t* key, size_t keyLen) {
+    _httpsCtx.config = _config;
+    _httpsCtx.hpController = _hpController;
+    _httpsCtx.scheduler = _ts;
+    _httpsCtx.shouldReboot = &_shouldReboot;
+    _httpsCtx.delayedReboot = &_tDelayedReboot;
+    _httpsCtx.gmtOffsetSec = &_gmtOffsetSec;
+    _httpsCtx.daylightOffsetSec = &_daylightOffsetSec;
+
+    _httpsServer = httpsStart(cert, certLen, key, keyLen, &_httpsCtx);
+    return _httpsServer != nullptr;
 }

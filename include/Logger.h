@@ -3,7 +3,7 @@
 
 #include <Arduino.h>
 #include <AsyncMqttClient.h>
-#include <ESPAsyncWebServer.h>
+class AsyncWebSocket;  // forward declaration — full include in Logger.cpp
 #include "SdFat.h"
 #include <SD.h>
 #include <ESP32-targz.h>
