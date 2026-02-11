@@ -52,6 +52,8 @@ class WebHandler {
 
     void syncNtpTime();
     void setupRoutes();
+    void serveFile(AsyncWebServerRequest* request, const String& path);
+    static const char* getContentType(const String& path);
     void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
                    AwsEventType type, void* arg, uint8_t* data, size_t len);
 };

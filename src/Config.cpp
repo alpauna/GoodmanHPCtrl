@@ -1,5 +1,7 @@
 #include "Config.h"
 #include "sdios.h"
+#include "esp_hmac.h"
+#include "esp_random.h"
 
 // External references needed for config loading
 extern ArduinoOutStream cout;
@@ -10,7 +12,13 @@ extern void tempSensorChangeCallback(TempSensor* sensor);
 
 #define SPI_SPEED SD_SCK_MHZ(SD_SPI_SPEED)
 
+uint8_t Config::_aesKey[32] = {0};
+bool Config::_encryptionReady = false;
 String Config::_obfuscationKey = "";
+
+void Config::setObfuscationKey(const String& key) {
+    _obfuscationKey = key;
+}
 
 Config::Config()
     : _sdInitialized(false)
@@ -25,52 +33,135 @@ Config::Config()
 {
 }
 
-void Config::setObfuscationKey(const String& key) {
-    _obfuscationKey = key;
+bool Config::initEncryption() {
+    static const uint8_t salt[] = "GoodmanHP-Config-Encrypt-v1";
+    esp_err_t err = esp_hmac_calculate(HMAC_KEY0, salt, sizeof(salt) - 1, _aesKey);
+    _encryptionReady = (err == ESP_OK);
+    return _encryptionReady;
 }
 
-String Config::obfuscatePassword(const String& plaintext) {
-    if (plaintext.length() == 0 || _obfuscationKey.length() == 0) return plaintext;
+String Config::encryptPassword(const String& plaintext) {
+    if (plaintext.length() == 0) return plaintext;
 
-    // XOR with key
-    size_t len = plaintext.length();
-    uint8_t* xored = new uint8_t[len];
-    for (size_t i = 0; i < len; i++) {
-        xored[i] = plaintext[i] ^ _obfuscationKey[i % _obfuscationKey.length()];
+    // Fall back to XOR obfuscation when eFuse HMAC key is not available
+    if (!_encryptionReady) {
+        if (_obfuscationKey.length() == 0) return plaintext;
+        size_t len = plaintext.length();
+        uint8_t* xored = new uint8_t[len];
+        for (size_t i = 0; i < len; i++) {
+            xored[i] = plaintext[i] ^ _obfuscationKey[i % _obfuscationKey.length()];
+        }
+        size_t outLen = 0;
+        mbedtls_base64_encode(nullptr, 0, &outLen, xored, len);
+        uint8_t* b64 = new uint8_t[outLen + 1];
+        mbedtls_base64_encode(b64, outLen + 1, &outLen, xored, len);
+        b64[outLen] = '\0';
+        String result = "$ENC$" + String((char*)b64);
+        delete[] xored;
+        delete[] b64;
+        return result;
     }
 
-    // Base64 encode
-    size_t outLen = 0;
-    mbedtls_base64_encode(nullptr, 0, &outLen, xored, len);
-    uint8_t* b64 = new uint8_t[outLen + 1];
-    mbedtls_base64_encode(b64, outLen + 1, &outLen, xored, len);
-    b64[outLen] = '\0';
+    // Generate 12-byte random IV
+    uint8_t iv[12];
+    esp_fill_random(iv, sizeof(iv));
 
-    String result = "$ENC$" + String((char*)b64);
-    delete[] xored;
+    size_t ptLen = plaintext.length();
+    uint8_t* ciphertext = new uint8_t[ptLen];
+    uint8_t tag[16];
+
+    mbedtls_gcm_context gcm;
+    mbedtls_gcm_init(&gcm);
+    mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, _aesKey, 256);
+    mbedtls_gcm_crypt_and_tag(&gcm, MBEDTLS_GCM_ENCRYPT, ptLen,
+        iv, sizeof(iv), nullptr, 0,
+        (const uint8_t*)plaintext.c_str(), ciphertext, sizeof(tag), tag);
+    mbedtls_gcm_free(&gcm);
+
+    // Pack: IV[12] + ciphertext[N] + tag[16]
+    size_t packedLen = 12 + ptLen + 16;
+    uint8_t* packed = new uint8_t[packedLen];
+    memcpy(packed, iv, 12);
+    memcpy(packed + 12, ciphertext, ptLen);
+    memcpy(packed + 12 + ptLen, tag, 16);
+    delete[] ciphertext;
+
+    // Base64 encode
+    size_t b64Len = 0;
+    mbedtls_base64_encode(nullptr, 0, &b64Len, packed, packedLen);
+    uint8_t* b64 = new uint8_t[b64Len + 1];
+    mbedtls_base64_encode(b64, b64Len + 1, &b64Len, packed, packedLen);
+    b64[b64Len] = '\0';
+    delete[] packed;
+
+    String result = "$AES$" + String((char*)b64);
     delete[] b64;
     return result;
 }
 
-String Config::deobfuscatePassword(const String& encoded) {
-    if (!encoded.startsWith("$ENC$")) return encoded;  // plaintext passthrough
-    if (_obfuscationKey.length() == 0) return encoded;
+String Config::decryptPassword(const String& encrypted) {
+    if (encrypted.startsWith("$AES$")) {
+        if (!_encryptionReady) return "";
 
-    String b64Part = encoded.substring(5);
-    size_t outLen = 0;
-    mbedtls_base64_decode(nullptr, 0, &outLen, (const uint8_t*)b64Part.c_str(), b64Part.length());
-    uint8_t* decoded = new uint8_t[outLen + 1];
-    mbedtls_base64_decode(decoded, outLen + 1, &outLen, (const uint8_t*)b64Part.c_str(), b64Part.length());
+        String b64Part = encrypted.substring(5);
+        size_t decodedLen = 0;
+        mbedtls_base64_decode(nullptr, 0, &decodedLen,
+            (const uint8_t*)b64Part.c_str(), b64Part.length());
 
-    // XOR with key to recover plaintext
-    for (size_t i = 0; i < outLen; i++) {
-        decoded[i] ^= _obfuscationKey[i % _obfuscationKey.length()];
+        if (decodedLen < 12 + 16) return "";  // IV + tag minimum
+
+        uint8_t* decoded = new uint8_t[decodedLen];
+        mbedtls_base64_decode(decoded, decodedLen, &decodedLen,
+            (const uint8_t*)b64Part.c_str(), b64Part.length());
+
+        // Unpack: IV[12] + ciphertext[N] + tag[16]
+        uint8_t* iv = decoded;
+        size_t ctLen = decodedLen - 12 - 16;
+        uint8_t* ciphertext = decoded + 12;
+        uint8_t* tag = decoded + 12 + ctLen;
+
+        uint8_t* plaintext = new uint8_t[ctLen + 1];
+
+        mbedtls_gcm_context gcm;
+        mbedtls_gcm_init(&gcm);
+        mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, _aesKey, 256);
+        int ret = mbedtls_gcm_auth_decrypt(&gcm, ctLen,
+            iv, 12, nullptr, 0, tag, 16,
+            ciphertext, plaintext);
+        mbedtls_gcm_free(&gcm);
+        delete[] decoded;
+
+        if (ret != 0) {
+            delete[] plaintext;
+            return "";  // Auth failed — tampered or wrong key
+        }
+
+        plaintext[ctLen] = '\0';
+        String result = String((char*)plaintext);
+        delete[] plaintext;
+        return result;
     }
-    decoded[outLen] = '\0';
 
-    String result = String((char*)decoded);
-    delete[] decoded;
-    return result;
+    if (encrypted.startsWith("$ENC$")) {
+        if (_obfuscationKey.length() == 0) return encrypted;
+        String b64Part = encrypted.substring(5);
+        size_t outLen = 0;
+        mbedtls_base64_decode(nullptr, 0, &outLen,
+            (const uint8_t*)b64Part.c_str(), b64Part.length());
+        uint8_t* decoded = new uint8_t[outLen + 1];
+        mbedtls_base64_decode(decoded, outLen + 1, &outLen,
+            (const uint8_t*)b64Part.c_str(), b64Part.length());
+        for (size_t i = 0; i < outLen; i++) {
+            decoded[i] ^= _obfuscationKey[i % _obfuscationKey.length()];
+        }
+        decoded[outLen] = '\0';
+        String result = String((char*)decoded);
+        delete[] decoded;
+        return result;
+    }
+
+    // Plaintext passthrough
+    return encrypted;
 }
 
 bool Config::initSDCard() {
@@ -144,7 +235,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     const char* wifi_ssid = doc["wifi"]["ssid"];
     const char* wifi_password = doc["wifi"]["password"];
     _wifiSSID = wifi_ssid != nullptr ? wifi_ssid : "";
-    _wifiPassword = wifi_password != nullptr ? deobfuscatePassword(wifi_password != nullptr ? wifi_password : "") : "";
+    _wifiPassword = wifi_password != nullptr ? decryptPassword(wifi_password != nullptr ? wifi_password : "") : "";
     cout << "Read WiFi SSID:" << wifi_ssid << endl;
 
     JsonObject mqtt = doc["mqtt"];
@@ -154,7 +245,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     int mqtt_port = mqtt["port"];
     _mqttPort = mqtt_port;
     _mqttUser = mqtt_user != nullptr ? mqtt_user : "";
-    _mqttPassword = mqtt_password != nullptr ? deobfuscatePassword(mqtt_password != nullptr ? mqtt_password : "") : "";
+    _mqttPassword = mqtt_password != nullptr ? decryptPassword(mqtt_password != nullptr ? mqtt_password : "") : "";
     _mqttHost.fromString(mqtt_host != nullptr ? mqtt_host : "192.168.1.2");
     cout << "Read mqtt Host:" << _mqttHost.toString().c_str() << endl;
 
@@ -311,11 +402,11 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
 
     JsonObject wifi = doc["wifi"].to<JsonObject>();
     wifi["ssid"] = _wifiSSID;
-    wifi["password"] = obfuscatePassword(_wifiPassword);
+    wifi["password"] = encryptPassword(_wifiPassword);
 
     JsonObject mqtt = doc["mqtt"].to<JsonObject>();
     mqtt["user"] = _mqttUser;
-    mqtt["password"] = obfuscatePassword(_mqttPassword);
+    mqtt["password"] = encryptPassword(_mqttPassword);
     mqtt["host"] = _mqttHost.toString();
     mqtt["port"] = _mqttPort;
 

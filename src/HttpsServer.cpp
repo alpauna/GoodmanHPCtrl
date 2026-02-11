@@ -7,94 +7,41 @@
 #include <Update.h>
 #include <ArduinoJson.h>
 #include <TaskSchedulerDeclarations.h>
+#include "SdFat.h"
 #include "HttpsServer.h"
 #include "Config.h"
 #include "GoodmanHP.h"
 #include "Logger.h"
 
-// --- Static HTML pages ---
+// --- SD card file serving helper ---
 
-static const char CONFIG_HTML[] PROGMEM =
-    "<html><head><title>Configuration</title>"
-    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<style>"
-    "body{font-family:Arial,sans-serif;margin:0;padding:20px;background:#f5f5f5;}"
-    ".container{max-width:600px;margin:0 auto;}"
-    "h1{color:#333;}"
-    "fieldset{background:#fff;border:1px solid #ddd;border-radius:6px;padding:15px;margin-bottom:15px;}"
-    "legend{font-weight:bold;color:#4CAF50;padding:0 8px;}"
-    "label{display:block;margin:8px 0 3px;color:#555;font-size:14px;}"
-    "input[type=text],input[type=password],input[type=number]{width:100%;padding:8px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;}"
-    ".tag{font-size:11px;padding:2px 6px;border-radius:3px;margin-left:6px;color:#fff;}"
-    ".tag-reboot{background:#e67e22;}"
-    ".tag-live{background:#27ae60;}"
-    "button{background:#4CAF50;color:#fff;padding:10px 24px;border:none;border-radius:4px;cursor:pointer;font-size:16px;margin-top:10px;}"
-    "button:hover{background:#45a049;}"
-    "#status{margin-top:15px;padding:10px;border-radius:4px;display:none;}"
-    ".ok{background:#d4edda;color:#155724;display:block!important;}"
-    ".err{background:#f8d7da;color:#721c24;display:block!important;}"
-    ".info{background:#d1ecf1;color:#0c5460;display:block!important;}"
-    "</style></head><body>"
-    "<div class='container'>"
-    "<h1>Configuration (Secure)</h1>"
-    "<form id='cf' onsubmit='return save(event)'>"
-    "<fieldset><legend>WiFi <span class='tag tag-reboot'>reboot</span></legend>"
-    "<label>SSID</label><input type='text' id='wifiSSID'>"
-    "<label>Password</label><input type='password' id='wifiPassword'>"
-    "<label>Current Password (required to change)</label><input type='password' id='curWifiPw'>"
-    "</fieldset>"
-    "<fieldset><legend>MQTT <span class='tag tag-reboot'>reboot</span></legend>"
-    "<label>Host</label><input type='text' id='mqttHost'>"
-    "<label>Port</label><input type='number' id='mqttPort'>"
-    "<label>User</label><input type='text' id='mqttUser'>"
-    "<label>Password</label><input type='password' id='mqttPassword'>"
-    "<label>Current Password (required to change)</label><input type='password' id='curMqttPw'>"
-    "</fieldset>"
-    "<fieldset><legend>Timezone <span class='tag tag-live'>live</span></legend>"
-    "<label>GMT Offset (hours)</label><input type='number' step='0.5' id='gmtOffsetHrs'>"
-    "<label>Daylight Offset (hours)</label><input type='number' step='0.5' id='daylightOffsetHrs'>"
-    "</fieldset>"
-    "<fieldset><legend>Low Temp Protection <span class='tag tag-live'>live</span></legend>"
-    "<label>Threshold (&deg;F)</label><input type='number' step='0.1' id='lowTempThreshold'>"
-    "</fieldset>"
-    "<fieldset><legend>Logging <span class='tag tag-live'>live</span></legend>"
-    "<label>Max Log Size (bytes)</label><input type='number' id='maxLogSize'>"
-    "<label>Max Old Log Count</label><input type='number' id='maxOldLogCount'>"
-    "</fieldset>"
-    "<button type='submit'>Save</button>"
-    "</form>"
-    "<div id='status'></div>"
-    "</div>"
-    "<script>"
-    "var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','maxLogSize','maxOldLogCount'];"
-    "fetch('/config?format=json').then(r=>r.json()).then(d=>{"
-    "fields.forEach(f=>{var e=document.getElementById(f);if(e)e.value=d[f]!=null?d[f]:'';});"
-    "});"
-    "function save(e){"
-    "e.preventDefault();"
-    "var d={};fields.forEach(f=>{var e=document.getElementById(f);d[f]=e?e.value:'';});"
-    "d.curWifiPw=document.getElementById('curWifiPw').value;"
-    "d.curMqttPw=document.getElementById('curMqttPw').value;"
-    "var s=document.getElementById('status');"
-    "fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r=>r.json()).then(r=>{"
-    "s.className=r.reboot?'info':r.error?'err':'ok';"
-    "s.textContent=r.message||r.error||'Saved';"
-    "s.style.display='block';"
-    "if(r.reboot){setTimeout(()=>{s.textContent='Rebooting... page will reload in 5s';setTimeout(()=>location.reload(),5000);},1000);}"
-    "document.getElementById('curWifiPw').value='';"
-    "document.getElementById('curMqttPw').value='';"
-    "}).catch(err=>{s.className='err';s.textContent='Error: '+err;s.style.display='block';});"
-    "return false;}"
-    "</script></body></html>";
+static esp_err_t serveFileHttps(httpd_req_t* req, const char* sdPath) {
+    FsFile file;
+    if (!file.open(sdPath, O_RDONLY)) {
+        httpd_resp_send_404(req);
+        return ESP_OK;
+    }
+    size_t fileSize = file.size();
+    char* buf = (char*)ps_malloc(fileSize + 1);
+    if (!buf) {
+        file.close();
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_OK;
+    }
+    file.read((uint8_t*)buf, fileSize);
+    buf[fileSize] = '\0';
+    file.close();
 
-static const char UPDATE_HTML[] PROGMEM =
-    "<html><head><title>ESP32 OTA Update</title></head>"
-    "<body><h1>ESP32 OTA Update (Secure)</h1>"
-    "<form method='POST' action='/update' enctype='multipart/form-data'>"
-    "<input type='file' name='update'>"
-    "<input type='submit' value='Update'>"
-    "</form>"
-    "</body></html>";
+    const char* contentType = "text/html";
+    if (strstr(sdPath, ".css")) contentType = "text/css";
+    else if (strstr(sdPath, ".js")) contentType = "application/javascript";
+    else if (strstr(sdPath, ".json")) contentType = "application/json";
+
+    httpd_resp_set_type(req, contentType);
+    httpd_resp_send(req, buf, fileSize);
+    free(buf);
+    return ESP_OK;
+}
 
 // --- ESP-IDF httpd handler callbacks ---
 
@@ -141,9 +88,7 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         return ESP_OK;
     }
 
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, CONFIG_HTML, HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
+    return serveFileHttps(req, "/www/config.html");
 }
 
 static esp_err_t configPostHandler(httpd_req_t* req) {
@@ -307,9 +252,7 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
 }
 
 static esp_err_t updateGetHandler(httpd_req_t* req) {
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, UPDATE_HTML, HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
+    return serveFileHttps(req, "/www/update.html");
 }
 
 static esp_err_t updatePostHandler(httpd_req_t* req) {

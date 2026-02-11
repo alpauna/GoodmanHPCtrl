@@ -1,0 +1,33 @@
+<html><head><title>Goodman HP Control</title>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<style>
+body{font-family:Arial,sans-serif;margin:0;padding:0;background:#f5f5f5;}
+nav{background:#333;padding:10px 20px;display:flex;align-items:center;gap:18px;}
+nav a{color:#fff;text-decoration:none;font-size:14px;padding:6px 12px;border-radius:4px;}
+nav a:hover,nav a.active{background:#4CAF50;}
+nav .brand{font-weight:bold;font-size:16px;margin-right:auto;}
+.content{max-width:600px;margin:20px auto;padding:0 20px;}
+h1{color:#333;}
+.card{background:#fff;border:1px solid #ddd;border-radius:6px;padding:15px;margin-bottom:15px;}
+.card h3{margin-top:0;color:#4CAF50;}
+.card a{color:#4CAF50;text-decoration:none;font-weight:bold;}
+.card a:hover{text-decoration:underline;}
+</style></head>
+<body>
+<nav><span class='brand'>Goodman HP</span>
+<a href='/' class='active'>Home</a>
+<a href='/config'>Config</a>
+<a href='/update'>Update</a>
+<a href='/log'>Log</a>
+</nav>
+<div class='content'>
+<h1>Goodman HP Control</h1>
+<p>IP: <span id="ip"></span></p>
+<div class='card'><h3>Configuration</h3><p>WiFi, MQTT, timezone, and sensor settings.</p><a href='/config'>Open Config</a></div>
+<div class='card'><h3>OTA Update</h3><p>Upload new firmware over the air.</p><a href='/update'>Open Update</a></div>
+<div class='card'><h3>Temperatures</h3><p>Current sensor readings (JSON).</p><a href='/temps'>View Temps</a></div>
+<div class='card'><h3>System</h3><p>Heap and memory info.</p><a href='/heap'>View Heap</a></div>
+<div class='card'><h3>Log</h3><p>Recent log entries.</p><a href='/log?limit=50'>View Log</a></div>
+</div>
+<script>document.getElementById('ip').textContent=location.hostname;</script>
+</body></html>

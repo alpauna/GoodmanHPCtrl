@@ -7,6 +7,7 @@
 #include "ArduinoJson.h"
 #include "TempSensor.h"
 #include "mbedtls/base64.h"
+#include "mbedtls/gcm.h"
 
 struct ProjectInfo {
     String name;
@@ -67,10 +68,13 @@ class Config {
     void setProjectInfo(ProjectInfo* proj) { _proj = proj; }
     ProjectInfo* getProjectInfo() { return _proj; }
 
-    // Password obfuscation
+    // Password encryption (AES-256-GCM with eFuse HMAC-derived key)
+    // Falls back to XOR obfuscation ($ENC$) when eFuse key not available
+    bool initEncryption();
+    static bool isEncryptionReady() { return _encryptionReady; }
     static void setObfuscationKey(const String& key);
-    static String obfuscatePassword(const String& plaintext);
-    static String deobfuscatePassword(const String& encoded);
+    static String encryptPassword(const String& plaintext);
+    static String decryptPassword(const String& encrypted);
 
     // Callback setter for temp sensor discovery
     typedef void (*TempSensorDiscoveryCallback)(TempSensorMap& config);
@@ -95,7 +99,11 @@ class Config {
     // ProjectInfo pointer for WebHandler access
     ProjectInfo* _proj;
 
-    // Obfuscation key (set from build timestamp)
+    // AES-256-GCM encryption key (derived from eFuse HMAC)
+    static uint8_t _aesKey[32];
+    static bool _encryptionReady;
+
+    // XOR obfuscation key (fallback when eFuse not available)
     static String _obfuscationKey;
 
     // HTTPS certificate buffers (PSRAM)

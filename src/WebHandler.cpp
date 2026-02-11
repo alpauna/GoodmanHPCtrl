@@ -93,28 +93,55 @@ void WebHandler::setTimezone(int32_t gmtOffset, int32_t daylightOffset) {
     _daylightOffsetSec = daylightOffset;
 }
 
+const char* WebHandler::getContentType(const String& path) {
+    if (path.endsWith(".html")) return "text/html";
+    if (path.endsWith(".css")) return "text/css";
+    if (path.endsWith(".js")) return "application/javascript";
+    if (path.endsWith(".json")) return "application/json";
+    if (path.endsWith(".ico")) return "image/x-icon";
+    if (path.endsWith(".png")) return "image/png";
+    if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
+    if (path.endsWith(".svg")) return "image/svg+xml";
+    return "text/plain";
+}
+
+void WebHandler::serveFile(AsyncWebServerRequest* request, const String& path) {
+    if (!_config || !_config->isSDCardInitialized()) {
+        request->send(503, "text/plain", "SD card not available");
+        return;
+    }
+    String fullPath = "/www" + path;
+    FsFile file;
+    if (!file.open(fullPath.c_str(), O_RDONLY)) {
+        request->send(404, "text/plain", "Not found: " + path);
+        return;
+    }
+    size_t fileSize = file.size();
+    if (fileSize == 0) {
+        file.close();
+        request->send(200, getContentType(path), "");
+        return;
+    }
+    char* buf = (char*)ps_malloc(fileSize + 1);
+    if (!buf) {
+        file.close();
+        request->send(500, "text/plain", "Out of memory");
+        return;
+    }
+    file.read((uint8_t*)buf, fileSize);
+    buf[fileSize] = '\0';
+    file.close();
+    request->send(200, getContentType(path), buf);
+    free(buf);
+}
+
 void WebHandler::setupRoutes() {
     _server.on("/ws", HTTP_GET, [this](AsyncWebServerRequest *request) {
         _ws.handleRequest(request);
     });
 
-    _server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "text/html",
-            "<html><head><title>ESP32 OTA Update</title>"
-            "<style>"
-            "body { font-family: Arial, sans-serif; margin: 20px; }"
-            ".progress-container { width: 100%; background-color: #f0f0f0; border-radius: 5px; margin: 10px 0; }"
-            ".progress-bar { height: 20px; background-color: #4CAF50; border-radius: 5px; transition: width 0.1s; }"
-            ".progress-text { text-align: center; margin: 5px 0; }"
-            "button { background-color: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }"
-            "button:hover { background-color: #45a049; }"
-            "</style>"
-            "</head>"
-            "<body><h1>ESP32 OTA Update Server</h1>"
-            "<p>Current IP: " + WiFi.localIP().toString() + "</p>"
-            "<p>Use this server to upload new firmware</p>"
-            "<a href='/update'>OTA Update Page</a>"
-            "</body></html>");
+    _server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        serveFile(request, "/index.html");
     });
 
     _server.on("/scan", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -284,15 +311,8 @@ void WebHandler::setupRoutes() {
     // The actual handlers are registered in registerHttpsHandlers() or as fallbacks below.
     if (!_httpsServer) {
         // No HTTPS — serve /update and /config directly on HTTP (fallback)
-        _server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
-            request->send(200, "text/html",
-                "<html><head><title>ESP32 OTA Update</title></head>"
-                "<body><h1>ESP32 OTA Update</h1>"
-                "<form method='POST' action='/update' enctype='multipart/form-data'>"
-                "<input type='file' name='update'>"
-                "<input type='submit' value='Update'>"
-                "</form>"
-                "</body></html>");
+        _server.on("/update", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            serveFile(request, "/update.html");
         });
 
         _server.on("/config", HTTP_GET, [this](AsyncWebServerRequest *request) {
@@ -319,78 +339,7 @@ void WebHandler::setupRoutes() {
                 request->send(200, "application/json", json);
                 return;
             }
-            request->send(200, "text/html",
-                "<html><head><title>Configuration</title>"
-                "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-                "<style>"
-                "body{font-family:Arial,sans-serif;margin:0;padding:20px;background:#f5f5f5;}"
-                ".container{max-width:600px;margin:0 auto;}"
-                "h1{color:#333;}"
-                "fieldset{background:#fff;border:1px solid #ddd;border-radius:6px;padding:15px;margin-bottom:15px;}"
-                "legend{font-weight:bold;color:#4CAF50;padding:0 8px;}"
-                "label{display:block;margin:8px 0 3px;color:#555;font-size:14px;}"
-                "input[type=text],input[type=password],input[type=number]{width:100%;padding:8px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;}"
-                ".tag{font-size:11px;padding:2px 6px;border-radius:3px;margin-left:6px;color:#fff;}"
-                ".tag-reboot{background:#e67e22;}"
-                ".tag-live{background:#27ae60;}"
-                "button{background:#4CAF50;color:#fff;padding:10px 24px;border:none;border-radius:4px;cursor:pointer;font-size:16px;margin-top:10px;}"
-                "button:hover{background:#45a049;}"
-                "#status{margin-top:15px;padding:10px;border-radius:4px;display:none;}"
-                ".ok{background:#d4edda;color:#155724;display:block!important;}"
-                ".err{background:#f8d7da;color:#721c24;display:block!important;}"
-                ".info{background:#d1ecf1;color:#0c5460;display:block!important;}"
-                "</style></head><body>"
-                "<div class='container'>"
-                "<h1>Configuration</h1>"
-                "<form id='cf' onsubmit='return save(event)'>"
-                "<fieldset><legend>WiFi <span class='tag tag-reboot'>reboot</span></legend>"
-                "<label>SSID</label><input type='text' id='wifiSSID'>"
-                "<label>Password</label><input type='password' id='wifiPassword'>"
-                "<label>Current Password (required to change)</label><input type='password' id='curWifiPw'>"
-                "</fieldset>"
-                "<fieldset><legend>MQTT <span class='tag tag-reboot'>reboot</span></legend>"
-                "<label>Host</label><input type='text' id='mqttHost'>"
-                "<label>Port</label><input type='number' id='mqttPort'>"
-                "<label>User</label><input type='text' id='mqttUser'>"
-                "<label>Password</label><input type='password' id='mqttPassword'>"
-                "<label>Current Password (required to change)</label><input type='password' id='curMqttPw'>"
-                "</fieldset>"
-                "<fieldset><legend>Timezone <span class='tag tag-live'>live</span></legend>"
-                "<label>GMT Offset (hours)</label><input type='number' step='0.5' id='gmtOffsetHrs'>"
-                "<label>Daylight Offset (hours)</label><input type='number' step='0.5' id='daylightOffsetHrs'>"
-                "</fieldset>"
-                "<fieldset><legend>Low Temp Protection <span class='tag tag-live'>live</span></legend>"
-                "<label>Threshold (&deg;F)</label><input type='number' step='0.1' id='lowTempThreshold'>"
-                "</fieldset>"
-                "<fieldset><legend>Logging <span class='tag tag-live'>live</span></legend>"
-                "<label>Max Log Size (bytes)</label><input type='number' id='maxLogSize'>"
-                "<label>Max Old Log Count</label><input type='number' id='maxOldLogCount'>"
-                "</fieldset>"
-                "<button type='submit'>Save</button>"
-                "</form>"
-                "<div id='status'></div>"
-                "</div>"
-                "<script>"
-                "var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','maxLogSize','maxOldLogCount'];"
-                "fetch('/config?format=json').then(r=>r.json()).then(d=>{"
-                "fields.forEach(f=>{var e=document.getElementById(f);if(e)e.value=d[f]!=null?d[f]:'';});"
-                "});"
-                "function save(e){"
-                "e.preventDefault();"
-                "var d={};fields.forEach(f=>{var e=document.getElementById(f);d[f]=e?e.value:'';});"
-                "d.curWifiPw=document.getElementById('curWifiPw').value;"
-                "d.curMqttPw=document.getElementById('curMqttPw').value;"
-                "var s=document.getElementById('status');"
-                "fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r=>r.json()).then(r=>{"
-                "s.className=r.reboot?'info':r.error?'err':'ok';"
-                "s.textContent=r.message||r.error||'Saved';"
-                "s.style.display='block';"
-                "if(r.reboot){setTimeout(()=>{s.textContent='Rebooting... page will reload in 5s';setTimeout(()=>location.reload(),5000);},1000);}"
-                "document.getElementById('curWifiPw').value='';"
-                "document.getElementById('curMqttPw').value='';"
-                "}).catch(err=>{s.className='err';s.textContent='Error: '+err;s.style.display='block';});"
-                "return false;}"
-                "</script></body></html>");
+            serveFile(request, "/config.html");
         });
 
         auto* configPostHandler = new AsyncCallbackJsonWebHandler("/config", [this](AsyncWebServerRequest *request, JsonVariant &json) {

@@ -6,6 +6,8 @@
 #include <SPI.h>
 #include <Wire.h>
 #include "SdFat.h"
+#include <SD.h>
+#include <SimpleFTPServer.h>
 #include <StringStream.h>
 #include "sdios.h"
 #include <TaskSchedulerDeclarations.h>
@@ -17,6 +19,7 @@
 #include "Config.h"
 #include "WebHandler.h"
 #include "MQTTHandler.h"
+
 
 const char compile_date[] = __DATE__ " " __TIME__;
 ArduinoOutStream cout(Serial);
@@ -60,6 +63,9 @@ int freeMemory() { return 0;}
 
 // Config instance for SD card and configuration management
 Config config;
+
+// FTP server uses Arduino's SD library (STORAGE_SD mode)
+FtpServer ftpSrv;
 
 
 std::map<String, InputPin*> _isrEvent;
@@ -324,8 +330,14 @@ void setup() {
   sprintf((char *)acc_data_all, "Test %d", millis());
   sensors.begin();
 
-  // Set obfuscation key before loading config so passwords are properly decoded
-  Config::setObfuscationKey("GoodmanHP-ESP32-ObfKey");
+  // Set XOR obfuscation key (used as fallback when eFuse HMAC is not available)
+  Config::setObfuscationKey(compile_date);
+
+  // Derive AES-256 key from eFuse HMAC for password encryption
+  if (!config.initEncryption()) {
+    Serial.println("WARNING: eFuse HMAC key not available. Using XOR obfuscation for passwords.");
+    Serial.println("Burn an eFuse key with -D BURN_EFUSE_KEY to enable AES-256-GCM encryption.");
+  }
 
   // Initialize config and load from SD card
   config.setTempSensorDiscoveryCallback([](TempSensorMap& tempMap) {
@@ -366,6 +378,13 @@ void setup() {
     Log.warn("HTTPS", "No certificates on SD card, HTTPS disabled. /config and /update served over HTTP.");
   }
   webHandler.begin();
+
+  // Start FTP server for SD card file management (HTML pages in /www/)
+  // Initialize Arduino's SD library alongside SdFat (both share the same SPI card)
+  if (config.isSDCardInitialized() && SD.begin(SS)) {
+    ftpSrv.begin("admin", "admin");
+    Log.info("FTP", "FTP server started on port 21 (admin/admin)");
+  }
 
   mqttHandler.begin(_MQTT_HOST_DEFAULT, _MQTT_PORT, _MQTT_USER, _MQTT_PASSWORD);
   mqttHandler.setController(&hpController);
@@ -528,6 +547,8 @@ void loop() {
     vTaskDelay(pdMS_TO_TICKS(100));
     ESP.restart();
   }
+
+  ftpSrv.handleFTP();
 
   bool bIdle = ts.execute();
   if (bIdle) {
