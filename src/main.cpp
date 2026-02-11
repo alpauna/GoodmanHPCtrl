@@ -201,7 +201,7 @@ Task tSaveRuntime(5 * TASK_MINUTE, TASK_FOREVER, &onSaveRuntime, &ts, false);
 // Log temperature history to per-sensor CSV files every 30 seconds
 void onLogTempsCSV();
 void cleanOldTempFiles(int maxAgeDays);
-Task tLogTempsCSV(30 * TASK_SECOND, TASK_FOREVER, &onLogTempsCSV, &ts, false);
+Task tLogTempsCSV(5 * TASK_MINUTE, TASK_FOREVER, &onLogTempsCSV, &ts, false);
 static char _tempsCsvDate[12] = "";
 
 // CPU load calculation every 1 second
@@ -600,7 +600,7 @@ void onLogTempsCSV() {
             snprintf(dir, sizeof(dir), "/temps/%s", tempCsvEntries[i].dirName);
             if (!SD.exists(dir)) SD.mkdir(dir);
         }
-        cleanOldTempFiles(31);
+        cleanOldTempFiles(7);
     }
 
     time_t epoch = mktime(&timeinfo);
