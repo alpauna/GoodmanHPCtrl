@@ -216,6 +216,14 @@ void GoodmanHP::checkAmbientTemp() {
         }
 
         if (_stateChangeCb) _stateChangeCb(State::LOW_TEMP, oldState);
+    } else if (temp < _lowTempThreshold && _lowTemp) {
+        // Already in LOW_TEMP — ensure W is off if switched to COOL mode (Y+O)
+        OutPin* w = getOutput("W");
+        if (w != nullptr && w->isOn() && isOActive()) {
+            w->turnOff();
+            Log.info("HP", "W turned OFF in LOW_TEMP (switched to COOL request)");
+        }
+        return;
     } else if (temp >= _lowTempThreshold && _lowTemp) {
         _lowTemp = false;
         Log.info("HP", "Ambient temp %.1fF >= %.1fF threshold, exiting LOW_TEMP state",

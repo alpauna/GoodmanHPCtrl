@@ -70,8 +70,9 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 
 - **Low Ambient Temperature Protection** — When AMBIENT_TEMP drops below the configurable threshold (default 20°F):
   - Enters `LOW_TEMP` state: shuts down CNT, turns off FAN and RV
-  - Turns on W (auxiliary heat) as backup heating, but only if not in COOL mode (W is never turned on in COOL mode)
-  - Blocks compressor activation while ambient temp is too low
+  - Turns on W (auxiliary heat) in HEAT mode only
+  - If thermostat switches to COOL mode (Y+O) while in LOW_TEMP, W is turned off — no heating or cooling operates below 20°F in COOL mode
+  - Blocks all compressor activation (CNT) while ambient temp is too low
   - Auto-recovers when temperature rises above threshold
   - Threshold is configurable via `lowTemp.threshold` in SD card config
 
