@@ -21,6 +21,7 @@ h1{color:#333;}
 <a href='/update'>Update</a>
 <a href='/log'>Log</a>
 <a href='/heap'>Heap</a>
+<a href='#' onclick="if(confirm('Reboot device?')){fetch('/reboot',{method:'POST',headers:{'Authorization':'Basic '+btoa(prompt('user:pass','admin:'))}}).then(r=>r.ok?alert('Rebooting...'):alert('Failed'))};return false" style='margin-left:auto;background:#d32f2f;'>Reboot</a>
 </nav>
 <div class='content'>
 <h1>Goodman HP Control</h1>

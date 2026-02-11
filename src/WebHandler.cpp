@@ -651,6 +651,19 @@ void WebHandler::setupRoutes() {
             }
         });
 
+        // Reboot endpoint
+        _server.on("/reboot", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            request->send(200, "text/plain", "OK");
+            Log.info("WEB", "Reboot requested, rebooting in 2s...");
+            if (!_tDelayedReboot) {
+                _tDelayedReboot = new Task(2 * TASK_SECOND, TASK_ONCE, [this]() {
+                    _shouldReboot = true;
+                }, _ts, false);
+            }
+            _tDelayedReboot->restartDelayed(2 * TASK_SECOND);
+        });
+
         // FTP control endpoints (HTTP fallback)
         _server.on("/ftp", HTTP_GET, [this](AsyncWebServerRequest *request) {
             if (!checkAuth(request)) return;
@@ -702,6 +715,9 @@ void WebHandler::setupRoutes() {
         });
         _server.on("/revert", HTTP_POST, [this](AsyncWebServerRequest *request) {
             request->redirect("https://" + String(getWiFiIP()) + "/revert");
+        });
+        _server.on("/reboot", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/reboot");
         });
         _server.on("/ftp", HTTP_GET, [this](AsyncWebServerRequest *request) {
             request->redirect("https://" + String(getWiFiIP()) + "/ftp");

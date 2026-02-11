@@ -667,6 +667,21 @@ static esp_err_t revertPostHandler(httpd_req_t* req) {
     return ESP_OK;
 }
 
+static esp_err_t rebootPostHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+
+    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+    Log.info("HTTPS", "Reboot requested, rebooting in 2s...");
+    if (!*(ctx->delayedReboot)) {
+        *(ctx->delayedReboot) = new Task(2 * TASK_SECOND, TASK_ONCE, [ctx]() {
+            *(ctx->shouldReboot) = true;
+        }, ctx->scheduler, false);
+    }
+    (*(ctx->delayedReboot))->restartDelayed(2 * TASK_SECOND);
+    return ESP_OK;
+}
+
 // --- Public API ---
 
 HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
@@ -775,6 +790,14 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &revPost);
+
+    httpd_uri_t rebootPost = {
+        .uri = "/reboot",
+        .method = HTTP_POST,
+        .handler = rebootPostHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &rebootPost);
 
     httpd_uri_t ftpGet = {
         .uri = "/ftp",
