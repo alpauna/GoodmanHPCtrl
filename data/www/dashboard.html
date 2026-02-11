@@ -1,0 +1,199 @@
+<html><head><title>Dashboard - Goodman HP</title>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<style>
+body{font-family:Arial,sans-serif;margin:0;padding:0;background:#f5f5f5;}
+nav{background:#333;padding:10px 20px;display:flex;align-items:center;gap:18px;}
+nav a{color:#fff;text-decoration:none;font-size:14px;padding:6px 12px;border-radius:4px;}
+nav a:hover,nav a.active{background:#4CAF50;}
+nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
+.content{max-width:600px;margin:20px auto;padding:0 20px;}
+.card{background:#fff;border:1px solid #ddd;border-radius:6px;padding:15px;margin-bottom:15px;}
+.card h3{margin:0 0 10px 0;color:#333;font-size:15px;}
+.state-banner{padding:20px;border-radius:6px;text-align:center;color:#fff;margin-bottom:15px;}
+.state-name{font-size:28px;font-weight:bold;}
+.state-runtime{font-size:14px;opacity:0.9;margin-top:5px;}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.indicator{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#fff;border:1px solid #ddd;border-radius:4px;}
+.indicator .label{font-size:14px;color:#333;font-weight:bold;}
+.indicator .val{font-size:13px;color:#555;margin-left:auto;}
+.dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;}
+.dot.on{background:#4CAF50;}
+.dot.off{background:#ccc;}
+.fault-row{display:flex;flex-wrap:wrap;gap:8px;}
+.pill{padding:4px 10px;border-radius:12px;font-size:12px;font-weight:bold;}
+.pill.ok{background:#e8f5e9;color:#2e7d32;}
+.pill.active{background:#ffebee;color:#c62828;}
+.temp-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee;}
+.temp-row:last-child{border-bottom:none;}
+.temp-name{color:#555;font-size:14px;}
+.temp-value{font-weight:bold;color:#333;font-size:14px;}
+.footer{text-align:center;color:#999;font-size:12px;margin-top:10px;}
+.footer.error{color:#d32f2f;}
+</style></head><body>
+<nav><span class='brand'>Goodman HP</span>
+<a href='/'>Home</a>
+<a href='/dashboard' class='active'>Dashboard</a>
+<a href='/config'>Config</a>
+<a href='/update'>Update</a>
+<a href='/log'>Log</a>
+<a href='/heap'>Heap</a>
+</nav>
+<div class='content'>
+
+<div id='stateBanner' class='state-banner' style='background:#9e9e9e;'>
+<div class='state-name' id='stateName'>--</div>
+<div class='state-runtime' id='stateRuntime'></div>
+</div>
+
+<div class='card'>
+<h3>Protection Status</h3>
+<div class='fault-row'>
+<span class='pill ok' id='fDefrost'>Defrost</span>
+<span class='pill ok' id='fLPS'>LPS Fault</span>
+<span class='pill ok' id='fLowTemp'>Low Temp</span>
+<span class='pill ok' id='fCompOT'>Comp OT</span>
+<span class='pill ok' id='fSuctLT'>Suct LT</span>
+</div>
+</div>
+
+<div class='card'>
+<h3>Inputs</h3>
+<div class='grid'>
+<div class='indicator'><span class='dot off' id='dY'></span><span class='label'>Y</span><span class='val' id='vY'>--</span></div>
+<div class='indicator'><span class='dot off' id='dO'></span><span class='label'>O</span><span class='val' id='vO'>--</span></div>
+<div class='indicator'><span class='dot off' id='dLPS'></span><span class='label'>LPS</span><span class='val' id='vLPS'>--</span></div>
+<div class='indicator'><span class='dot off' id='dDFT'></span><span class='label'>DFT</span><span class='val' id='vDFT'>--</span></div>
+</div>
+</div>
+
+<div class='card'>
+<h3>Outputs</h3>
+<div class='grid'>
+<div class='indicator'><span class='dot off' id='dFAN'></span><span class='label'>FAN</span><span class='val' id='vFAN'>--</span></div>
+<div class='indicator'><span class='dot off' id='dCNT'></span><span class='label'>CNT</span><span class='val' id='vCNT'>--</span></div>
+<div class='indicator'><span class='dot off' id='dW'></span><span class='label'>W</span><span class='val' id='vW'>--</span></div>
+<div class='indicator'><span class='dot off' id='dRV'></span><span class='label'>RV</span><span class='val' id='vRV'>--</span></div>
+</div>
+</div>
+
+<div class='card'>
+<h3>Temperatures</h3>
+<div id='temps'>
+<div class='temp-row'><span class='temp-name'>Loading...</span></div>
+</div>
+</div>
+
+<div class='footer' id='footer'>Connecting...</div>
+</div>
+<script>
+var stateColors={
+  'COOL':'#2196F3','HEAT':'#f44336','DEFROST':'#ff9800',
+  'OFF':'#9e9e9e','ERROR':'#d32f2f','LOW_TEMP':'#7b1fa2'
+};
+var tempNames={
+  'COMPRESSOR_TEMP':'Compressor','SUCTION_TEMP':'Suction',
+  'AMBIENT_TEMP':'Ambient','CONDENSER_TEMP':'Condenser','LIQUID_TEMP':'Liquid Line'
+};
+
+function setDot(id,on){
+  var el=document.getElementById(id);
+  if(el) el.className='dot '+(on?'on':'off');
+}
+function setPill(id,active){
+  var el=document.getElementById(id);
+  if(el) el.className='pill '+(active?'active':'ok');
+}
+function setText(id,txt){
+  var el=document.getElementById(id);
+  if(el) el.textContent=txt;
+}
+
+function update(d){
+  // State banner
+  var banner=document.getElementById('stateBanner');
+  var color=stateColors[d.state]||'#9e9e9e';
+  banner.style.backgroundColor=color;
+  setText('stateName',d.state||'--');
+  var rt=d.heatRuntimeMin||0;
+  var hrs=Math.floor(rt/60);
+  var mins=rt%60;
+  setText('stateRuntime','Heat Runtime: '+(hrs>0?hrs+'h ':'')+mins+'m');
+
+  // Faults
+  setPill('fDefrost',d.defrost);
+  setPill('fLPS',d.lpsFault);
+  setPill('fLowTemp',d.lowTemp);
+  setPill('fCompOT',d.compressorOverTemp);
+  setPill('fSuctLT',d.suctionLowTemp);
+
+  // Inputs
+  var ins=d.inputs||{};
+  var inKeys=['Y','O','LPS','DFT'];
+  for(var i=0;i<inKeys.length;i++){
+    var k=inKeys[i];
+    var v=ins[k];
+    setDot('d'+k,v===true);
+    setText('v'+k,v===true?'ON':v===false?'OFF':'--');
+  }
+
+  // Outputs
+  var outs=d.outputs||{};
+  var outKeys=['FAN','CNT','W','RV'];
+  for(var i=0;i<outKeys.length;i++){
+    var k=outKeys[i];
+    var v=outs[k];
+    setDot('d'+k,v===true);
+    setText('v'+k,v===true?'ON':v===false?'OFF':'--');
+  }
+
+  // Temps
+  var tc=document.getElementById('temps');
+  var ts=d.temps||{};
+  var order=['AMBIENT_TEMP','COMPRESSOR_TEMP','SUCTION_TEMP','CONDENSER_TEMP','LIQUID_TEMP'];
+  var html='';
+  for(var i=0;i<order.length;i++){
+    var k=order[i];
+    var name=tempNames[k]||k;
+    var val=ts[k];
+    if(val!==undefined){
+      html+="<div class='temp-row'><span class='temp-name'>"+name+"</span><span class='temp-value'>"+val.toFixed(1)+"&deg;F</span></div>";
+    }else{
+      html+="<div class='temp-row'><span class='temp-name'>"+name+"</span><span class='temp-value' style='color:#999'>--</span></div>";
+    }
+  }
+  tc.innerHTML=html;
+
+  // Footer
+  var now=new Date();
+  var ts=now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0')+':'+now.getSeconds().toString().padStart(2,'0');
+  var ft=document.getElementById('footer');
+  ft.textContent='Last updated: '+ts;
+  ft.className='footer';
+}
+
+function fetchState(){
+  var xhr=new XMLHttpRequest();
+  xhr.open('GET','/state',true);
+  xhr.timeout=5000;
+  xhr.onload=function(){
+    if(xhr.status===200){
+      try{ update(JSON.parse(xhr.responseText)); }catch(e){}
+    }
+  };
+  xhr.onerror=function(){
+    var ft=document.getElementById('footer');
+    ft.textContent='Connection lost';
+    ft.className='footer error';
+  };
+  xhr.ontimeout=function(){
+    var ft=document.getElementById('footer');
+    ft.textContent='Connection timeout';
+    ft.className='footer error';
+  };
+  xhr.send();
+}
+
+fetchState();
+setInterval(fetchState,2000);
+</script>
+</body></html>

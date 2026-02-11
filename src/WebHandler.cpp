@@ -192,6 +192,10 @@ void WebHandler::setupRoutes() {
         serveFile(request, "/index.html");
     });
 
+    _server.on("/dashboard", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        serveFile(request, "/dashboard.html");
+    });
+
     _server.on("/scan", HTTP_GET, [](AsyncWebServerRequest *request) {
         String json = "[";
         int n = WiFi.scanComplete();
@@ -243,6 +247,40 @@ void WebHandler::setupRoutes() {
         json += ",\"free psram MB\":" + String(ESP.getFreePsram() * MB_MULTIPLIER);
         json += ",\"used psram MB\":" + String((ESP.getPsramSize() - ESP.getFreePsram()) * MB_MULTIPLIER);
         json += "}";
+        request->send(200, "application/json", json);
+    });
+
+    _server.on("/state", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        JsonDocument doc;
+        doc["state"] = _hpController->getStateString();
+
+        JsonObject inputs = doc["inputs"].to<JsonObject>();
+        for (auto& pair : _hpController->getInputMap()) {
+            if (pair.second != nullptr)
+                inputs[pair.first] = pair.second->isActive();
+        }
+
+        JsonObject outputs = doc["outputs"].to<JsonObject>();
+        for (auto& pair : _hpController->getOutputMap()) {
+            if (pair.second != nullptr)
+                outputs[pair.first] = pair.second->isPinOn();
+        }
+
+        doc["heatRuntimeMin"] = _hpController->getHeatRuntimeMs() / 60000UL;
+        doc["defrost"] = _hpController->isSoftwareDefrostActive();
+        doc["lpsFault"] = _hpController->isLPSFaultActive();
+        doc["lowTemp"] = _hpController->isLowTempActive();
+        doc["compressorOverTemp"] = _hpController->isCompressorOverTempActive();
+        doc["suctionLowTemp"] = _hpController->isSuctionLowTempActive();
+
+        JsonObject temps = doc["temps"].to<JsonObject>();
+        for (const auto& m : _hpController->getTempSensorMap()) {
+            if (m.second != nullptr && m.second->isValid())
+                temps[m.first] = m.second->getValue();
+        }
+
+        String json;
+        serializeJson(doc, json);
         request->send(200, "application/json", json);
     });
 

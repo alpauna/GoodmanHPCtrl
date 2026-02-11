@@ -528,6 +528,51 @@ static esp_err_t heapGetHandler(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// --- State handler ---
+
+static esp_err_t stateGetHandler(httpd_req_t* req) {
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+    JsonDocument doc;
+    doc["state"] = ctx->hpController->getStateString();
+
+    JsonObject inputs = doc["inputs"].to<JsonObject>();
+    for (auto& pair : ctx->hpController->getInputMap()) {
+        if (pair.second != nullptr)
+            inputs[pair.first] = pair.second->isActive();
+    }
+
+    JsonObject outputs = doc["outputs"].to<JsonObject>();
+    for (auto& pair : ctx->hpController->getOutputMap()) {
+        if (pair.second != nullptr)
+            outputs[pair.first] = pair.second->isPinOn();
+    }
+
+    doc["heatRuntimeMin"] = ctx->hpController->getHeatRuntimeMs() / 60000UL;
+    doc["defrost"] = ctx->hpController->isSoftwareDefrostActive();
+    doc["lpsFault"] = ctx->hpController->isLPSFaultActive();
+    doc["lowTemp"] = ctx->hpController->isLowTempActive();
+    doc["compressorOverTemp"] = ctx->hpController->isCompressorOverTempActive();
+    doc["suctionLowTemp"] = ctx->hpController->isSuctionLowTempActive();
+
+    JsonObject temps = doc["temps"].to<JsonObject>();
+    for (const auto& m : ctx->hpController->getTempSensorMap()) {
+        if (m.second != nullptr && m.second->isValid())
+            temps[m.first] = m.second->getValue();
+    }
+
+    String json;
+    serializeJson(doc, json);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
+// --- Dashboard handler ---
+
+static esp_err_t dashboardGetHandler(httpd_req_t* req) {
+    return serveFileHttps(req, "/www/dashboard.html");
+}
+
 // --- Root/index handler ---
 
 static esp_err_t rootGetHandler(httpd_req_t* req) {
@@ -648,6 +693,22 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &rootGet);
+
+    httpd_uri_t dashGet = {
+        .uri = "/dashboard",
+        .method = HTTP_GET,
+        .handler = dashboardGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &dashGet);
+
+    httpd_uri_t stateGet = {
+        .uri = "/state",
+        .method = HTTP_GET,
+        .handler = stateGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &stateGet);
 
     httpd_uri_t cfgGet = {
         .uri = "/config",
