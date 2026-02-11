@@ -29,6 +29,12 @@ class GoodmanHP {
     static constexpr float COMPRESSOR_OVERTEMP_OFF_F = 190.0f;  // Resume CNT below this
     static const uint32_t COMPRESSOR_OVERTEMP_CHECK_MS = 60UL * 1000;  // 1 min recheck
 
+    // Suction low-temperature protection (COOL mode only)
+    static constexpr float SUCTION_WARN_F = 34.0f;       // Warn below this
+    static constexpr float SUCTION_CRITICAL_F = 32.0f;    // Shut down CNT below this
+    static constexpr float SUCTION_RESUME_F = 40.0f;      // Resume above this
+    static const uint32_t SUCTION_CHECK_MS = 60UL * 1000; // 1 min recheck
+
     GoodmanHP(Scheduler *ts);
 
     void setDallasTemperature(DallasTemperature *sensors);
@@ -67,6 +73,7 @@ class GoodmanHP {
     bool isLPSFaultActive() const;
     bool isLowTempActive() const;
     bool isCompressorOverTempActive() const;
+    bool isSuctionLowTempActive() const;
     void setLowTempThreshold(float threshold);
     float getLowTempThreshold() const;
 
@@ -103,12 +110,16 @@ class GoodmanHP {
     bool _compressorOverTemp;
     uint32_t _compressorOverTempStartTick;
     uint32_t _compressorOverTempLastCheckTick;
+    bool _suctionLowTemp;
+    uint32_t _suctionLowTempStartTick;
+    uint32_t _suctionLowTempLastCheckTick;
     StateChangeCallback _stateChangeCb;
     LPSFaultCallback _lpsFaultCb;
 
     void checkLPSFault();
     void checkAmbientTemp();
     void checkCompressorTemp();
+    void checkSuctionTemp();
     void checkYAndActivateCNT();
     void updateState();
     void accumulateHeatRuntime();

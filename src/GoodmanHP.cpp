@@ -23,6 +23,9 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _compressorOverTemp(false)
     , _compressorOverTempStartTick(0)
     , _compressorOverTempLastCheckTick(0)
+    , _suctionLowTemp(false)
+    , _suctionLowTempStartTick(0)
+    , _suctionLowTempLastCheckTick(0)
 {
     _instance = this;
     _tskUpdate = new Task(500, TASK_FOREVER, [this]() {
@@ -125,6 +128,7 @@ void GoodmanHP::clearTempSensors() {
 
 void GoodmanHP::update() {
     checkCompressorTemp();
+    checkSuctionTemp();
     checkLPSFault();
     checkAmbientTemp();
     checkYAndActivateCNT();
@@ -283,6 +287,77 @@ void GoodmanHP::checkCompressorTemp() {
     }
 }
 
+void GoodmanHP::checkSuctionTemp() {
+    // Only applies in COOL mode
+    if (_state != State::COOL && !_suctionLowTemp) return;
+
+    uint32_t now = millis();
+
+    // If already in suction low temp fault, recheck for recovery
+    if (_suctionLowTemp) {
+        // Auto-clear if no longer in COOL mode
+        if (_state != State::COOL && _state != State::ERROR) {
+            uint32_t elapsed = now - _suctionLowTempStartTick;
+            Log.info("HP", "Suction low temp cleared: no longer in COOL mode, resolved in %lu min %lu sec",
+                     elapsed / 60000UL, (elapsed / 1000UL) % 60);
+            _suctionLowTemp = false;
+            if (_stateChangeCb) _stateChangeCb(_state, _state);
+            return;
+        }
+
+        if (now - _suctionLowTempLastCheckTick < SUCTION_CHECK_MS) return;
+        _suctionLowTempLastCheckTick = now;
+
+        TempSensor* suction = getTempSensor("SUCTION_TEMP");
+        if (suction == nullptr || !suction->isValid()) return;
+
+        float temp = suction->getValue();
+        Log.info("HP", "Suction low temp recheck: %.1fF (recovery > %.1fF)", temp, SUCTION_RESUME_F);
+
+        if (temp > SUCTION_RESUME_F) {
+            uint32_t elapsed = now - _suctionLowTempStartTick;
+            Log.warn("HP", "Suction low temp cleared: %.1fF > %.1fF, resolved in %lu min %lu sec",
+                     temp, SUCTION_RESUME_F, elapsed / 60000UL, (elapsed / 1000UL) % 60);
+            _suctionLowTemp = false;
+            if (_stateChangeCb) _stateChangeCb(_state, _state);
+        }
+        return;
+    }
+
+    // Only check every 1 minute for new condition
+    if (now - _suctionLowTempLastCheckTick < SUCTION_CHECK_MS) return;
+    _suctionLowTempLastCheckTick = now;
+
+    TempSensor* suction = getTempSensor("SUCTION_TEMP");
+    if (suction == nullptr || !suction->isValid()) return;
+
+    float temp = suction->getValue();
+
+    if (temp < SUCTION_CRITICAL_F) {
+        _suctionLowTemp = true;
+        _suctionLowTempStartTick = now;
+        Log.error("HP", "Suction temp critically low: %.1fF < %.1fF, shutting down CNT (FAN stays on)",
+                  temp, SUCTION_CRITICAL_F);
+
+        OutPin* cnt = getOutput("CNT");
+        if (cnt != nullptr && cnt->isOn()) {
+            cnt->turnOff();
+            _cntActivated = false;
+        }
+
+        // Keep FAN on
+        OutPin* fan = getOutput("FAN");
+        if (fan != nullptr && !fan->isOn()) {
+            fan->turnOn();
+            Log.info("HP", "FAN kept ON during suction low temp");
+        }
+
+        if (_stateChangeCb) _stateChangeCb(_state, _state);
+    } else if (temp < SUCTION_WARN_F) {
+        Log.warn("HP", "Suction temp low: %.1fF < %.1fF", temp, SUCTION_WARN_F);
+    }
+}
+
 void GoodmanHP::checkYAndActivateCNT() {
     InputPin* y = getInput("Y");
     OutPin* cnt = getOutput("CNT");
@@ -327,7 +402,7 @@ void GoodmanHP::checkYAndActivateCNT() {
             Log.info("HP", "Y dropped during defrost, system shutdown (defrost pending)");
         }
     } else if (yActive && _yWasActive && !_cntActivated) {
-        if (_lpsFault || _lowTemp || _compressorOverTemp) return;
+        if (_lpsFault || _lowTemp || _compressorOverTemp || _suctionLowTemp) return;
         // Check if CNT was off for less than 5 minutes - if so, enforce 30s delay
         uint32_t offElapsed = millis() - cnt->getOffTick();
         if (cnt->getOffTick() > 0 && offElapsed < 5 * 60 * 1000UL) {
@@ -516,6 +591,10 @@ bool GoodmanHP::isLowTempActive() const {
 
 bool GoodmanHP::isCompressorOverTempActive() const {
     return _compressorOverTemp;
+}
+
+bool GoodmanHP::isSuctionLowTempActive() const {
+    return _suctionLowTemp;
 }
 
 void GoodmanHP::setLowTempThreshold(float threshold) {

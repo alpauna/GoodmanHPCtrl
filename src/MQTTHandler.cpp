@@ -99,6 +99,7 @@ void MQTTHandler::publishState() {
     doc["lpsFault"] = _controller->isLPSFaultActive();
     doc["lowTemp"] = _controller->isLowTempActive();
     doc["compressorOverTemp"] = _controller->isCompressorOverTempActive();
+    doc["suctionLowTemp"] = _controller->isSuctionLowTempActive();
 
     char buf[512];
     size_t len = serializeJson(doc, buf, sizeof(buf));
