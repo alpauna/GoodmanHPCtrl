@@ -221,6 +221,73 @@ void WebHandler::setupRoutes() {
         request->send(200, "application/json", json);
     });
 
+    // Temperature history CSV endpoint (must be registered before /temps)
+    _server.on("/temps/history", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!_config || !_config->isSDCardInitialized()) {
+            request->send(503, "application/json", "{\"error\":\"SD card not available\"}");
+            return;
+        }
+
+        static const char* validSensors[] = {"ambient","compressor","suction","condenser","liquid"};
+        if (!request->hasParam("sensor")) {
+            request->send(400, "application/json", "{\"error\":\"Missing sensor param\"}");
+            return;
+        }
+        String sensor = request->getParam("sensor")->value();
+        bool valid = false;
+        for (int i = 0; i < 5; i++) {
+            if (sensor == validSensors[i]) { valid = true; break; }
+        }
+        if (!valid) {
+            request->send(400, "application/json", "{\"error\":\"Invalid sensor\"}");
+            return;
+        }
+
+        String dirPath = "/temps/" + sensor;
+
+        if (request->hasParam("date")) {
+            String date = request->getParam("date")->value();
+            if (date.length() != 10 || date[4] != '-' || date[7] != '-') {
+                request->send(400, "application/json", "{\"error\":\"Invalid date format\"}");
+                return;
+            }
+            String filepath = dirPath + "/" + date + ".csv";
+            if (!SD.exists(filepath.c_str())) {
+                request->send(404, "application/json", "{\"error\":\"No data\"}");
+                return;
+            }
+            request->send(SD, filepath.c_str(), "text/csv");
+            return;
+        }
+
+        File dir = SD.open(dirPath.c_str());
+        if (!dir || !dir.isDirectory()) {
+            request->send(200, "application/json", "{\"files\":[]}");
+            return;
+        }
+
+        String json = "{\"files\":[";
+        bool first = true;
+        File entry = dir.openNextFile();
+        while (entry) {
+            String name = entry.name();
+            size_t size = entry.size();
+            entry.close();
+            if (name.endsWith(".csv")) {
+                int slashIdx = name.lastIndexOf('/');
+                String datePart = (slashIdx >= 0) ? name.substring(slashIdx + 1) : name;
+                datePart = datePart.substring(0, datePart.length() - 4);
+                if (!first) json += ",";
+                json += "{\"date\":\"" + datePart + "\",\"size\":" + String(size) + "}";
+                first = false;
+            }
+            entry = dir.openNextFile();
+        }
+        dir.close();
+        json += "]}";
+        request->send(200, "application/json", json);
+    });
+
     _server.on("/temps", HTTP_GET, [this](AsyncWebServerRequest *request) {
         String json = "[";
         bool firstTime = true;

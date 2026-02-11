@@ -32,6 +32,11 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 .sc-pill{padding:2px 6px;font-size:10px;}
 .sep{color:#ccc;font-size:14px;}
 .footer.error{color:#d32f2f;}
+.chart-card h3{display:flex;align-items:center;justify-content:space-between;}
+.chart-card h3 select{font-size:13px;padding:2px 6px;border:1px solid #ccc;border-radius:4px;}
+.chart-container{margin-bottom:12px;}
+.chart-container h4{margin:0 0 4px 0;font-size:13px;color:#555;}
+.chart-container canvas{width:100%;height:150px;border:1px solid #eee;border-radius:4px;background:#fafafa;display:block;}
 </style></head><body>
 <nav><span class='brand'>Goodman HP</span>
 <a href='/'>Home</a>
@@ -86,6 +91,19 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <div id='temps'>
 <div class='temp-row'><span class='temp-name'>Loading...</span></div>
 </div>
+</div>
+
+<div class='card chart-card'>
+<h3><span>Temperature History</span>
+<select id='timeRange'>
+<option value='1'>1 Hour</option>
+<option value='6' selected>6 Hours</option>
+<option value='24'>24 Hours</option>
+<option value='168'>7 Days</option>
+</select>
+</h3>
+<div id='chartStatus' style='text-align:center;color:#999;font-size:12px;margin:4px 0;'></div>
+<div id='charts'></div>
 </div>
 
 <div class='footer' id='footer'>Connecting...</div>
@@ -178,6 +196,9 @@ function update(d){
   var ft=document.getElementById('footer');
   ft.textContent='Last updated: '+ts;
   ft.className='footer';
+
+  // Append live data to charts
+  appendLiveTemp(d);
 }
 
 function fetchState(){
@@ -204,5 +225,240 @@ function fetchState(){
 
 fetchState();
 setInterval(fetchState,2000);
+
+// ---- Temperature History Charts ----
+var chartSensors=[
+  {key:'AMBIENT_TEMP',dir:'ambient',color:'#2196F3'},
+  {key:'COMPRESSOR_TEMP',dir:'compressor',color:'#f44336'},
+  {key:'SUCTION_TEMP',dir:'suction',color:'#4CAF50'},
+  {key:'CONDENSER_TEMP',dir:'condenser',color:'#ff9800'},
+  {key:'LIQUID_TEMP',dir:'liquid',color:'#9C27B0'}
+];
+var chartData={};
+var chartCanvases={};
+var chartInited=false;
+var lastAppendEpoch=0;
+
+function initCharts(){
+  var c=document.getElementById('charts');
+  c.innerHTML='';
+  for(var i=0;i<chartSensors.length;i++){
+    var s=chartSensors[i];
+    chartData[s.key]=[];
+    var div=document.createElement('div');
+    div.className='chart-container';
+    var h4=document.createElement('h4');
+    h4.textContent=tempNames[s.key]||s.key;
+    div.appendChild(h4);
+    var cvs=document.createElement('canvas');
+    cvs.width=560;cvs.height=150;
+    div.appendChild(cvs);
+    c.appendChild(div);
+    chartCanvases[s.key]=cvs;
+  }
+  chartInited=true;
+}
+
+function loadHistory(){
+  var range=parseInt(document.getElementById('timeRange').value);
+  var status=document.getElementById('chartStatus');
+  status.textContent='Loading history...';
+  var daysNeeded=Math.ceil(range/24);
+  if(daysNeeded<1) daysNeeded=1;
+
+  // Load each sensor independently
+  var sensorsLoaded=0;
+  for(var si=0;si<chartSensors.length;si++){
+    (function(sensor){
+      var xhr=new XMLHttpRequest();
+      xhr.open('GET','/temps/history?sensor='+sensor.dir,true);
+      xhr.onload=function(){
+        if(xhr.status===200){
+          try{
+            var resp=JSON.parse(xhr.responseText);
+            var files=(resp.files||[]).sort(function(a,b){return b.date.localeCompare(a.date);});
+            var toFetch=files.slice(0,daysNeeded);
+            toFetch.reverse();
+            if(toFetch.length===0){
+              chartData[sensor.key]=[];
+              sensorsLoaded++;
+              if(sensorsLoaded===chartSensors.length) onAllLoaded(range);
+              return;
+            }
+            var fetched=0;
+            var rows=[];
+            for(var fi=0;fi<toFetch.length;fi++){
+              (function(dateStr){
+                var csvXhr=new XMLHttpRequest();
+                csvXhr.open('GET','/temps/history?sensor='+sensor.dir+'&date='+dateStr,true);
+                csvXhr.onload=function(){
+                  if(csvXhr.status===200) parseCSV(csvXhr.responseText,rows);
+                  fetched++;
+                  if(fetched===toFetch.length){
+                    rows.sort(function(a,b){return a.t-b.t;});
+                    var now=Math.floor(Date.now()/1000);
+                    var cutoff=now-(range*3600);
+                    var filtered=[];
+                    for(var r=0;r<rows.length;r++){
+                      if(rows[r].t>=cutoff) filtered.push(rows[r]);
+                    }
+                    // Decimate to max 500 points
+                    if(filtered.length>500){
+                      var step=Math.ceil(filtered.length/500);
+                      var dec=[];
+                      for(var r=0;r<filtered.length;r+=step) dec.push(filtered[r]);
+                      filtered=dec;
+                    }
+                    chartData[sensor.key]=filtered;
+                    if(filtered.length>0) lastAppendEpoch=Math.max(lastAppendEpoch,filtered[filtered.length-1].t);
+                    sensorsLoaded++;
+                    if(sensorsLoaded===chartSensors.length) onAllLoaded(range);
+                  }
+                };
+                csvXhr.onerror=function(){fetched++;if(fetched===toFetch.length){sensorsLoaded++;if(sensorsLoaded===chartSensors.length) onAllLoaded(range);}};
+                csvXhr.send();
+              })(toFetch[fi].date);
+            }
+          }catch(e){sensorsLoaded++;if(sensorsLoaded===chartSensors.length) onAllLoaded(range);}
+        }else{sensorsLoaded++;if(sensorsLoaded===chartSensors.length) onAllLoaded(range);}
+      };
+      xhr.onerror=function(){sensorsLoaded++;if(sensorsLoaded===chartSensors.length) onAllLoaded(range);};
+      xhr.send();
+    })(chartSensors[si]);
+  }
+}
+
+function parseCSV(text,rows){
+  var lines=text.split('\n');
+  for(var i=0;i<lines.length;i++){
+    var line=lines[i].trim();
+    if(!line) continue;
+    var cols=line.split(',');
+    if(cols.length<2) continue;
+    var t=parseInt(cols[0]);
+    var v=parseFloat(cols[1]);
+    if(!isNaN(t)&&!isNaN(v)) rows.push({t:t,v:v});
+  }
+}
+
+function onAllLoaded(range){
+  var total=0;
+  for(var i=0;i<chartSensors.length;i++) total+=chartData[chartSensors[i].key].length;
+  document.getElementById('chartStatus').textContent=total+' data points loaded';
+  renderAllCharts();
+}
+
+function renderChart(sensorIdx){
+  var s=chartSensors[sensorIdx];
+  var canvas=chartCanvases[s.key];
+  if(!canvas) return;
+  var data=chartData[s.key];
+
+  var rect=canvas.getBoundingClientRect();
+  var dpr=window.devicePixelRatio||1;
+  canvas.width=rect.width*dpr;
+  canvas.height=rect.height*dpr;
+  var ctx=canvas.getContext('2d');
+  ctx.scale(dpr,dpr);
+
+  var W=rect.width,H=rect.height;
+  var pad={top:10,right:10,bottom:25,left:45};
+  var plotW=W-pad.left-pad.right;
+  var plotH=H-pad.top-pad.bottom;
+
+  ctx.clearRect(0,0,W,H);
+
+  if(data.length<2){
+    ctx.fillStyle='#999';ctx.font='12px Arial';ctx.textAlign='center';
+    ctx.fillText('No data',W/2,H/2);
+    return;
+  }
+
+  var minV=Infinity,maxV=-Infinity;
+  for(var i=0;i<data.length;i++){
+    if(data[i].v<minV) minV=data[i].v;
+    if(data[i].v>maxV) maxV=data[i].v;
+  }
+  var yR=maxV-minV;
+  if(yR<2){yR=2;minV-=1;maxV+=1;}
+  minV-=yR*0.05;maxV+=yR*0.05;
+  yR=maxV-minV;
+
+  var tMin=data[0].t,tMax=data[data.length-1].t;
+  var tR=tMax-tMin;if(tR===0)tR=1;
+
+  function xPx(t){return pad.left+((t-tMin)/tR)*plotW;}
+  function yPx(v){return pad.top+plotH-((v-minV)/yR)*plotH;}
+
+  // Grid lines
+  ctx.strokeStyle='#eee';ctx.lineWidth=1;
+  ctx.font='10px Arial';ctx.fillStyle='#999';ctx.textAlign='right';
+  for(var i=0;i<=5;i++){
+    var val=minV+(yR*i/5);
+    var y=yPx(val);
+    ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(W-pad.right,y);ctx.stroke();
+    ctx.fillText(val.toFixed(0)+'\u00B0F',pad.left-4,y+3);
+  }
+
+  // X axis labels
+  ctx.textAlign='center';ctx.fillStyle='#999';
+  for(var i=0;i<=6;i++){
+    var t=tMin+(tR*i/6);
+    var x=xPx(t);
+    var d=new Date(t*1000);
+    var label;
+    if(tR>86400){
+      label=(d.getMonth()+1)+'/'+d.getDate()+' '+d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');
+    }else{
+      label=d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');
+    }
+    ctx.fillText(label,x,H-4);
+  }
+
+  // Data line
+  ctx.strokeStyle=s.color;ctx.lineWidth=1.5;ctx.lineJoin='round';
+  ctx.beginPath();
+  ctx.moveTo(xPx(data[0].t),yPx(data[0].v));
+  for(var i=1;i<data.length;i++){
+    ctx.lineTo(xPx(data[i].t),yPx(data[i].v));
+  }
+  ctx.stroke();
+
+  // Current value label
+  var lastVal=data[data.length-1].v;
+  ctx.fillStyle=s.color;ctx.font='bold 12px Arial';ctx.textAlign='right';
+  ctx.fillText(lastVal.toFixed(1)+'\u00B0F',W-pad.right-4,pad.top+14);
+}
+
+function renderAllCharts(){
+  for(var i=0;i<chartSensors.length;i++) renderChart(i);
+}
+
+function appendLiveTemp(d){
+  if(!chartInited) return;
+  var ts=d.temps||{};
+  var now=Math.floor(Date.now()/1000);
+  if(now-lastAppendEpoch<25) return;
+  lastAppendEpoch=now;
+
+  var range=parseInt(document.getElementById('timeRange').value);
+  var cutoff=now-(range*3600);
+
+  for(var i=0;i<chartSensors.length;i++){
+    var key=chartSensors[i].key;
+    var val=ts[key];
+    if(val!==undefined){
+      chartData[key].push({t:now,v:val});
+      while(chartData[key].length>0&&chartData[key][0].t<cutoff) chartData[key].shift();
+    }
+  }
+  renderAllCharts();
+}
+
+// Init charts on page load
+initCharts();
+loadHistory();
+document.getElementById('timeRange').addEventListener('change',function(){loadHistory();});
+window.addEventListener('resize',function(){if(chartInited) renderAllCharts();});
 </script>
 </body></html>

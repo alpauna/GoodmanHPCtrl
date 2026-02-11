@@ -514,6 +514,122 @@ static esp_err_t tempsGetHandler(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// --- Temps history handler ---
+
+static esp_err_t tempsHistoryGetHandler(httpd_req_t* req) {
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+
+    if (!ctx->config || !ctx->config->isSDCardInitialized()) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"SD card not available\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    // Parse query string
+    size_t qLen = httpd_req_get_url_query_len(req);
+    char sensorVal[16] = {};
+    char dateVal[16] = {};
+    bool hasSensor = false, hasDate = false;
+
+    if (qLen > 0) {
+        char* qBuf = (char*)malloc(qLen + 1);
+        if (qBuf && httpd_req_get_url_query_str(req, qBuf, qLen + 1) == ESP_OK) {
+            if (httpd_query_key_value(qBuf, "sensor", sensorVal, sizeof(sensorVal)) == ESP_OK)
+                hasSensor = true;
+            if (httpd_query_key_value(qBuf, "date", dateVal, sizeof(dateVal)) == ESP_OK)
+                hasDate = true;
+        }
+        free(qBuf);
+    }
+
+    if (!hasSensor) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Missing sensor param\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    // Validate sensor name
+    static const char* validSensors[] = {"ambient","compressor","suction","condenser","liquid"};
+    bool valid = false;
+    for (int i = 0; i < 5; i++) {
+        if (strcmp(sensorVal, validSensors[i]) == 0) { valid = true; break; }
+    }
+    if (!valid) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Invalid sensor\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    char dirPath[32];
+    snprintf(dirPath, sizeof(dirPath), "/temps/%s", sensorVal);
+
+    if (hasDate) {
+        if (strlen(dateVal) != 10 || dateVal[4] != '-' || dateVal[7] != '-') {
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_send(req, "{\"error\":\"Invalid date format\"}", HTTPD_RESP_USE_STRLEN);
+            return ESP_OK;
+        }
+
+        char filepath[48];
+        snprintf(filepath, sizeof(filepath), "%s/%s.csv", dirPath, dateVal);
+        if (!SD.exists(filepath)) {
+            httpd_resp_send_404(req);
+            return ESP_OK;
+        }
+
+        // Stream CSV in chunks
+        File f = SD.open(filepath, FILE_READ);
+        if (!f) {
+            httpd_resp_send_404(req);
+            return ESP_OK;
+        }
+        httpd_resp_set_type(req, "text/csv");
+        char buf[1024];
+        while (f.available()) {
+            int bytesRead = f.read((uint8_t*)buf, sizeof(buf));
+            if (bytesRead > 0)
+                httpd_resp_send_chunk(req, buf, bytesRead);
+        }
+        f.close();
+        httpd_resp_send_chunk(req, NULL, 0);
+        return ESP_OK;
+    }
+
+    // List available files
+    File dir = SD.open(dirPath);
+    if (!dir || !dir.isDirectory()) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"files\":[]}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    String json = "{\"files\":[";
+    bool first = true;
+    File entry = dir.openNextFile();
+    while (entry) {
+        String name = entry.name();
+        size_t size = entry.size();
+        entry.close();
+
+        if (name.endsWith(".csv")) {
+            int slashIdx = name.lastIndexOf('/');
+            String datePart = (slashIdx >= 0) ? name.substring(slashIdx + 1) : name;
+            datePart = datePart.substring(0, datePart.length() - 4);
+
+            if (!first) json += ",";
+            json += "{\"date\":\"" + datePart + "\",\"size\":" + String(size) + "}";
+            first = false;
+        }
+        entry = dir.openNextFile();
+    }
+    dir.close();
+    json += "]}";
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
 // --- Heap handler ---
 
 static esp_err_t heapGetHandler(httpd_req_t* req) {
@@ -694,7 +810,7 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
     cfg.prvtkey_pem = key;
     cfg.prvtkey_len = keyLen + 1;
     cfg.port_secure = 443;
-    cfg.httpd.max_uri_handlers = 20;
+    cfg.httpd.max_uri_handlers = 24;
 
     httpd_handle_t server = nullptr;
     esp_err_t err = httpd_ssl_start(&server, &cfg);
@@ -831,6 +947,14 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &tempsGet);
+
+    httpd_uri_t tempsHistoryGet = {
+        .uri = "/temps/history",
+        .method = HTTP_GET,
+        .handler = tempsHistoryGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &tempsHistoryGet);
 
     httpd_uri_t heapGet = {
         .uri = "/heap",

@@ -183,6 +183,12 @@ Task _tGetInputs(500 * TASK_MILLISECOND, TASK_FOREVER, &onCheckInputQueue, &ts, 
 void onSaveRuntime();
 Task tSaveRuntime(5 * TASK_MINUTE, TASK_FOREVER, &onSaveRuntime, &ts, false);
 
+// Log temperature history to per-sensor CSV files every 30 seconds
+void onLogTempsCSV();
+void cleanOldTempFiles(int maxAgeDays);
+Task tLogTempsCSV(30 * TASK_SECOND, TASK_FOREVER, &onLogTempsCSV, &ts, false);
+static char _tempsCsvDate[12] = "";
+
 
 
 /**
@@ -463,6 +469,7 @@ void setup() {
   tRuntime.enable();
   _tGetInputs.enable();
   tSaveRuntime.enable();
+  tLogTempsCSV.enable();
 
   Log.info("MAIN", "Starting Main Loop");
 }
@@ -508,6 +515,112 @@ void onSaveRuntime(){
       Log.debug("MAIN", "Heat runtime saved: %lu ms", runtimeMs);
     }
   }
+}
+
+// Sensor key → CSV directory name mapping
+struct TempCsvEntry {
+    const char* sensorKey;
+    const char* dirName;
+};
+static const TempCsvEntry tempCsvEntries[] = {
+    {"AMBIENT_TEMP",    "ambient"},
+    {"COMPRESSOR_TEMP", "compressor"},
+    {"SUCTION_TEMP",    "suction"},
+    {"CONDENSER_TEMP",  "condenser"},
+    {"LIQUID_TEMP",     "liquid"}
+};
+
+void onLogTempsCSV() {
+    if (!config.isSDCardInitialized()) return;
+
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo)) return;  // No NTP sync yet
+
+    char today[12];
+    strftime(today, sizeof(today), "%Y-%m-%d", &timeinfo);
+
+    // Date change: create dirs, clean old files
+    if (strcmp(today, _tempsCsvDate) != 0) {
+        strncpy(_tempsCsvDate, today, sizeof(_tempsCsvDate));
+        if (!SD.exists("/temps")) SD.mkdir("/temps");
+        for (int i = 0; i < 5; i++) {
+            char dir[32];
+            snprintf(dir, sizeof(dir), "/temps/%s", tempCsvEntries[i].dirName);
+            if (!SD.exists(dir)) SD.mkdir(dir);
+        }
+        cleanOldTempFiles(31);
+    }
+
+    time_t epoch = mktime(&timeinfo);
+    TempSensorMap& temps = hpController.getTempSensorMap();
+
+    for (int i = 0; i < 5; i++) {
+        auto it = temps.find(tempCsvEntries[i].sensorKey);
+        if (it == temps.end() || it->second == nullptr || !it->second->isValid()) continue;
+
+        char filepath[48];
+        snprintf(filepath, sizeof(filepath), "/temps/%s/%s.csv",
+                 tempCsvEntries[i].dirName, today);
+
+        File f = SD.open(filepath, FILE_APPEND);
+        if (f) {
+            char row[32];
+            snprintf(row, sizeof(row), "%ld,%.1f", (long)epoch, it->second->getValue());
+            f.println(row);
+            f.close();
+        }
+    }
+}
+
+void cleanOldTempFiles(int maxAgeDays) {
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo)) return;
+
+    time_t now = mktime(&timeinfo);
+    time_t cutoff = now - ((time_t)maxAgeDays * 86400);
+
+    for (int s = 0; s < 5; s++) {
+        char dirPath[32];
+        snprintf(dirPath, sizeof(dirPath), "/temps/%s", tempCsvEntries[s].dirName);
+
+        File dir = SD.open(dirPath);
+        if (!dir || !dir.isDirectory()) continue;
+
+        String toDelete[64];
+        int deleteCount = 0;
+
+        File entry = dir.openNextFile();
+        while (entry && deleteCount < 64) {
+            String name = entry.name();
+            entry.close();
+
+            if (name.endsWith(".csv")) {
+                // Extract date from filename (may include path prefix)
+                int slashIdx = name.lastIndexOf('/');
+                String datePart = (slashIdx >= 0) ? name.substring(slashIdx + 1) : name;
+                datePart = datePart.substring(0, 10);  // "YYYY-MM-DD"
+
+                struct tm fileTm = {};
+                if (sscanf(datePart.c_str(), "%d-%d-%d",
+                           &fileTm.tm_year, &fileTm.tm_mon, &fileTm.tm_mday) == 3) {
+                    fileTm.tm_year -= 1900;
+                    fileTm.tm_mon -= 1;
+                    time_t fileTime = mktime(&fileTm);
+                    if (fileTime < cutoff) {
+                        String fullPath = String(dirPath) + "/" + datePart + ".csv";
+                        toDelete[deleteCount++] = fullPath;
+                    }
+                }
+            }
+            entry = dir.openNextFile();
+        }
+        dir.close();
+
+        for (int i = 0; i < deleteCount; i++) {
+            SD.remove(toDelete[i].c_str());
+            Log.info("TEMPS", "Deleted old temp file: %s", toDelete[i].c_str());
+        }
+    }
 }
 
 bool OnReadInputsEnable(){
