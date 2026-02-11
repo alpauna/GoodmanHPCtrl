@@ -10,6 +10,7 @@
 #include <SD.h>
 #include "mbedtls/base64.h"
 #include "HttpsServer.h"
+#include "OtaUtils.h"
 #include "Config.h"
 #include "GoodmanHP.h"
 #include "Logger.h"
@@ -350,6 +351,8 @@ static esp_err_t updatePostHandler(httpd_req_t* req) {
         return ESP_OK;
     }
 
+    backupFirmwareToSD();
+
     if (!Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000)) {
         Log.error("OTA", "Update.begin failed");
         Update.printError(Serial);
@@ -556,6 +559,37 @@ static esp_err_t logGetHandler(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// --- Revert handlers ---
+
+static esp_err_t revertGetHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    bool exists = firmwareBackupExists();
+    size_t size = exists ? firmwareBackupSize() : 0;
+    String json = "{\"exists\":" + String(exists ? "true" : "false") +
+                  ",\"size\":" + String(size) + "}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
+static esp_err_t revertPostHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+
+    if (!firmwareBackupExists()) {
+        httpd_resp_send(req, "FAIL: no backup", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    if (revertFirmwareFromSD()) {
+        httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+        *(ctx->shouldReboot) = true;
+    } else {
+        httpd_resp_send(req, "FAIL", HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+}
+
 // --- Public API ---
 
 HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
@@ -567,7 +601,7 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
     cfg.prvtkey_pem = key;
     cfg.prvtkey_len = keyLen + 1;
     cfg.port_secure = 443;
-    cfg.httpd.max_uri_handlers = 16;
+    cfg.httpd.max_uri_handlers = 20;
 
     httpd_handle_t server = nullptr;
     esp_err_t err = httpd_ssl_start(&server, &cfg);
@@ -616,6 +650,22 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &updPost);
+
+    httpd_uri_t revGet = {
+        .uri = "/revert",
+        .method = HTTP_GET,
+        .handler = revertGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &revGet);
+
+    httpd_uri_t revPost = {
+        .uri = "/revert",
+        .method = HTTP_POST,
+        .handler = revertPostHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &revPost);
 
     httpd_uri_t ftpGet = {
         .uri = "/ftp",

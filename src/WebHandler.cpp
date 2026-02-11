@@ -2,6 +2,7 @@
 #include "AsyncJson.h"
 #include "ArduinoJson.h"
 #include "TempSensor.h"
+#include "OtaUtils.h"
 
 WebHandler::WebHandler(uint16_t port, Scheduler* ts, GoodmanHP* hpController)
     : _server(port), _ws("/ws"), _ts(ts), _hpController(hpController),
@@ -531,6 +532,7 @@ void WebHandler::setupRoutes() {
             request->send(response);
         }, nullptr, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
             if (index == 0) {
+                backupFirmwareToSD();
                 Log.info("OTA", "Update Start: %u bytes", total);
                 if (!Update.begin(total)) {
                     Log.error("OTA", "Update.begin failed");
@@ -550,6 +552,26 @@ void WebHandler::setupRoutes() {
                     Update.printError(Serial);
                 }
             }
+        });
+
+        _server.on("/revert", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            bool exists = firmwareBackupExists();
+            size_t size = exists ? firmwareBackupSize() : 0;
+            String json = "{\"exists\":" + String(exists ? "true" : "false") +
+                          ",\"size\":" + String(size) + "}";
+            request->send(200, "application/json", json);
+        });
+
+        _server.on("/revert", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            if (!firmwareBackupExists()) {
+                request->send(400, "text/plain", "FAIL: no backup");
+                return;
+            }
+            bool ok = revertFirmwareFromSD();
+            request->send(200, "text/plain", ok ? "OK" : "FAIL");
+            if (ok) _shouldReboot = true;
         });
 
         // FTP control endpoints (HTTP fallback)
@@ -591,6 +613,12 @@ void WebHandler::setupRoutes() {
         });
         _server.on("/update", HTTP_POST, [this](AsyncWebServerRequest *request) {
             request->redirect("https://" + String(getWiFiIP()) + "/update");
+        });
+        _server.on("/revert", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/revert");
+        });
+        _server.on("/revert", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/revert");
         });
         _server.on("/ftp", HTTP_GET, [this](AsyncWebServerRequest *request) {
             request->redirect("https://" + String(getWiFiIP()) + "/ftp");

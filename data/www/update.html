@@ -7,17 +7,22 @@ nav a{color:#fff;text-decoration:none;font-size:14px;padding:6px 12px;border-rad
 nav a:hover,nav a.active{background:#4CAF50;}
 nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 .content{max-width:600px;margin:20px auto;padding:0 20px;}
-h1{color:#333;}
+h1{color:#333;} h2{color:#333;margin-top:30px;}
 .file-info{margin:10px 0;color:#555;font-size:14px;}
 progress{width:100%;height:24px;display:none;margin:10px 0;border-radius:4px;overflow:hidden;}
 progress::-webkit-progress-bar{background:#ddd;border-radius:4px;}
 progress::-webkit-progress-value{background:#4CAF50;border-radius:4px;}
-#status{margin:10px 0;font-size:14px;color:#333;white-space:pre-line;}
-#uploadBtn{padding:8px 20px;background:#4CAF50;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;}
-#uploadBtn:disabled{background:#999;cursor:not-allowed;}
+#status,#revertStatus{margin:10px 0;font-size:14px;color:#333;white-space:pre-line;}
+.btn{padding:8px 20px;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;}
+.btn:disabled{background:#999!important;cursor:not-allowed;}
+#uploadBtn{background:#4CAF50;}
 #uploadBtn:hover:not(:disabled){background:#45a049;}
+#revertBtn{background:#f57c00;}
+#revertBtn:hover:not(:disabled){background:#e65100;}
 .error{color:#d32f2f;}
 .success{color:#2e7d32;}
+.backup-info{color:#555;font-size:14px;margin:8px 0;}
+hr{border:none;border-top:1px solid #ddd;margin:30px 0;}
 </style></head><body>
 <nav><span class='brand'>Goodman HP</span>
 <a href='/'>Home</a>
@@ -29,9 +34,14 @@ progress::-webkit-progress-value{background:#4CAF50;border-radius:4px;}
 <h1>OTA Update</h1>
 <input type='file' id='fileInput' accept='.bin'>
 <div class='file-info' id='fileInfo'></div>
-<button id='uploadBtn' disabled>Upload</button>
+<button id='uploadBtn' class='btn' disabled>Upload</button>
 <progress id='progress' max='100' value='0'></progress>
 <div id='status'></div>
+<hr>
+<h2>Revert Firmware</h2>
+<div id='backupInfo' class='backup-info'>Checking for backup...</div>
+<button id='revertBtn' class='btn' disabled style='display:none'>Revert to Previous</button>
+<div id='revertStatus'></div>
 </div>
 <script>
 var fileInput=document.getElementById('fileInput');
@@ -39,6 +49,31 @@ var uploadBtn=document.getElementById('uploadBtn');
 var progress=document.getElementById('progress');
 var status=document.getElementById('status');
 var fileInfo=document.getElementById('fileInfo');
+var revertBtn=document.getElementById('revertBtn');
+var revertStatus=document.getElementById('revertStatus');
+var backupInfo=document.getElementById('backupInfo');
+
+function checkBackup(){
+  var xhr=new XMLHttpRequest();
+  xhr.open('GET','/revert',true);
+  xhr.onload=function(){
+    if(xhr.status===200){
+      var data=JSON.parse(xhr.responseText);
+      if(data.exists){
+        backupInfo.textContent='Previous firmware backup available ('+Math.round(data.size/1024)+' KB)';
+        revertBtn.style.display='';
+        revertBtn.disabled=false;
+      }else{
+        backupInfo.textContent='No previous firmware backup available.';
+        revertBtn.style.display='none';
+      }
+    }
+  };
+  xhr.onerror=function(){ backupInfo.textContent='Could not check backup status.'; };
+  xhr.send();
+}
+
+checkBackup();
 
 fileInput.addEventListener('change',function(){
   var f=fileInput.files[0];
@@ -53,11 +88,27 @@ fileInput.addEventListener('change',function(){
   }
 });
 
+function rebootCountdown(el,msg){
+  var sec=10;
+  el.textContent=msg+' Rebooting in '+sec+'s...';
+  var iv=setInterval(function(){
+    sec--;
+    if(sec<=0){
+      clearInterval(iv);
+      el.textContent='Reloading page...';
+      location.reload();
+    }else{
+      el.textContent=msg+' Rebooting in '+sec+'s...';
+    }
+  },1000);
+}
+
 uploadBtn.addEventListener('click',function(){
   var f=fileInput.files[0];
   if(!f)return;
   uploadBtn.disabled=true;
   fileInput.disabled=true;
+  revertBtn.disabled=true;
   progress.style.display='block';
   progress.value=0;
   status.textContent='Uploading...';
@@ -79,23 +130,13 @@ uploadBtn.addEventListener('click',function(){
     if(xhr.status===200&&xhr.responseText==='OK'){
       progress.value=100;
       status.className='success';
-      var sec=10;
-      status.textContent='Upload complete! Rebooting in '+sec+'s...';
-      var iv=setInterval(function(){
-        sec--;
-        if(sec<=0){
-          clearInterval(iv);
-          status.textContent='Reloading page...';
-          location.reload();
-        }else{
-          status.textContent='Upload complete! Rebooting in '+sec+'s...';
-        }
-      },1000);
+      rebootCountdown(status,'Upload complete!');
     }else{
       status.className='error';
       status.textContent='Update failed: '+(xhr.responseText||'Unknown error');
       uploadBtn.disabled=false;
       fileInput.disabled=false;
+      revertBtn.disabled=false;
     }
   };
 
@@ -104,9 +145,42 @@ uploadBtn.addEventListener('click',function(){
     status.textContent='Upload failed: network error';
     uploadBtn.disabled=false;
     fileInput.disabled=false;
+    revertBtn.disabled=false;
   };
 
   xhr.send(f);
+});
+
+revertBtn.addEventListener('click',function(){
+  if(!confirm('Revert to previous firmware version? The device will reboot.'))return;
+  revertBtn.disabled=true;
+  uploadBtn.disabled=true;
+  fileInput.disabled=true;
+  revertStatus.textContent='Reverting firmware...';
+  revertStatus.className='';
+
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST','/revert',true);
+  xhr.onload=function(){
+    if(xhr.status===200&&xhr.responseText==='OK'){
+      revertStatus.className='success';
+      rebootCountdown(revertStatus,'Revert complete!');
+    }else{
+      revertStatus.className='error';
+      revertStatus.textContent='Revert failed: '+(xhr.responseText||'Unknown error');
+      revertBtn.disabled=false;
+      uploadBtn.disabled=false;
+      fileInput.disabled=false;
+    }
+  };
+  xhr.onerror=function(){
+    revertStatus.className='error';
+    revertStatus.textContent='Revert failed: network error';
+    revertBtn.disabled=false;
+    uploadBtn.disabled=false;
+    fileInput.disabled=false;
+  };
+  xhr.send();
 });
 </script>
 </body></html>
