@@ -6,6 +6,7 @@
 #include "SdFat.h"
 #include "ArduinoJson.h"
 #include "TempSensor.h"
+#include "mbedtls/base64.h"
 
 struct ProjectInfo {
     String name;
@@ -31,6 +32,7 @@ class Config {
     bool loadTempConfig(const char* filename, TempSensorMap& config, ProjectInfo& proj);
     bool saveConfiguration(const char* filename, TempSensorMap& config, ProjectInfo& proj);
     bool updateRuntime(const char* filename, uint32_t heatRuntimeMs);
+    bool updateConfig(const char* filename, TempSensorMap& config, ProjectInfo& proj);
     void clearConfig(TempSensorMap& config);
 
     // Getters for loaded config values
@@ -53,6 +55,15 @@ class Config {
     SdFs* getSd() { return &_sd; }
     bool isSDCardInitialized() const { return _sdInitialized; }
 
+    // ProjectInfo access
+    void setProjectInfo(ProjectInfo* proj) { _proj = proj; }
+    ProjectInfo* getProjectInfo() { return _proj; }
+
+    // Password obfuscation
+    static void setObfuscationKey(const String& key);
+    static String obfuscatePassword(const String& plaintext);
+    static String deobfuscatePassword(const String& encoded);
+
     // Callback setter for temp sensor discovery
     typedef void (*TempSensorDiscoveryCallback)(TempSensorMap& config);
     void setTempSensorDiscoveryCallback(TempSensorDiscoveryCallback cb) { _tempDiscoveryCb = cb; }
@@ -72,6 +83,12 @@ class Config {
 
     // Callback for discovering temp sensors when saving new config
     TempSensorDiscoveryCallback _tempDiscoveryCb;
+
+    // ProjectInfo pointer for WebHandler access
+    ProjectInfo* _proj;
+
+    // Obfuscation key (set from build timestamp)
+    static String _obfuscationKey;
 };
 
 #endif

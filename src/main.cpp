@@ -350,6 +350,9 @@ void setup() {
   WiFi.onEvent(onWiFiEvent);
   connectToWifi();
 
+  config.setProjectInfo(&proj);
+  Config::setObfuscationKey(compile_date);
+  webHandler.setConfig(&config);
   webHandler.setTimezone(proj.gmtOffsetSec, proj.daylightOffsetSec);
   webHandler.begin();
 

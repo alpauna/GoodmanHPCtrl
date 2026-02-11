@@ -11,6 +11,7 @@
 #include <TaskSchedulerDeclarations.h>
 #include "GoodmanHP.h"
 #include "Logger.h"
+#include "Config.h"
 
 class WebHandler {
   public:
@@ -18,6 +19,7 @@ class WebHandler {
     void begin();
     void startNtpSync();
     void setTimezone(int32_t gmtOffset, int32_t daylightOffset);
+    void setConfig(Config* config) { _config = config; }
     bool shouldReboot() const { return _shouldReboot; }
     const char * getWiFiIP();
 
@@ -27,8 +29,10 @@ class WebHandler {
 
     Scheduler* _ts;
     GoodmanHP* _hpController;
+    Config* _config;
 
     bool _shouldReboot;
+    Task* _tDelayedReboot;
     bool _ntpSynced;
     Task* _tNtpSync;
 

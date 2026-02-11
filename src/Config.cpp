@@ -10,6 +10,8 @@ extern void tempSensorChangeCallback(TempSensor* sensor);
 
 #define SPI_SPEED SD_SCK_MHZ(SD_SPI_SPEED)
 
+String Config::_obfuscationKey = "";
+
 Config::Config()
     : _sdInitialized(false)
     , _mqttHost(192, 168, 0, 46)
@@ -19,7 +21,56 @@ Config::Config()
     , _wifiSSID("")
     , _wifiPassword("")
     , _tempDiscoveryCb(nullptr)
+    , _proj(nullptr)
 {
+}
+
+void Config::setObfuscationKey(const String& key) {
+    _obfuscationKey = key;
+}
+
+String Config::obfuscatePassword(const String& plaintext) {
+    if (plaintext.length() == 0 || _obfuscationKey.length() == 0) return plaintext;
+
+    // XOR with key
+    size_t len = plaintext.length();
+    uint8_t* xored = new uint8_t[len];
+    for (size_t i = 0; i < len; i++) {
+        xored[i] = plaintext[i] ^ _obfuscationKey[i % _obfuscationKey.length()];
+    }
+
+    // Base64 encode
+    size_t outLen = 0;
+    mbedtls_base64_encode(nullptr, 0, &outLen, xored, len);
+    uint8_t* b64 = new uint8_t[outLen + 1];
+    mbedtls_base64_encode(b64, outLen + 1, &outLen, xored, len);
+    b64[outLen] = '\0';
+
+    String result = "$ENC$" + String((char*)b64);
+    delete[] xored;
+    delete[] b64;
+    return result;
+}
+
+String Config::deobfuscatePassword(const String& encoded) {
+    if (!encoded.startsWith("$ENC$")) return encoded;  // plaintext passthrough
+    if (_obfuscationKey.length() == 0) return encoded;
+
+    String b64Part = encoded.substring(5);
+    size_t outLen = 0;
+    mbedtls_base64_decode(nullptr, 0, &outLen, (const uint8_t*)b64Part.c_str(), b64Part.length());
+    uint8_t* decoded = new uint8_t[outLen + 1];
+    mbedtls_base64_decode(decoded, outLen + 1, &outLen, (const uint8_t*)b64Part.c_str(), b64Part.length());
+
+    // XOR with key to recover plaintext
+    for (size_t i = 0; i < outLen; i++) {
+        decoded[i] ^= _obfuscationKey[i % _obfuscationKey.length()];
+    }
+    decoded[outLen] = '\0';
+
+    String result = String((char*)decoded);
+    delete[] decoded;
+    return result;
 }
 
 bool Config::initSDCard() {
@@ -93,7 +144,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     const char* wifi_ssid = doc["wifi"]["ssid"];
     const char* wifi_password = doc["wifi"]["password"];
     _wifiSSID = wifi_ssid != nullptr ? wifi_ssid : "";
-    _wifiPassword = wifi_password != nullptr ? wifi_password : "";
+    _wifiPassword = wifi_password != nullptr ? deobfuscatePassword(wifi_password != nullptr ? wifi_password : "") : "";
     cout << "Read WiFi SSID:" << wifi_ssid << endl;
 
     JsonObject mqtt = doc["mqtt"];
@@ -103,7 +154,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     int mqtt_port = mqtt["port"];
     _mqttPort = mqtt_port;
     _mqttUser = mqtt_user != nullptr ? mqtt_user : "";
-    _mqttPassword = mqtt_password != nullptr ? mqtt_password : "";
+    _mqttPassword = mqtt_password != nullptr ? deobfuscatePassword(mqtt_password != nullptr ? mqtt_password : "") : "";
     _mqttHost.fromString(mqtt_host != nullptr ? mqtt_host : "192.168.1.2");
     cout << "Read mqtt Host:" << _mqttHost.toString().c_str() << endl;
 
@@ -233,6 +284,61 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     cout << "Temp sensor as json..." << endl;
     cout << output << endl;
     _configFile.close();
+    return true;
+}
+
+bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectInfo& proj) {
+    if (!_sdInitialized) {
+        return false;
+    }
+
+    FsFile file;
+    if (!file.open(filename, O_RDONLY)) {
+        return false;
+    }
+
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, file);
+    file.close();
+
+    if (error) {
+        return false;
+    }
+
+    // Update all config fields
+    doc["project"] = proj.name;
+    doc["description"] = proj.description;
+
+    JsonObject wifi = doc["wifi"].to<JsonObject>();
+    wifi["ssid"] = _wifiSSID;
+    wifi["password"] = obfuscatePassword(_wifiPassword);
+
+    JsonObject mqtt = doc["mqtt"].to<JsonObject>();
+    mqtt["user"] = _mqttUser;
+    mqtt["password"] = obfuscatePassword(_mqttPassword);
+    mqtt["host"] = _mqttHost.toString();
+    mqtt["port"] = _mqttPort;
+
+    JsonObject logging = doc["logging"].to<JsonObject>();
+    logging["maxLogSize"] = proj.maxLogSize;
+    logging["maxOldLogCount"] = proj.maxOldLogCount;
+
+    JsonObject runtime = doc["runtime"].to<JsonObject>();
+    runtime["heatAccumulatedMs"] = proj.heatRuntimeAccumulatedMs;
+
+    JsonObject timezone = doc["timezone"].to<JsonObject>();
+    timezone["gmtOffset"] = proj.gmtOffsetSec;
+    timezone["daylightOffset"] = proj.daylightOffsetSec;
+
+    JsonObject lowTemp = doc["lowTemp"].to<JsonObject>();
+    lowTemp["threshold"] = proj.lowTempThreshold;
+
+    // Write back
+    if (!file.open(filename, O_RDWR | O_TRUNC)) {
+        return false;
+    }
+    serializeJson(doc, file);
+    file.close();
     return true;
 }
 
