@@ -100,12 +100,14 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 
 **Fault Conditions** (overlay on current state, block CNT activation):
 
-| Fault | Condition | Trigger | Recovery | FAN | CNT | Priority |
-|-------|-----------|---------|----------|-----|-----|----------|
-| Compressor overtemp | COMPRESSOR_TEMP ≥ 240°F | Any mode | Temp < 190°F | ON | OFF | 1 (highest) |
-| Suction low temp | SUCTION_TEMP < 32°F | COOL mode only | Temp > 40°F | ON | OFF | 2 |
-| LPS fault | LPS input LOW | Any mode | LPS goes HIGH | OFF | OFF | 3 |
-| Low ambient temp | AMBIENT_TEMP < 20°F | Any mode | Temp ≥ 20°F | OFF | OFF | 4 |
+| Fault | Condition | Trigger | Recovery | FAN | CNT | W | Priority |
+|-------|-----------|---------|----------|-----|-----|---|----------|
+| Compressor overtemp | COMPRESSOR_TEMP ≥ 240°F | Any mode | Temp < 190°F | ON | OFF | OFF | 1 (highest) |
+| Suction low temp | SUCTION_TEMP < 32°F | COOL mode only | Temp > 40°F | ON | OFF | OFF | 2 |
+| LPS fault | LPS input LOW | Any mode | LPS goes HIGH | OFF | OFF | ON* | 3 |
+| Low ambient temp | AMBIENT_TEMP < 20°F | Any mode | Temp ≥ 20°F | OFF | OFF | ON* | 4 |
+
+\* W on only in HEAT mode (Y active, O inactive); never activated in COOL mode (Y+O).
 
 **Fault Priority:** Compressor overtemp > Suction low temp > LPS fault > Low ambient temp. Higher-priority faults take precedence; lower-priority checks are skipped while a higher-priority fault is active.
 
