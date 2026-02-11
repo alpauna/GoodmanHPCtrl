@@ -423,17 +423,8 @@ void setup() {
   }
   webHandler.begin();
 
-  // Conditional FTP startup: only auto-start if no admin password is set
-  // NOTE: While FTP is active, SD card web pages won't load (SPI bus conflict).
-  // Set an admin password to disable FTP and restore web page serving.
-  if (sdCardReady && !config.hasAdminPassword()) {
-    config.getSd()->end();
-    SD.begin(SS);
-    ftpSrv.begin("admin", "admin");
-    ftpActive = true;
-    ftpStopTime = 0;  // Unlimited until admin password is set
-    Log.info("FTP", "FTP server started (no admin password set)");
-  }
+  // FTP is never auto-started at boot — enable on demand from config page.
+  // While FTP is active, SD card web pages won't load (SPI bus conflict).
 
   mqttHandler.begin(_MQTT_HOST_DEFAULT, _MQTT_PORT, _MQTT_USER, _MQTT_PASSWORD);
   mqttHandler.setController(&hpController);

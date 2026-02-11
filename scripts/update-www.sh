@@ -1,14 +1,9 @@
 #!/bin/bash
 # Upload HTML files from data/www/ to SD card /www/ via FTP
-# Usage: ./scripts/update-www.sh <device-ip> [admin-password]
-#
-# If admin password is set on the device, it will authenticate via HTTPS
-# and enable FTP for 10 minutes before uploading files.
+# Prompts for device IP and optional admin password.
 
 set -e
 
-DEVICE_IP="${1:?Usage: $0 <device-ip> [admin-password]}"
-ADMIN_PW="${2:-}"
 FTP_USER="admin"
 FTP_PASS="admin"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -18,6 +13,15 @@ if [ ! -d "$WWW_DIR" ]; then
     echo "Error: data/www/ directory not found at $WWW_DIR"
     exit 1
 fi
+
+read -rp "Device IP: " DEVICE_IP
+if [ -z "$DEVICE_IP" ]; then
+    echo "Error: IP address required"
+    exit 1
+fi
+
+read -rsp "Admin password (blank if none set): " ADMIN_PW
+echo
 
 # Always use HTTPS with -k for self-signed certs
 BASE_URL="https://$DEVICE_IP"
@@ -36,7 +40,7 @@ if [ -n "$ADMIN_PW" ]; then
     fi
     echo "FTP enabled: $RESP"
 else
-    echo "No admin password provided, enabling FTP without auth..."
+    echo "Enabling FTP for 10 minutes (no auth)..."
     RESP=$(curl $CURL_OPTS \
         -X POST "$BASE_URL/ftp" \
         -H "Content-Type: application/json" \
