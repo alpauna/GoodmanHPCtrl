@@ -111,6 +111,7 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <div class='indicator'><span class='label'>Heap</span><span class='val' id='vHeap'>--</span></div>
 <div class='indicator'><span class='label'>WiFi</span><div class='wifi-info'><div class='wifi-bars' id='wifiBars'><span></span><span></span><span></span><span></span></div><span class='val' id='vWifi'>--</span></div></div>
 <div class='indicator'><span class='label'>Build</span><span class='val' id='vBuild' style='font-size:11px'>--</span></div>
+<div class='indicator'><span class='label'>Date/Time</span><span class='val' id='vDatetime' style='font-size:11px'>--</span></div>
 </div>
 </div>
 
@@ -216,6 +217,7 @@ function update(d){
   setText('vCpu1',d.cpuLoad1!==undefined?d.cpuLoad1+'%':'--%');
   if(d.freeHeap!==undefined){var kb=Math.round(d.freeHeap/1024);setText('vHeap',kb+'KB');}
   if(d.buildDate)setText('vBuild',d.buildDate);
+  if(d.datetime)setText('vDatetime',d.datetime);
   if(d.wifiRSSI!==undefined){
     var rssi=d.wifiRSSI;
     setText('vWifi',rssi+'dBm');

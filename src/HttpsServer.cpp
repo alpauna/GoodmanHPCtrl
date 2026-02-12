@@ -709,6 +709,12 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     doc["wifiIP"] = WiFi.localIP().toString();
     doc["apMode"] = _apModeActive;
     doc["buildDate"] = compile_date;
+    struct tm ti;
+    if (getLocalTime(&ti, 0)) {
+        char buf[20];
+        strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &ti);
+        doc["datetime"] = buf;
+    }
 
     JsonObject temps = doc["temps"].to<JsonObject>();
     for (const auto& m : ctx->hpController->getTempSensorMap()) {
