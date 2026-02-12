@@ -18,6 +18,7 @@
 #include "Config.h"
 #include "WebHandler.h"
 #include "MQTTHandler.h"
+#include "TempHistory.h"
 
 #ifndef AP_PASSWORD
 #error "AP_PASSWORD not defined — create secrets.ini with: -D AP_PASSWORD=\\\"yourpassword\\\""
@@ -140,6 +141,7 @@ std::map<String, InputPin* > activePins;
 GoodmanHP hpController(&ts);
 WebHandler webHandler(80, &ts, &hpController);
 MQTTHandler mqttHandler(&ts);
+TempHistory tempHistory;
 
 OneWire oneWire(ONE_WIRE_BUS);
 
@@ -216,6 +218,10 @@ static char _tempsCsvDate[12] = "";
 // CPU load calculation every 1 second
 void onCalcCpuLoad();
 Task tCpuLoad(TASK_SECOND, TASK_FOREVER, &onCalcCpuLoad, &ts, false);
+
+// Backfill temp history from SD after NTP sync
+void onBackfillTempHistory();
+Task tBackfillTempHistory(5 * TASK_SECOND, 12, &onBackfillTempHistory, &ts, false); // retry every 5s up to 12 times (60s)
 
 
 
@@ -434,6 +440,8 @@ void setup() {
   config.setProjectInfo(&proj);
   webHandler.setConfig(&config);
   webHandler.setTimezone(proj.gmtOffsetSec, proj.daylightOffsetSec);
+  tempHistory.begin();
+  webHandler.setTempHistory(&tempHistory);
 
   bool sdCardReady = config.isSDCardInitialized();
 
@@ -530,6 +538,7 @@ void setup() {
   _tGetInputs.enable();
   tSaveRuntime.enable();
   tLogTempsCSV.enable();
+  tBackfillTempHistory.enableDelayed();
 
   esp_register_freertos_idle_hook_for_cpu(idleHookCore0, 0);
   esp_register_freertos_idle_hook_for_cpu(idleHookCore1, 1);
@@ -610,6 +619,13 @@ void onCalcCpuLoad() {
   _cpuLoadCore1 = (_cpuLoadCore1 * 3 + raw1 + 2) / 4;
 }
 
+void onBackfillTempHistory() {
+  struct tm ti;
+  if (!getLocalTime(&ti, 0)) return;  // NTP not ready, will retry
+  tempHistory.backfillFromSD();
+  tBackfillTempHistory.disable();  // Done, stop retrying
+}
+
 // Sensor key → CSV directory name mapping
 struct TempCsvEntry {
     const char* sensorKey;
@@ -655,13 +671,17 @@ void onLogTempsCSV() {
         snprintf(filepath, sizeof(filepath), "/temps/%s/%s.csv",
                  tempCsvEntries[i].dirName, today);
 
+        float tempVal = it->second->getValue();
+
         File f = SD.open(filepath, FILE_APPEND);
         if (f) {
             char row[32];
-            snprintf(row, sizeof(row), "%ld,%.1f", (long)epoch, it->second->getValue());
+            snprintf(row, sizeof(row), "%ld,%.1f", (long)epoch, tempVal);
             f.println(row);
             f.close();
         }
+
+        tempHistory.addSample(i, (uint32_t)epoch, tempVal);
     }
 }
 

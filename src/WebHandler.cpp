@@ -2,6 +2,7 @@
 #include "AsyncJson.h"
 #include "ArduinoJson.h"
 #include "TempSensor.h"
+#include "TempHistory.h"
 #include "OtaUtils.h"
 
 extern const char compile_date[];
@@ -236,6 +237,63 @@ void WebHandler::setupRoutes() {
             }
         }
         json += "]";
+        request->send(200, "application/json", json);
+    });
+
+    // Consolidated temp history from PSRAM (must be registered before /temps/history)
+    _server.on("/temps/history/all", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!_tempHistory) {
+            request->send(503, "application/json", "{\"error\":\"Temp history not available\"}");
+            return;
+        }
+        int range = 24;
+        if (request->hasParam("range")) {
+            range = request->getParam("range")->value().toInt();
+            if (range < 1) range = 1;
+            if (range > 168) range = 168;
+        }
+        struct tm ti;
+        if (!getLocalTime(&ti, 0)) {
+            request->send(503, "application/json", "{\"error\":\"Time not synced\"}");
+            return;
+        }
+        time_t now = mktime(&ti);
+        uint32_t sinceEpoch = (uint32_t)(now - (time_t)range * 3600);
+
+        // Allocate output buffer on PSRAM for largest possible result
+        int maxPerSensor = TempHistory::MAX_SAMPLES;
+        TempSample* buf = (TempSample*)ps_malloc(maxPerSensor * sizeof(TempSample));
+        if (!buf) {
+            request->send(500, "application/json", "{\"error\":\"Out of memory\"}");
+            return;
+        }
+
+        String json = "{\"sensors\":{";
+        for (int s = 0; s < TempHistory::MAX_SENSORS; s++) {
+            if (s > 0) json += ",";
+            json += "\"";
+            json += TempHistory::sensorDirs[s];
+            json += "\":[";
+            int count = _tempHistory->getSamples(s, sinceEpoch, buf, maxPerSensor);
+
+            // Decimate to max 500 points
+            int step = 1;
+            if (count > 500) step = (count + 499) / 500;
+
+            bool first = true;
+            for (int i = 0; i < count; i += step) {
+                if (!first) json += ",";
+                json += "[";
+                json += String(buf[i].epoch);
+                json += ",";
+                json += String(buf[i].temp, 1);
+                json += "]";
+                first = false;
+            }
+            json += "]";
+        }
+        json += "}}";
+        free(buf);
         request->send(200, "application/json", json);
     });
 
@@ -1147,6 +1205,7 @@ bool WebHandler::beginSecure(const uint8_t* cert, size_t certLen, const uint8_t*
     _httpsCtx.wifiOldPassword = &_wifiOldPassword;
     _httpsCtx.wifiTestCountdown = &_wifiTestCountdown;
     _httpsCtx.wifiTestTask = &_tWifiTest;
+    _httpsCtx.tempHistory = _tempHistory;
 
     _httpsServer = httpsStart(cert, certLen, key, keyLen, &_httpsCtx);
     return _httpsServer != nullptr;

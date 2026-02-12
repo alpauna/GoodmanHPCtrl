@@ -9,6 +9,7 @@
 // to prevent enum conflicts with ESPAsyncWebServer
 class Config;
 class GoodmanHP;
+class TempHistory;
 class Scheduler;
 class Task;
 
@@ -33,6 +34,7 @@ struct HttpsContext {
     String* wifiOldPassword;
     uint8_t* wifiTestCountdown;
     Task** wifiTestTask;
+    TempHistory* tempHistory;
 };
 
 // Opaque handle

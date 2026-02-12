@@ -16,6 +16,8 @@
 #include "Config.h"
 #include "HttpsServer.h"
 
+class TempHistory;
+
 class WebHandler {
   public:
     WebHandler(uint16_t port, Scheduler* ts, GoodmanHP* hpController);
@@ -30,6 +32,7 @@ class WebHandler {
     typedef std::function<void(int)> FtpEnableCallback;
     typedef std::function<void()> FtpDisableCallback;
     typedef std::function<String()> FtpStatusCallback;
+    void setTempHistory(TempHistory* th) { _tempHistory = th; }
     void setFtpControl(FtpEnableCallback enableCb, FtpDisableCallback disableCb, FtpStatusCallback statusCb);
     void setFtpState(bool* activePtr, unsigned long* stopTimePtr);
 
@@ -42,6 +45,7 @@ class WebHandler {
     Scheduler* _ts;
     GoodmanHP* _hpController;
     Config* _config;
+    TempHistory* _tempHistory = nullptr;
 
     bool _shouldReboot;
     Task* _tDelayedReboot;

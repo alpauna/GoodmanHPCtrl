@@ -299,69 +299,36 @@ function loadHistory(){
   var range=parseInt(document.getElementById('timeRange').value);
   var status=document.getElementById('chartStatus');
   status.textContent='Loading history...';
-  var daysNeeded=Math.ceil(range/24);
-  if(daysNeeded<1) daysNeeded=1;
 
-  // Load each sensor independently
-  var sensorsLoaded=0;
-  for(var si=0;si<chartSensors.length;si++){
-    (function(sensor){
-      var xhr=new XMLHttpRequest();
-      xhr.open('GET','/temps/history?sensor='+sensor.dir,true);
-      xhr.onload=function(){
-        if(xhr.status===200){
-          try{
-            var resp=JSON.parse(xhr.responseText);
-            var files=(resp.files||[]).sort(function(a,b){return b.date.localeCompare(a.date);});
-            var toFetch=files.slice(0,daysNeeded);
-            toFetch.reverse();
-            if(toFetch.length===0){
-              chartData[sensor.key]=[];
-              sensorsLoaded++;
-              if(sensorsLoaded===chartSensors.length) onAllLoaded(range);
-              return;
-            }
-            var fetched=0;
-            var rows=[];
-            for(var fi=0;fi<toFetch.length;fi++){
-              (function(dateStr){
-                var csvXhr=new XMLHttpRequest();
-                csvXhr.open('GET','/temps/history?sensor='+sensor.dir+'&date='+dateStr,true);
-                csvXhr.onload=function(){
-                  if(csvXhr.status===200) parseCSV(csvXhr.responseText,rows);
-                  fetched++;
-                  if(fetched===toFetch.length){
-                    rows.sort(function(a,b){return a.t-b.t;});
-                    var now=Math.floor(Date.now()/1000);
-                    var cutoff=now-(range*3600);
-                    var filtered=[];
-                    for(var r=0;r<rows.length;r++){
-                      if(rows[r].t>=cutoff) filtered.push(rows[r]);
-                    }
-                    // Decimate to max 500 points
-                    if(filtered.length>500){
-                      var step=Math.ceil(filtered.length/500);
-                      var dec=[];
-                      for(var r=0;r<filtered.length;r+=step) dec.push(filtered[r]);
-                      filtered=dec;
-                    }
-                    chartData[sensor.key]=filtered;
-                    if(filtered.length>0) lastAppendEpoch=Math.max(lastAppendEpoch,filtered[filtered.length-1].t);
-                    sensorsLoaded++;
-                    if(sensorsLoaded===chartSensors.length) onAllLoaded(range);
-                  }
-                };
-                csvXhr.onerror=function(){fetched++;if(fetched===toFetch.length){sensorsLoaded++;if(sensorsLoaded===chartSensors.length) onAllLoaded(range);}};
-                csvXhr.send();
-              })(toFetch[fi].date);
-            }
-          }catch(e){sensorsLoaded++;if(sensorsLoaded===chartSensors.length) onAllLoaded(range);}
-        }else{sensorsLoaded++;if(sensorsLoaded===chartSensors.length) onAllLoaded(range);}
-      };
-      xhr.onerror=function(){sensorsLoaded++;if(sensorsLoaded===chartSensors.length) onAllLoaded(range);};
-      xhr.send();
-    })(chartSensors[si]);
-  }
+  var xhr=new XMLHttpRequest();
+  xhr.open('GET','/temps/history/all?range='+range,true);
+  xhr.timeout=10000;
+  xhr.onload=function(){
+    if(xhr.status===200){
+      try{
+        var resp=JSON.parse(xhr.responseText);
+        var sensors=resp.sensors||{};
+        for(var i=0;i<chartSensors.length;i++){
+          var s=chartSensors[i];
+          var raw=sensors[s.dir]||[];
+          var rows=[];
+          for(var j=0;j<raw.length;j++){
+            rows.push({t:raw[j][0],v:raw[j][1]});
+          }
+          chartData[s.key]=rows;
+          if(rows.length>0) lastAppendEpoch=Math.max(lastAppendEpoch,rows[rows.length-1].t);
+        }
+        onAllLoaded(range);
+      }catch(e){
+        status.textContent='Error parsing response';
+      }
+    }else{
+      status.textContent='Error loading history ('+xhr.status+')';
+    }
+  };
+  xhr.onerror=function(){status.textContent='Network error loading history';};
+  xhr.ontimeout=function(){status.textContent='Timeout loading history';};
+  xhr.send();
 }
 
 function parseCSV(text,rows){

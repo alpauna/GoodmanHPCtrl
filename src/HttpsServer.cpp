@@ -14,6 +14,7 @@
 #include "OtaUtils.h"
 #include "Config.h"
 #include "GoodmanHP.h"
+#include "TempHistory.h"
 #include "Logger.h"
 
 extern uint8_t getCpuLoadCore0();
@@ -538,6 +539,102 @@ static esp_err_t tempsGetHandler(httpd_req_t* req) {
     json += "]";
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
+// --- Consolidated temp history from PSRAM ---
+
+static esp_err_t tempsHistoryAllGetHandler(httpd_req_t* req) {
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+    if (!ctx->tempHistory) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Temp history not available\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    int range = 24;
+    size_t qLen = httpd_req_get_url_query_len(req);
+    if (qLen > 0) {
+        char* qBuf = (char*)malloc(qLen + 1);
+        if (qBuf && httpd_req_get_url_query_str(req, qBuf, qLen + 1) == ESP_OK) {
+            char val[16] = {};
+            if (httpd_query_key_value(qBuf, "range", val, sizeof(val)) == ESP_OK) {
+                range = atoi(val);
+                if (range < 1) range = 1;
+                if (range > 168) range = 168;
+            }
+        }
+        free(qBuf);
+    }
+
+    struct tm ti;
+    if (!getLocalTime(&ti, 0)) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Time not synced\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+    time_t now = mktime(&ti);
+    uint32_t sinceEpoch = (uint32_t)(now - (time_t)range * 3600);
+
+    int maxPerSensor = TempHistory::MAX_SAMPLES;
+    TempSample* buf = (TempSample*)ps_malloc(maxPerSensor * sizeof(TempSample));
+    if (!buf) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Out of memory\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+
+    // Send response in chunks to avoid huge single allocation
+    httpd_resp_send_chunk(req, "{\"sensors\":{", 12);
+
+    for (int s = 0; s < TempHistory::MAX_SENSORS; s++) {
+        // Sensor key prefix
+        String prefix = (s > 0 ? ",\"" : "\"");
+        prefix += TempHistory::sensorDirs[s];
+        prefix += "\":[";
+        httpd_resp_send_chunk(req, prefix.c_str(), prefix.length());
+
+        int count = ctx->tempHistory->getSamples(s, sinceEpoch, buf, maxPerSensor);
+
+        // Decimate to max 500 points
+        int step = 1;
+        if (count > 500) step = (count + 499) / 500;
+
+        bool first = true;
+        // Build in chunks of ~50 points to avoid huge strings
+        String chunk;
+        chunk.reserve(2048);
+        int pointsInChunk = 0;
+
+        for (int i = 0; i < count; i += step) {
+            if (!first) chunk += ",";
+            chunk += "[";
+            chunk += String(buf[i].epoch);
+            chunk += ",";
+            chunk += String(buf[i].temp, 1);
+            chunk += "]";
+            first = false;
+            pointsInChunk++;
+
+            if (pointsInChunk >= 50) {
+                httpd_resp_send_chunk(req, chunk.c_str(), chunk.length());
+                chunk = "";
+                pointsInChunk = 0;
+            }
+        }
+        if (chunk.length() > 0) {
+            httpd_resp_send_chunk(req, chunk.c_str(), chunk.length());
+        }
+
+        httpd_resp_send_chunk(req, "]", 1);
+    }
+
+    httpd_resp_send_chunk(req, "}}", 2);
+    httpd_resp_send_chunk(req, NULL, 0);  // End chunked response
+
+    free(buf);
     return ESP_OK;
 }
 
@@ -1320,6 +1417,14 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &tempsGet);
+
+    httpd_uri_t tempsHistoryAllGet = {
+        .uri = "/temps/history/all",
+        .method = HTTP_GET,
+        .handler = tempsHistoryAllGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &tempsHistoryAllGet);
 
     httpd_uri_t tempsHistoryGet = {
         .uri = "/temps/history",
