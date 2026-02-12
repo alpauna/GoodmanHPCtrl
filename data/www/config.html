@@ -63,6 +63,7 @@ button:hover{background:#45a049;}
 <label>SSID</label><input type='text' id='wifiSSID'>
 <label>Password</label><input type='password' id='wifiPassword'>
 <label>Current Password or Admin Password (required to change)</label><input type='password' id='curWifiPw'>
+<label>AP Fallback Timeout (minutes) <span class='tag tag-live'>live</span></label><input type='number' id='apFallbackMinutes' min='1' step='1'>
 <a href='/wifi/view' class='btn-sm' style='display:inline-block;text-decoration:none;margin-top:8px;'>Scan WiFi</a>
 </fieldset>
 <fieldset><legend>MQTT <span class='tag tag-reboot'>reboot</span></legend>
@@ -95,7 +96,7 @@ button:hover{background:#45a049;}
 <div id='status'></div>
 </div>
 <script>
-var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','maxOldLogCount','theme'];
+var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','apFallbackMinutes','maxOldLogCount','theme'];
 var adminPwSet=false;
 fetch('/config?format=json').then(r=>r.json()).then(d=>{
 fields.forEach(f=>{var e=document.getElementById(f);if(e)e.value=d[f]!=null?d[f]:'';});

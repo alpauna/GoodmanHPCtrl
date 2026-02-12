@@ -158,6 +158,7 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["gmtOffsetHrs"] = proj->gmtOffsetSec / 3600.0f;
         doc["daylightOffsetHrs"] = proj->daylightOffsetSec / 3600.0f;
         doc["lowTempThreshold"] = proj->lowTempThreshold;
+        doc["apFallbackMinutes"] = proj->apFallbackSeconds / 60;
         doc["maxLogSize"] = proj->maxLogSize;
         doc["maxOldLogCount"] = proj->maxOldLogCount;
         doc["adminPasswordSet"] = ctx->config->hasAdminPassword();
@@ -311,6 +312,10 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         proj->lowTempThreshold = threshold;
         ctx->hpController->setLowTempThreshold(threshold);
     }
+
+    // AP fallback timeout (live)
+    uint32_t apMinutes = data["apFallbackMinutes"] | (proj->apFallbackSeconds / 60);
+    proj->apFallbackSeconds = apMinutes * 60;
 
     // Logging (live)
     uint32_t maxLogSize = data["maxLogSize"] | proj->maxLogSize;

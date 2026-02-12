@@ -565,6 +565,7 @@ void WebHandler::setupRoutes() {
                 doc["gmtOffsetHrs"] = proj->gmtOffsetSec / 3600.0f;
                 doc["daylightOffsetHrs"] = proj->daylightOffsetSec / 3600.0f;
                 doc["lowTempThreshold"] = proj->lowTempThreshold;
+                doc["apFallbackMinutes"] = proj->apFallbackSeconds / 60;
                 doc["maxLogSize"] = proj->maxLogSize;
                 doc["maxOldLogCount"] = proj->maxOldLogCount;
                 doc["adminPasswordSet"] = _config->hasAdminPassword();
@@ -671,6 +672,9 @@ void WebHandler::setupRoutes() {
                 proj->lowTempThreshold = threshold;
                 _hpController->setLowTempThreshold(threshold);
             }
+
+            uint32_t apMinutes = data["apFallbackMinutes"] | (proj->apFallbackSeconds / 60);
+            proj->apFallbackSeconds = apMinutes * 60;
 
             uint32_t maxLogSize = data["maxLogSize"] | proj->maxLogSize;
             uint8_t maxOldLogCount = data["maxOldLogCount"] | proj->maxOldLogCount;

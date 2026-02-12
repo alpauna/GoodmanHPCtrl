@@ -216,11 +216,13 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     proj.createdOnDate = created != nullptr ? created : "";
     proj.description = description != nullptr ? description : "";
 
-    const char* wifi_ssid = doc["wifi"]["ssid"];
-    const char* wifi_password = doc["wifi"]["password"];
+    JsonObject wifiObj = doc["wifi"];
+    const char* wifi_ssid = wifiObj["ssid"];
+    const char* wifi_password = wifiObj["password"];
     _wifiSSID = wifi_ssid != nullptr ? wifi_ssid : "";
     _wifiPassword = wifi_password != nullptr ? decryptPassword(wifi_password != nullptr ? wifi_password : "") : "";
-    Serial.printf("Read WiFi SSID:%s\n", wifi_ssid ? wifi_ssid : "");
+    proj.apFallbackSeconds = wifiObj["apFallbackSeconds"] | 600;
+    Serial.printf("Read WiFi SSID:%s apFallback:%us\n", wifi_ssid ? wifi_ssid : "", proj.apFallbackSeconds);
 
     JsonObject mqtt = doc["mqtt"];
     const char* mqtt_user = mqtt["user"];
@@ -329,6 +331,7 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     JsonObject wifi = doc["wifi"].to<JsonObject>();
     wifi["ssid"] = "MEGA";
     wifi["password"] = "";
+    wifi["apFallbackSeconds"] = proj.apFallbackSeconds;
 
     JsonObject mqtt = doc["mqtt"].to<JsonObject>();
     mqtt["user"] = "debian";
@@ -405,6 +408,7 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     JsonObject wifi = doc["wifi"].to<JsonObject>();
     wifi["ssid"] = _wifiSSID;
     wifi["password"] = encryptPassword(_wifiPassword);
+    wifi["apFallbackSeconds"] = proj.apFallbackSeconds;
 
     JsonObject mqtt = doc["mqtt"].to<JsonObject>();
     mqtt["user"] = _mqttUser;

@@ -98,7 +98,6 @@ u_int32_t _wifiStartMillis = 0;
 
 // WiFi AP fallback mode
 static uint32_t _wifiDisconnectCount = 0;
-static const uint32_t _AP_FALLBACK_SECONDS = 1200; // 20 minutes
 bool _apModeActive = false;
 
 u_long runTimeStart;
@@ -167,6 +166,7 @@ ProjectInfo proj = {
   -21600,             // gmtOffsetSec: UTC-6 (US Central)
   3600,               // daylightOffsetSec: 1hr DST
   20.0f,              // lowTempThreshold: 20°F default
+  600,                // apFallbackSeconds: 10 minutes
   "dark"              // theme: dark default
 };
 
@@ -287,8 +287,8 @@ void onWifiWaitDisable(){
   } else {
     _wifiDisconnectCount += 60;
     Log.warn("WiFi", "Connection timed out (%lu/%lu sec), no IP assigned",
-             _wifiDisconnectCount, _AP_FALLBACK_SECONDS);
-    if (_wifiDisconnectCount >= _AP_FALLBACK_SECONDS) {
+             _wifiDisconnectCount, proj.apFallbackSeconds);
+    if (_wifiDisconnectCount >= proj.apFallbackSeconds) {
       startAPMode();
       return;
     }
