@@ -714,6 +714,36 @@ static esp_err_t heapViewGetHandler(httpd_req_t* req) {
     return serveFileHttps(req, "/www/heap.html");
 }
 
+static esp_err_t wifiViewGetHandler(httpd_req_t* req) {
+    return serveFileHttps(req, "/www/wifi.html");
+}
+
+static esp_err_t scanGetHandler(httpd_req_t* req) {
+    String json = "[";
+    int n = WiFi.scanComplete();
+    if (n == -2) {
+        WiFi.scanNetworks(true);
+    } else if (n) {
+        for (int i = 0; i < n; ++i) {
+            if (i) json += ",";
+            json += "{\"rssi\":" + String(WiFi.RSSI(i));
+            json += ",\"ssid\":\"" + WiFi.SSID(i) + "\"";
+            json += ",\"bssid\":\"" + WiFi.BSSIDstr(i) + "\"";
+            json += ",\"channel\":" + String(WiFi.channel(i));
+            json += ",\"secure\":" + String(WiFi.encryptionType(i));
+            json += "}";
+        }
+        WiFi.scanDelete();
+        if (WiFi.scanComplete() == -2) {
+            WiFi.scanNetworks(true);
+        }
+    }
+    json += "]";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json.c_str());
+    return ESP_OK;
+}
+
 // --- Root/index handler ---
 
 static esp_err_t rootGetHandler(httpd_req_t* req) {
@@ -873,6 +903,22 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &heapViewGet);
+
+    httpd_uri_t wifiViewGet = {
+        .uri = "/wifi/view",
+        .method = HTTP_GET,
+        .handler = wifiViewGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &wifiViewGet);
+
+    httpd_uri_t scanGet = {
+        .uri = "/scan",
+        .method = HTTP_GET,
+        .handler = scanGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &scanGet);
 
     httpd_uri_t stateGet = {
         .uri = "/state",

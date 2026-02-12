@@ -68,6 +68,16 @@ class WebHandler {
     File _otaFile;
     bool _otaUploadOk = false;
 
+    // WiFi test state
+    String _wifiTestState = "idle";
+    String _wifiTestMessage;
+    String _wifiTestNewSSID;
+    String _wifiTestNewPassword;
+    String _wifiOldSSID;
+    String _wifiOldPassword;
+    Task* _tWifiTest = nullptr;
+    uint8_t _wifiTestCountdown = 0;
+
     bool checkAuth(AsyncWebServerRequest* request);
     void syncNtpTime();
     void setupRoutes();

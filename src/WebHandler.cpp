@@ -775,6 +775,122 @@ void WebHandler::setupRoutes() {
             }
         });
         _server.addHandler(ftpPostHandler);
+        // WiFi scan/test endpoints (HTTP only — WiFi test disrupts HTTPS)
+        _server.on("/wifi/view", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            serveFile(request, "/wifi.html");
+        });
+
+        _server.on("/wifi/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            String json = "{\"status\":\"" + _wifiTestState + "\"";
+            if (_wifiTestMessage.length() > 0) {
+                json += ",\"message\":\"" + _wifiTestMessage + "\"";
+            }
+            json += "}";
+            request->send(200, "application/json", json);
+        });
+
+        auto* wifiTestHandler = new AsyncCallbackJsonWebHandler("/wifi/test", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+            if (!checkAuth(request)) return;
+            if (_wifiTestState == "testing") {
+                request->send(409, "application/json", "{\"error\":\"Test already in progress\"}");
+                return;
+            }
+            JsonObject data = json.as<JsonObject>();
+            String ssid = data["ssid"] | String("");
+            String password = data["password"] | String("");
+            String curPassword = data["curPassword"] | String("");
+
+            if (ssid.length() == 0) {
+                request->send(400, "application/json", "{\"error\":\"SSID required\"}");
+                return;
+            }
+
+            // Verify current password (WiFi password or admin password if no WiFi configured)
+            bool verified = false;
+            if (_config->getWifiPassword().length() > 0) {
+                verified = (curPassword == _config->getWifiPassword());
+            } else if (_config->hasAdminPassword()) {
+                verified = _config->verifyAdminPassword(curPassword);
+            } else {
+                verified = true;  // No passwords set
+            }
+            if (!verified) {
+                request->send(403, "application/json", "{\"error\":\"Current password incorrect\"}");
+                return;
+            }
+
+            // Store old credentials for revert
+            _wifiOldSSID = _config->getWifiSSID();
+            _wifiOldPassword = _config->getWifiPassword();
+            _wifiTestNewSSID = ssid;
+            _wifiTestNewPassword = password;
+            _wifiTestState = "testing";
+            _wifiTestMessage = "";
+            _wifiTestCountdown = 15;
+
+            // Start WiFi test task (polls every 1s for up to 15s)
+            if (!_tWifiTest) {
+                _tWifiTest = new Task(TASK_SECOND, TASK_FOREVER, [this]() {
+                    if (_wifiTestCountdown == 15) {
+                        // First iteration: initiate connection
+                        extern bool _apModeActive;
+                        if (_apModeActive) {
+                            WiFi.mode(WIFI_AP_STA);
+                        } else {
+                            WiFi.disconnect(true);
+                        }
+                        WiFi.begin(_wifiTestNewSSID.c_str(), _wifiTestNewPassword.c_str());
+                        Log.info("WiFi", "Testing connection to '%s'...", _wifiTestNewSSID.c_str());
+                    }
+
+                    _wifiTestCountdown--;
+
+                    if (WiFi.status() == WL_CONNECTED) {
+                        // Success — save new credentials
+                        String newIP = WiFi.localIP().toString();
+                        _config->setWifiSSID(_wifiTestNewSSID);
+                        _config->setWifiPassword(_wifiTestNewPassword);
+                        TempSensorMap& tempSensors = _hpController->getTempSensorMap();
+                        ProjectInfo* proj = _config->getProjectInfo();
+                        _config->updateConfig("/config.txt", tempSensors, *proj);
+                        _wifiTestState = "success";
+                        _wifiTestMessage = newIP;
+                        Log.info("WiFi", "Test OK — connected to '%s' at %s. Rebooting...",
+                                 _wifiTestNewSSID.c_str(), newIP.c_str());
+                        _tWifiTest->disable();
+                        // Schedule reboot
+                        if (!_tDelayedReboot) {
+                            _tDelayedReboot = new Task(3 * TASK_SECOND, TASK_ONCE, [this]() {
+                                _shouldReboot = true;
+                            }, _ts, false);
+                        }
+                        _tDelayedReboot->restartDelayed(3 * TASK_SECOND);
+                        return;
+                    }
+
+                    if (_wifiTestCountdown == 0) {
+                        // Timeout — revert
+                        Log.warn("WiFi", "Test FAILED — could not connect to '%s'", _wifiTestNewSSID.c_str());
+                        WiFi.disconnect(true);
+                        extern bool _apModeActive;
+                        if (_apModeActive) {
+                            WiFi.mode(WIFI_AP);
+                        } else {
+                            WiFi.begin(_wifiOldSSID.c_str(), _wifiOldPassword.c_str());
+                        }
+                        _wifiTestState = "failed";
+                        _wifiTestMessage = "Could not connect to " + _wifiTestNewSSID;
+                        _tWifiTest->disable();
+                    }
+                }, _ts, false);
+            }
+            _tWifiTest->restartDelayed(TASK_SECOND);
+            request->send(200, "application/json", "{\"status\":\"testing\"}");
+        });
+        _server.addHandler(wifiTestHandler);
+
     } else {
         // HTTPS is active — redirect HTTP /config and /update to HTTPS
         _server.on("/config", HTTP_GET, [this](AsyncWebServerRequest *request) {
@@ -814,6 +930,110 @@ void WebHandler::setupRoutes() {
         _server.on("/ftp", HTTP_POST, [this](AsyncWebServerRequest *request) {
             request->redirect("https://" + String(getWiFiIP()) + "/ftp");
         });
+
+        // WiFi scan/test — serve on HTTP too (WiFi test disrupts connections)
+        _server.on("/wifi/view", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            serveFile(request, "/wifi.html");
+        });
+        _server.on("/wifi/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            String json = "{\"status\":\"" + _wifiTestState + "\"";
+            if (_wifiTestMessage.length() > 0) {
+                json += ",\"message\":\"" + _wifiTestMessage + "\"";
+            }
+            json += "}";
+            request->send(200, "application/json", json);
+        });
+        auto* wifiTestHandlerHttps = new AsyncCallbackJsonWebHandler("/wifi/test", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+            if (!checkAuth(request)) return;
+            if (_wifiTestState == "testing") {
+                request->send(409, "application/json", "{\"error\":\"Test already in progress\"}");
+                return;
+            }
+            JsonObject data = json.as<JsonObject>();
+            String ssid = data["ssid"] | String("");
+            String password = data["password"] | String("");
+            String curPassword = data["curPassword"] | String("");
+
+            if (ssid.length() == 0) {
+                request->send(400, "application/json", "{\"error\":\"SSID required\"}");
+                return;
+            }
+
+            bool verified = false;
+            if (_config->getWifiPassword().length() > 0) {
+                verified = (curPassword == _config->getWifiPassword());
+            } else if (_config->hasAdminPassword()) {
+                verified = _config->verifyAdminPassword(curPassword);
+            } else {
+                verified = true;
+            }
+            if (!verified) {
+                request->send(403, "application/json", "{\"error\":\"Current password incorrect\"}");
+                return;
+            }
+
+            _wifiOldSSID = _config->getWifiSSID();
+            _wifiOldPassword = _config->getWifiPassword();
+            _wifiTestNewSSID = ssid;
+            _wifiTestNewPassword = password;
+            _wifiTestState = "testing";
+            _wifiTestMessage = "";
+            _wifiTestCountdown = 15;
+
+            if (!_tWifiTest) {
+                _tWifiTest = new Task(TASK_SECOND, TASK_FOREVER, [this]() {
+                    if (_wifiTestCountdown == 15) {
+                        extern bool _apModeActive;
+                        if (_apModeActive) {
+                            WiFi.mode(WIFI_AP_STA);
+                        } else {
+                            WiFi.disconnect(true);
+                        }
+                        WiFi.begin(_wifiTestNewSSID.c_str(), _wifiTestNewPassword.c_str());
+                        Log.info("WiFi", "Testing connection to '%s'...", _wifiTestNewSSID.c_str());
+                    }
+                    _wifiTestCountdown--;
+                    if (WiFi.status() == WL_CONNECTED) {
+                        String newIP = WiFi.localIP().toString();
+                        _config->setWifiSSID(_wifiTestNewSSID);
+                        _config->setWifiPassword(_wifiTestNewPassword);
+                        TempSensorMap& tempSensors = _hpController->getTempSensorMap();
+                        ProjectInfo* proj = _config->getProjectInfo();
+                        _config->updateConfig("/config.txt", tempSensors, *proj);
+                        _wifiTestState = "success";
+                        _wifiTestMessage = newIP;
+                        Log.info("WiFi", "Test OK — connected to '%s' at %s. Rebooting...",
+                                 _wifiTestNewSSID.c_str(), newIP.c_str());
+                        _tWifiTest->disable();
+                        if (!_tDelayedReboot) {
+                            _tDelayedReboot = new Task(3 * TASK_SECOND, TASK_ONCE, [this]() {
+                                _shouldReboot = true;
+                            }, _ts, false);
+                        }
+                        _tDelayedReboot->restartDelayed(3 * TASK_SECOND);
+                        return;
+                    }
+                    if (_wifiTestCountdown == 0) {
+                        Log.warn("WiFi", "Test FAILED — could not connect to '%s'", _wifiTestNewSSID.c_str());
+                        WiFi.disconnect(true);
+                        extern bool _apModeActive;
+                        if (_apModeActive) {
+                            WiFi.mode(WIFI_AP);
+                        } else {
+                            WiFi.begin(_wifiOldSSID.c_str(), _wifiOldPassword.c_str());
+                        }
+                        _wifiTestState = "failed";
+                        _wifiTestMessage = "Could not connect to " + _wifiTestNewSSID;
+                        _tWifiTest->disable();
+                    }
+                }, _ts, false);
+            }
+            _tWifiTest->restartDelayed(TASK_SECOND);
+            request->send(200, "application/json", "{\"status\":\"testing\"}");
+        });
+        _server.addHandler(wifiTestHandlerHttps);
     }
 }
 
