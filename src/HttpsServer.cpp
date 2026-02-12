@@ -3,6 +3,7 @@
 // enums (HTTP_PUT, HTTP_OPTIONS, HTTP_PATCH) and cannot coexist in the same TU.
 
 #include <Arduino.h>
+#include <WiFi.h>
 #include <esp_https_server.h>
 #include <Update.h>
 #include <ArduinoJson.h>
@@ -680,6 +681,9 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     doc["cpuLoad0"] = getCpuLoadCore0();
     doc["cpuLoad1"] = getCpuLoadCore1();
     doc["freeHeap"] = ESP.getFreeHeap();
+    doc["wifiSSID"] = WiFi.SSID();
+    doc["wifiRSSI"] = WiFi.RSSI();
+    doc["wifiIP"] = WiFi.localIP().toString();
 
     JsonObject temps = doc["temps"].to<JsonObject>();
     for (const auto& m : ctx->hpController->getTempSensorMap()) {

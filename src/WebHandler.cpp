@@ -358,6 +358,9 @@ void WebHandler::setupRoutes() {
         doc["cpuLoad0"] = getCpuLoadCore0();
         doc["cpuLoad1"] = getCpuLoadCore1();
         doc["freeHeap"] = ESP.getFreeHeap();
+        doc["wifiSSID"] = WiFi.SSID();
+        doc["wifiRSSI"] = WiFi.RSSI();
+        doc["wifiIP"] = WiFi.localIP().toString();
 
         JsonObject temps = doc["temps"].to<JsonObject>();
         for (const auto& m : _hpController->getTempSensorMap()) {

@@ -32,6 +32,14 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 .sc-pill{padding:2px 6px;font-size:10px;}
 .sep{color:#ccc;font-size:14px;}
 .footer.error{color:#d32f2f;}
+.wifi-bars{display:flex;align-items:flex-end;gap:2px;height:16px;}
+.wifi-bars span{width:4px;background:#ccc;border-radius:1px;transition:background 0.3s;}
+.wifi-bars span.active{background:#4CAF50;}
+.wifi-bars span:nth-child(1){height:4px;}
+.wifi-bars span:nth-child(2){height:7px;}
+.wifi-bars span:nth-child(3){height:11px;}
+.wifi-bars span:nth-child(4){height:16px;}
+.wifi-info{display:flex;align-items:center;gap:6px;margin-left:auto;}
 .chart-card h3{display:flex;align-items:center;justify-content:space-between;}
 .chart-card h3 select{font-size:13px;padding:2px 6px;border:1px solid #ccc;border-radius:4px;}
 .chart-container{margin-bottom:12px;}
@@ -99,6 +107,7 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <div class='indicator'><span class='label'>CPU 0</span><span class='val' id='vCpu0'>--%</span></div>
 <div class='indicator'><span class='label'>CPU 1</span><span class='val' id='vCpu1'>--%</span></div>
 <div class='indicator'><span class='label'>Heap</span><span class='val' id='vHeap'>--</span></div>
+<div class='indicator'><span class='label'>WiFi</span><div class='wifi-info'><div class='wifi-bars' id='wifiBars'><span></span><span></span><span></span><span></span></div><span class='val' id='vWifi'>--</span></div></div>
 </div>
 </div>
 
@@ -203,6 +212,13 @@ function update(d){
   setText('vCpu0',d.cpuLoad0!==undefined?d.cpuLoad0+'%':'--%');
   setText('vCpu1',d.cpuLoad1!==undefined?d.cpuLoad1+'%':'--%');
   if(d.freeHeap!==undefined){var kb=Math.round(d.freeHeap/1024);setText('vHeap',kb+'KB');}
+  if(d.wifiRSSI!==undefined){
+    var rssi=d.wifiRSSI;
+    setText('vWifi',rssi+'dBm');
+    var bars=rssi>=-50?4:rssi>=-60?3:rssi>=-70?2:rssi>=-80?1:0;
+    var el=document.getElementById('wifiBars');
+    if(el){var sp=el.children;for(var i=0;i<4;i++){sp[i].className=i<bars?'active':'';}}
+  }
 
   // Footer
   var now=new Date();
