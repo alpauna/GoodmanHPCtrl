@@ -18,6 +18,7 @@
 
 extern uint8_t getCpuLoadCore0();
 extern uint8_t getCpuLoadCore1();
+extern bool _apModeActive;
 
 // --- HTTPS Basic Auth helper ---
 
@@ -684,6 +685,7 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     doc["wifiSSID"] = WiFi.SSID();
     doc["wifiRSSI"] = WiFi.RSSI();
     doc["wifiIP"] = WiFi.localIP().toString();
+    doc["apMode"] = _apModeActive;
 
     JsonObject temps = doc["temps"].to<JsonObject>();
     for (const auto& m : ctx->hpController->getTempSensorMap()) {

@@ -6,6 +6,7 @@
 
 extern uint8_t getCpuLoadCore0();
 extern uint8_t getCpuLoadCore1();
+extern bool _apModeActive;
 
 WebHandler::WebHandler(uint16_t port, Scheduler* ts, GoodmanHP* hpController)
     : _server(port), _ws("/ws"), _ts(ts), _hpController(hpController),
@@ -361,6 +362,7 @@ void WebHandler::setupRoutes() {
         doc["wifiSSID"] = WiFi.SSID();
         doc["wifiRSSI"] = WiFi.RSSI();
         doc["wifiIP"] = WiFi.localIP().toString();
+        doc["apMode"] = _apModeActive;
 
         JsonObject temps = doc["temps"].to<JsonObject>();
         for (const auto& m : _hpController->getTempSensorMap()) {

@@ -19,6 +19,9 @@
 #include "WebHandler.h"
 #include "MQTTHandler.h"
 
+#ifndef AP_PASSWORD
+#error "AP_PASSWORD not defined — create secrets.ini with: -D AP_PASSWORD=\\\"yourpassword\\\""
+#endif
 
 const char compile_date[] = __DATE__ " " __TIME__;
 IPAddress _MQTT_HOST_DEFAULT = IPAddress(192, 168, 0, 46);
@@ -92,6 +95,11 @@ uint8_t getCpuLoadCore0() { return _cpuLoadCore0; }
 uint8_t getCpuLoadCore1() { return _cpuLoadCore1; }
 
 u_int32_t _wifiStartMillis = 0;
+
+// WiFi AP fallback mode
+static uint32_t _wifiDisconnectCount = 0;
+static const uint32_t _AP_FALLBACK_SECONDS = 1200; // 20 minutes
+bool _apModeActive = false;
 
 u_long runTimeStart;
 u_long currentRuntime;  
@@ -248,12 +256,41 @@ bool onWifiWaitEnable(){
   return true;
 }
 
+void startAPMode() {
+  _apModeActive = true;
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_AP);
+  const char* apSSID = "GoodmanHP";
+  const char* apPass = AP_PASSWORD;
+  WiFi.softAP(apSSID, apPass);
+  IPAddress apIP = WiFi.softAPIP();
+  Log.warn("WiFi", "========================================");
+  Log.warn("WiFi", "AP MODE ACTIVE - Could not connect to WiFi");
+  Log.warn("WiFi", "SSID: %s", apSSID);
+  Log.warn("WiFi", "Password: %s", apPass);
+  Log.warn("WiFi", "IP: %s", apIP.toString().c_str());
+  Log.warn("WiFi", "========================================");
+  Serial.println();
+  Serial.println("*** AP MODE ***");
+  Serial.printf("SSID: %s\n", apSSID);
+  Serial.printf("Pass: %s\n", apPass);
+  Serial.printf("IP:   %s\n", apIP.toString().c_str());
+  Serial.println("***************");
+}
+
 void onWifiWaitDisable(){
   Serial.println();
   if (WiFi.isConnected()) {
+    _wifiDisconnectCount = 0;
     Log.info("WiFi", "IP: %s", WiFi.localIP().toString().c_str());
   } else {
-    Log.warn("WiFi", "Connection timed out, no IP assigned");
+    _wifiDisconnectCount += 60;
+    Log.warn("WiFi", "Connection timed out (%lu/%lu sec), no IP assigned",
+             _wifiDisconnectCount, _AP_FALLBACK_SECONDS);
+    if (_wifiDisconnectCount >= _AP_FALLBACK_SECONDS) {
+      startAPMode();
+      return;
+    }
   }
   mqttHandler.startReconnect();
 }
@@ -268,11 +305,13 @@ void wifiConnected(){
 void onWiFiEvent(arduino_event_id_t event, arduino_event_info_t info){
   switch(event){
     case SYSTEM_EVENT_STA_GOT_IP:
+      _wifiDisconnectCount = 0;
       tWaitOnWiFi.disable();
       webHandler.startNtpSync();
       Log.info("WIFI", "Got ip: %s", webHandler.getWiFiIP());
       break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
+      if (_apModeActive) break;
       _wifiStartMillis = millis();
       tWaitOnWiFi.enableDelayed();
       mqttHandler.stopReconnect();
