@@ -71,7 +71,7 @@ button:hover{background:#45a049;}
 <label>Threshold (&deg;F)</label><input type='number' step='0.1' id='lowTempThreshold'>
 </fieldset>
 <fieldset><legend>Logging <span class='tag tag-live'>live</span></legend>
-<label>Max Log Size (bytes)</label><input type='number' id='maxLogSize'>
+<label>Max Log Size (MB)</label><input type='number' step='1' id='maxLogSizeMB'>
 <label>Max Old Log Count</label><input type='number' id='maxOldLogCount'>
 </fieldset>
 <button type='submit'>Save</button>
@@ -86,10 +86,11 @@ button:hover{background:#45a049;}
 <div id='status'></div>
 </div>
 <script>
-var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','maxLogSize','maxOldLogCount'];
+var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','maxOldLogCount'];
 var adminPwSet=false;
 fetch('/config?format=json').then(r=>r.json()).then(d=>{
 fields.forEach(f=>{var e=document.getElementById(f);if(e)e.value=d[f]!=null?d[f]:'';});
+document.getElementById('maxLogSizeMB').value=d.maxLogSize!=null?Math.round(d.maxLogSize/(1024*1024)):'';
 adminPwSet=!!d.adminPasswordSet;
 var st=document.getElementById('adminPwStatus');
 if(adminPwSet){
@@ -102,6 +103,8 @@ st.className='pw-unset';st.textContent='No password set \u2014 set one to secure
 function save(e){
 e.preventDefault();
 var d={};fields.forEach(f=>{var e=document.getElementById(f);d[f]=e?e.value:'';});
+var mbVal=document.getElementById('maxLogSizeMB').value;
+d.maxLogSize=mbVal?parseInt(mbVal)*1024*1024:'';
 d.curWifiPw=document.getElementById('curWifiPw').value;
 d.curMqttPw=document.getElementById('curMqttPw').value;
 var ap=document.getElementById('adminPassword').value;
