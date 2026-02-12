@@ -18,8 +18,8 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **Remote access** — REST API, WebSocket, and MQTT for monitoring and control
 - **HTTPS/SSL** — Self-signed ECC P-256 certificate on port 443 for secure `/config`, `/update`, and `/ftp` endpoints. Graceful fallback to HTTP-only if no certs found on SD card
 - **Dark/light theme** — Configurable dark/light theme with shared `theme.css` stylesheet. Persisted to SD card config, cached in localStorage for flash-free page loads. Instant preview on config page
-- **Admin password protection** — Encrypted admin password with HTTP Basic Auth on sensitive endpoints (`/config`, `/update`, `/ftp`). No password = open access
-- **AES-256-GCM password encryption** — All passwords (WiFi, MQTT, admin) encrypted at rest on SD card using hardware-derived keys from ESP32 eFuse HMAC peripheral. Falls back to XOR obfuscation with a stable key from `secrets.ini` when no eFuse key is provisioned
+- **Admin password protection** — HTTP Basic Auth on sensitive endpoints (`/config`, `/update`, `/ftp`). No password = open access
+- **Password encryption** — All passwords (WiFi, MQTT, admin) encrypted at rest on SD card
 - **Live dashboard** — Real-time dashboard at `/dashboard` with state banner, protection status pills (startup lockout countdown, short cycle), input/output grid, temperatures, and reboot button
 - **Temperature history** — CSV logging every 30s per sensor to SD card (`/temps/<sensor>/YYYY-MM-DD.csv`), rolling Canvas line charts on dashboard with 1h/6h/24h/7d timeframe selector, auto-purge after 31 days
 - **Web-based configuration** — HTML pages served from `/www/` on SD card for configuration, OTA updates, and monitoring
@@ -31,7 +31,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **NTP time sync** — Automatic time synchronization from NTP servers, refreshes every 2 hours
 - **I2C bus** — Initialized on GPIO8 (SDA) / GPIO9 (SCL) with automatic device scan at startup and `/i2c/scan` API endpoint
 - **PSRAM support** — All heap allocations routed through PSRAM when available
-- **WiFi AP fallback** — After 20 minutes of failed WiFi connection, automatically switches to Access Point mode for OTA recovery and reconfiguration
+- **WiFi AP fallback** — Configurable timeout (default 10 minutes) before switching to Access Point mode for OTA recovery and reconfiguration
 - **FreeRTOS compatible** — Uses `vTaskDelay()` instead of `delay()` for proper RTOS task yielding
 
 ## Architecture
@@ -189,7 +189,7 @@ build_flags =
 	-D XOR_KEY=\"your-random-base64-key\"
 ```
 
-`AP_PASSWORD` is used for WiFi AP fallback mode. `XOR_KEY` is used as the password obfuscation key when no eFuse HMAC key is provisioned (see [Password Encryption](#password-encryption)). Generate a random key with: `openssl rand -base64 32`
+`AP_PASSWORD` is used for WiFi AP fallback mode. `XOR_KEY` is used for password encryption on the SD card (see [Password Encryption](#password-encryption)). Generate a random key with: `openssl rand -base64 32`
 
 ### Build and Upload
 
@@ -226,7 +226,7 @@ The SD card should contain:
 ./scripts/configure.sh --local
 ```
 
-This prompts for WiFi and MQTT credentials and writes `data/config.txt`. Copy it to the SD card root. Passwords are stored in plaintext and encrypted on first boot (if eFuse key is provisioned).
+This prompts for WiFi and MQTT credentials and writes `data/config.txt`. Copy it to the SD card root. Passwords are stored in plaintext and encrypted automatically on first boot.
 
 **Manual config.txt format:**
 
@@ -325,7 +325,7 @@ This creates `cert.pem` and `key.pem` (ECC P-256, 10-year validity). Copy both t
 
 ### Admin Password
 
-Sensitive endpoints (`/config`, `/update`, `/ftp`) are protected by HTTP Basic Auth when an admin password is set. The password is encrypted at rest using the same AES-256-GCM or XOR obfuscation scheme as WiFi/MQTT passwords.
+Sensitive endpoints (`/config`, `/update`, `/ftp`) are protected by HTTP Basic Auth when an admin password is set.
 
 - **No password set** — All endpoints are open, no authentication required
 - **Password set** — Browser prompts for Basic Auth (username: `admin`, password: your admin password)
@@ -334,29 +334,24 @@ Sensitive endpoints (`/config`, `/update`, `/ftp`) are protected by HTTP Basic A
 
 ### Password Encryption
 
-All passwords (WiFi, MQTT, admin) are encrypted at rest on the SD card. Two encryption tiers are supported:
+All passwords (WiFi, MQTT, admin) are encrypted at rest on the SD card. Plaintext passwords are automatically encrypted on the next config save.
 
-1. **AES-256-GCM** (preferred) — Key derived from ESP32 eFuse HMAC peripheral via `esp_hmac_calculate()`. The hardware key never leaves the silicon. Encrypted passwords are stored as `$AES$<base64(IV+ciphertext+tag)>`.
-
-2. **XOR obfuscation** (fallback) — Used when no eFuse key is provisioned. Uses a stable random key defined as `XOR_KEY` in `secrets.ini` (compile-time build flag). Encrypted passwords are stored as `$ENC$<base64(xored)>`.
-
-Plaintext passwords on the SD card are automatically encrypted on the next config save. The XOR key is stable across firmware updates, so OTA updates do not break password decryption.
-
-**One-time eFuse key provisioning (optional):**
+Optionally, an eFuse HMAC key can be provisioned for hardware-backed encryption:
 
 ```bash
 ./scripts/burn-efuse-key.sh [/dev/ttyUSB0]
 ```
 
-This permanently burns a random 256-bit HMAC key to eFuse BLOCK_KEY0. Once provisioned, all passwords are upgraded to AES-256-GCM on the next config save.
+This permanently burns a random 256-bit HMAC key to eFuse BLOCK_KEY0. Without an eFuse key, passwords are encrypted using a stable key from `secrets.ini`.
 
 ### FTP Server
 
-FTP (SimpleFTPServer on port 21) is used for uploading HTML files to the SD card's `/www/` directory. Credentials are always `admin`/`admin`.
+FTP (SimpleFTPServer on port 21) is used for uploading HTML files to the SD card's `/www/` directory.
 
 - **FTP defaults to OFF** at boot
+- Enabling/disabling FTP requires admin authentication (via `/ftp` API endpoint)
 - Enable from the config page with timed durations (10/30/60 min), auto-disables after timeout
-- If no admin password is set, FTP can be enabled without authentication
+- FTP login credentials are `admin`/`admin` (separate from admin password)
 
 **Upload web pages via FTP:**
 
@@ -398,7 +393,7 @@ All scripts prompt interactively for required parameters (device IP, admin passw
 | `update-www.sh` | Upload HTML files from `data/www/` to device SD card via FTP | None (interactive prompts only) |
 | `backup-config.sh` | Download `config.txt` from device SD card for local backup | None (interactive prompts only) |
 | `generate-cert.sh` | Generate self-signed ECC P-256 cert for HTTPS | None (no prompts, requires `openssl`) |
-| `burn-efuse-key.sh` | Burn HMAC key to ESP32-S3 eFuse for AES-256-GCM encryption | `[PORT]` (optional, default: `/dev/ttyUSB0`) |
+| `burn-efuse-key.sh` | Burn hardware encryption key to ESP32-S3 eFuse | `[PORT]` (optional, default: `/dev/ttyUSB0`) |
 
 **Interactive prompts** (where applicable): Device IP, Admin password, WiFi/MQTT credentials, confirmation prompts.
 
@@ -462,7 +457,7 @@ Generate a self-signed ECC P-256 certificate (10-year validity) for the ESP32 HT
 
 ### `scripts/burn-efuse-key.sh`
 
-Burn a random 256-bit HMAC key to ESP32-S3 eFuse BLOCK_KEY0 for AES-256-GCM password encryption. The key is read-protected — only the hardware HMAC peripheral can access it.
+Burn a hardware encryption key to ESP32-S3 eFuse for password encryption at rest. The key is read-protected — only the hardware HMAC peripheral can access it.
 
 ```
 ./scripts/burn-efuse-key.sh [PORT]
