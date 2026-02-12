@@ -30,6 +30,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **NTP time sync** — Automatic time synchronization from NTP servers, refreshes every 2 hours
 - **I2C bus** — Initialized on GPIO8 (SDA) / GPIO9 (SCL) with automatic device scan at startup and `/i2c/scan` API endpoint
 - **PSRAM support** — All heap allocations routed through PSRAM when available
+- **WiFi AP fallback** — After 20 minutes of failed WiFi connection, automatically switches to Access Point mode for OTA recovery and reconfiguration
 - **FreeRTOS compatible** — Uses `vTaskDelay()` instead of `delay()` for proper RTOS task yielding
 
 ## Architecture
@@ -175,6 +176,16 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 
 - [PlatformIO](https://platformio.org/) (CLI or IDE extension)
 - USB cable connected to ESP32 board
+
+### Secrets Setup
+
+Create `secrets.ini` in the project root (gitignored — never committed):
+
+```ini
+[secrets]
+build_flags =
+	-D AP_PASSWORD=\"your-ap-password\"
+```
 
 ### Build and Upload
 
@@ -341,6 +352,34 @@ FTP (SimpleFTPServer on port 21) is used for uploading HTML files to the SD card
 
 This script prompts for the device IP and admin password, enables FTP for 10 minutes, and uploads all files from `data/www/` to the device's `/www/` directory.
 
+### WiFi AP Fallback
+
+If the device cannot connect to WiFi for 20 minutes, it automatically switches to Access Point (AP) mode for emergency OTA updates and configuration changes.
+
+- **SSID:** `GoodmanHP`
+- **Password:** Defined at build time via `AP_PASSWORD` in `secrets.ini` (gitignored)
+- **IP:** `192.168.4.1`
+- All web endpoints work in AP mode (dashboard, config, OTA update, log, heap)
+- HTTPS is not available in AP mode — use HTTP (`http://192.168.4.1`)
+- AP credentials are logged overtly at WARN level to both serial and log file
+- AP mode persists until reboot
+
+**Setup:** Create `secrets.ini` in the project root (gitignored):
+
+```ini
+[secrets]
+build_flags =
+	-D AP_PASSWORD=\"your-ap-password\"
+```
+
+The build will fail with a clear `#error` if `secrets.ini` is missing or `AP_PASSWORD` is not defined.
+
+**Recovery workflow:**
+1. Connect to `GoodmanHP` WiFi network with the AP password
+2. Browse to `http://192.168.4.1/config` to fix WiFi credentials
+3. Or upload new firmware via `http://192.168.4.1/update`
+4. Reboot the device to reconnect to the configured WiFi network
+
 ## Scripts
 
 | Script | Description |
@@ -401,7 +440,14 @@ Returns the full controller state as JSON. Used by the dashboard for real-time p
   "startupLockout": false,
   "startupLockoutRemainSec": 0,
   "shortCycleProtection": false,
-  "temps": { "AMBIENT_TEMP": 48.1, "COMPRESSOR_TEMP": 72.5, "SUCTION_TEMP": 65.2, "CONDENSER_TEMP": 38.7, "LIQUID_TEMP": 185.3 }
+  "temps": { "AMBIENT_TEMP": 48.1, "COMPRESSOR_TEMP": 72.5, "SUCTION_TEMP": 65.2, "CONDENSER_TEMP": 38.7, "LIQUID_TEMP": 185.3 },
+  "cpuLoad0": 23,
+  "cpuLoad1": 50,
+  "freeHeap": 159232,
+  "wifiSSID": "your-ssid",
+  "wifiRSSI": -48,
+  "wifiIP": "192.168.1.136",
+  "apMode": false
 }
 ```
 
@@ -410,6 +456,13 @@ Returns the full controller state as JSON. Used by the dashboard for real-time p
 | `startupLockout` | bool | Whether the 5-minute startup lockout is active |
 | `startupLockoutRemainSec` | number | Seconds remaining in startup lockout (0 when inactive) |
 | `shortCycleProtection` | bool | Whether short-cycle protection delay is active on CNT |
+| `cpuLoad0` | number | CPU load percentage for Core 0 (WiFi/protocol stack) |
+| `cpuLoad1` | number | CPU load percentage for Core 1 (Arduino loop/tasks) |
+| `freeHeap` | number | Free heap memory in bytes |
+| `wifiSSID` | string | Connected WiFi network name |
+| `wifiRSSI` | number | WiFi signal strength in dBm |
+| `wifiIP` | string | Device IP address |
+| `apMode` | bool | Whether the device is in AP fallback mode |
 
 ### `GET /temps/history`
 
@@ -511,6 +564,7 @@ Full controller state, published on every state transition, fault event, and com
 | `startupLockout` | bool | Whether the 5-minute startup lockout is active |
 | `startupLockoutRemainSec` | number | Seconds remaining in startup lockout (0 when inactive) |
 | `shortCycleProtection` | bool | Whether short-cycle protection delay is active on CNT |
+| `apMode` | bool | Whether the device is in AP fallback mode |
 
 ### `goodman/fault`
 
