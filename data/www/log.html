@@ -1,23 +1,25 @@
 <html><head><title>Log - Goodman HP</title>
 <meta name='viewport' content='width=device-width,initial-scale=1'>
+<link rel='stylesheet' href='/theme.css'>
+<script>document.documentElement.dataset.theme=localStorage.getItem('hp-theme')||'dark'</script>
 <style>
-body{font-family:Arial,sans-serif;margin:0;padding:0;background:#f5f5f5;}
-nav{background:#333;padding:10px 20px;display:flex;align-items:center;gap:18px;}
+body{font-family:Arial,sans-serif;margin:0;padding:0;background:var(--bg);}
+nav{background:var(--nav-bg);padding:10px 20px;display:flex;align-items:center;gap:18px;}
 nav a{color:#fff;text-decoration:none;font-size:14px;padding:6px 12px;border-radius:4px;}
 nav a:hover,nav a.active{background:#4CAF50;}
 nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 .content{max-width:800px;margin:20px auto;padding:0 20px;}
-h1{color:#333;display:flex;align-items:center;gap:12px;}
-h1 select{font-size:14px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;}
-.card{background:#fff;border:1px solid #ddd;border-radius:6px;padding:15px;margin-bottom:15px;}
+h1{color:var(--text);display:flex;align-items:center;gap:12px;}
+h1 select{font-size:14px;padding:4px 8px;border:1px solid var(--input-border);border-radius:4px;background:var(--input-bg);color:var(--text);}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:15px;margin-bottom:15px;}
 .card h3{margin-top:0;color:#4CAF50;}
-.log-entry{font-family:monospace;font-size:12px;padding:4px 0;border-bottom:1px solid #f0f0f0;word-break:break-all;}
+.log-entry{font-family:monospace;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border-light);word-break:break-all;}
 .log-entry:last-child{border-bottom:none;}
 .log-entry .error{color:#d32f2f;}
 .log-entry .warn{color:#f57c00;}
-.log-entry .info{color:#333;}
-.log-entry .debug{color:#999;}
-.footer{text-align:center;color:#999;font-size:12px;margin-top:10px;}
+.log-entry .info{color:var(--text);}
+.log-entry .debug{color:var(--text-muted);}
+.footer{text-align:center;color:var(--text-muted);font-size:12px;margin-top:10px;}
 </style></head><body>
 <nav><span class='brand'>Goodman HP</span>
 <a href='/'>Home</a>
@@ -75,5 +77,6 @@ function load(){
 }
 load();
 setInterval(load,5000);
+fetch('/theme').then(function(r){return r.json()}).then(function(d){var t=d.theme||'light';document.documentElement.dataset.theme=t;localStorage.setItem('hp-theme',t);}).catch(function(){});
 </script>
 </body></html>

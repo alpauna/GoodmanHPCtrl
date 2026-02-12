@@ -1,17 +1,19 @@
 <html><head><title>Configuration</title>
 <meta name='viewport' content='width=device-width,initial-scale=1'>
+<link rel='stylesheet' href='/theme.css'>
+<script>document.documentElement.dataset.theme=localStorage.getItem('hp-theme')||'dark'</script>
 <style>
-body{font-family:Arial,sans-serif;margin:0;padding:0;background:#f5f5f5;}
-nav{background:#333;padding:10px 20px;display:flex;align-items:center;gap:18px;}
+body{font-family:Arial,sans-serif;margin:0;padding:0;background:var(--bg);}
+nav{background:var(--nav-bg);padding:10px 20px;display:flex;align-items:center;gap:18px;}
 nav a{color:#fff;text-decoration:none;font-size:14px;padding:6px 12px;border-radius:4px;}
 nav a:hover,nav a.active{background:#4CAF50;}
 nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 .container{max-width:600px;margin:20px auto;padding:0 20px;}
-h1{color:#333;}
-fieldset{background:#fff;border:1px solid #ddd;border-radius:6px;padding:15px;margin-bottom:15px;}
+h1{color:var(--text);}
+fieldset{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:15px;margin-bottom:15px;}
 legend{font-weight:bold;color:#4CAF50;padding:0 8px;}
-label{display:block;margin:8px 0 3px;color:#555;font-size:14px;}
-input[type=text],input[type=password],input[type=number]{width:100%;padding:8px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;}
+label{display:block;margin:8px 0 3px;color:var(--text-secondary);font-size:14px;}
+input[type=text],input[type=password],input[type=number],select{width:100%;padding:8px;border:1px solid var(--input-border);border-radius:4px;box-sizing:border-box;background:var(--input-bg);color:var(--text);}
 .tag{font-size:11px;padding:2px 6px;border-radius:3px;margin-left:6px;color:#fff;}
 .tag-reboot{background:#e67e22;}
 .tag-live{background:#27ae60;}
@@ -28,7 +30,7 @@ button:hover{background:#45a049;}
 #adminPwStatus{margin:8px 0;font-size:13px;padding:6px 10px;border-radius:4px;}
 .pw-unset{background:#fff3cd;color:#856404;}
 .pw-set{background:#d4edda;color:#155724;}
-#ftpStatus{margin:8px 0;font-size:13px;padding:6px 10px;border-radius:4px;background:#e9ecef;color:#333;}
+#ftpStatus{margin:8px 0;font-size:13px;padding:6px 10px;border-radius:4px;background:var(--code-bg);color:var(--text);}
 </style></head><body>
 <nav><span class='brand'>Goodman HP</span>
 <a href='/'>Home</a>
@@ -42,6 +44,13 @@ button:hover{background:#45a049;}
 <div class='container'>
 <h1>Configuration</h1>
 <form id='cf' onsubmit='return save(event)'>
+<fieldset><legend>Appearance <span class='tag tag-live'>live</span></legend>
+<label>Theme</label>
+<select id='theme' onchange="document.documentElement.dataset.theme=this.value;localStorage.setItem('hp-theme',this.value);">
+<option value='light'>Light</option>
+<option value='dark'>Dark</option>
+</select>
+</fieldset>
 <fieldset><legend>Admin Password</legend>
 <div id='adminPwStatus'></div>
 <label>New Password</label><input type='password' id='adminPassword'>
@@ -86,7 +95,7 @@ button:hover{background:#45a049;}
 <div id='status'></div>
 </div>
 <script>
-var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','maxOldLogCount'];
+var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','maxOldLogCount','theme'];
 var adminPwSet=false;
 fetch('/config?format=json').then(r=>r.json()).then(d=>{
 fields.forEach(f=>{var e=document.getElementById(f);if(e)e.value=d[f]!=null?d[f]:'';});
@@ -99,6 +108,8 @@ document.getElementById('curAdminPwRow').style.display='block';
 }else{
 st.className='pw-unset';st.textContent='No password set \u2014 set one to secure this page and disable open FTP.';
 }
+// Apply loaded theme immediately
+if(d.theme){document.documentElement.dataset.theme=d.theme;localStorage.setItem('hp-theme',d.theme);}
 });
 function save(e){
 e.preventDefault();
@@ -126,6 +137,10 @@ document.getElementById('adminPassword').value='';
 document.getElementById('adminPasswordConfirm').value='';
 document.getElementById('curAdminPw').value='';
 if(ap.length>0&&!r.error){adminPwSet=true;document.getElementById('adminPwStatus').className='pw-set';document.getElementById('adminPwStatus').textContent='Password is set.';document.getElementById('curAdminPwRow').style.display='block';loadFtpStatus();}
+// Apply theme change immediately
+var newTheme=document.getElementById('theme').value;
+document.documentElement.dataset.theme=newTheme;
+localStorage.setItem('hp-theme',newTheme);
 }).catch(err=>{s.className='err';s.textContent='Error: '+err;s.style.display='block';});
 return false;}
 function ftpControl(mins){
@@ -142,7 +157,7 @@ el.textContent=d.remainingMinutes>0?'Active ('+d.remainingMinutes+' min remainin
 el.style.background='#d4edda';el.style.color='#155724';
 }else{
 el.textContent='Inactive';
-el.style.background='#e9ecef';el.style.color='#333';
+el.style.background='';el.style.color='';
 }
 }).catch(()=>{document.getElementById('ftpStatus').textContent='Error loading status';});
 }

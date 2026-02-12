@@ -1,21 +1,23 @@
 <html><head><title>Dashboard - Goodman HP</title>
 <meta name='viewport' content='width=device-width,initial-scale=1'>
+<link rel='stylesheet' href='/theme.css'>
+<script>document.documentElement.dataset.theme=localStorage.getItem('hp-theme')||'dark'</script>
 <style>
-body{font-family:Arial,sans-serif;margin:0;padding:0;background:#f5f5f5;}
-nav{background:#333;padding:10px 20px;display:flex;align-items:center;gap:18px;}
+body{font-family:Arial,sans-serif;margin:0;padding:0;background:var(--bg);}
+nav{background:var(--nav-bg);padding:10px 20px;display:flex;align-items:center;gap:18px;}
 nav a{color:#fff;text-decoration:none;font-size:14px;padding:6px 12px;border-radius:4px;}
 nav a:hover,nav a.active{background:#4CAF50;}
 nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 .content{max-width:600px;margin:20px auto;padding:0 20px;}
-.card{background:#fff;border:1px solid #ddd;border-radius:6px;padding:15px;margin-bottom:15px;}
-.card h3{margin:0 0 10px 0;color:#333;font-size:15px;}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:15px;margin-bottom:15px;}
+.card h3{margin:0 0 10px 0;color:var(--text);font-size:15px;}
 .state-banner{padding:20px;border-radius:6px;text-align:center;color:#fff;margin-bottom:15px;}
 .state-name{font-size:28px;font-weight:bold;}
 .state-runtime{font-size:14px;opacity:0.9;margin-top:5px;}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
-.indicator{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#fff;border:1px solid #ddd;border-radius:4px;}
-.indicator .label{font-size:14px;color:#333;font-weight:bold;}
-.indicator .val{font-size:13px;color:#555;margin-left:auto;}
+.indicator{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:4px;}
+.indicator .label{font-size:14px;color:var(--text);font-weight:bold;}
+.indicator .val{font-size:13px;color:var(--text-secondary);margin-left:auto;}
 .dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;}
 .dot.on{background:#4CAF50;}
 .dot.off{background:#ccc;}
@@ -23,11 +25,11 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 .pill{padding:4px 10px;border-radius:12px;font-size:12px;font-weight:bold;}
 .pill.ok{background:#e8f5e9;color:#2e7d32;}
 .pill.active{background:#ffebee;color:#c62828;}
-.temp-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee;}
+.temp-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-light);}
 .temp-row:last-child{border-bottom:none;}
-.temp-name{color:#555;font-size:14px;}
-.temp-value{font-weight:bold;color:#333;font-size:14px;}
-.footer{text-align:center;color:#999;font-size:12px;margin-top:10px;}
+.temp-name{color:var(--text-secondary);font-size:14px;}
+.temp-value{font-weight:bold;color:var(--text);font-size:14px;}
+.footer{text-align:center;color:var(--text-muted);font-size:12px;margin-top:10px;}
 .sc-group{margin-left:auto;display:flex;align-items:center;gap:4px;}
 .sc-pill{padding:2px 6px;font-size:10px;}
 .sep{color:#ccc;font-size:14px;}
@@ -41,10 +43,10 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 .wifi-bars span:nth-child(4){height:16px;}
 .wifi-info{display:flex;align-items:center;gap:6px;margin-left:auto;}
 .chart-card h3{display:flex;align-items:center;justify-content:space-between;}
-.chart-card h3 select{font-size:13px;padding:2px 6px;border:1px solid #ccc;border-radius:4px;}
+.chart-card h3 select{font-size:13px;padding:2px 6px;border:1px solid var(--input-border);border-radius:4px;background:var(--input-bg);color:var(--text);}
 .chart-container{margin-bottom:12px;}
-.chart-container h4{margin:0 0 4px 0;font-size:13px;color:#555;}
-.chart-container canvas{width:100%;height:150px;border:1px solid #eee;border-radius:4px;background:#fafafa;display:block;}
+.chart-container h4{margin:0 0 4px 0;font-size:13px;color:var(--text-secondary);}
+.chart-container canvas{width:100%;height:150px;border:1px solid var(--border-light);border-radius:4px;background:var(--surface);display:block;}
 </style></head><body>
 <nav><span class='brand'>Goodman HP</span>
 <a href='/'>Home</a>
@@ -108,6 +110,7 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <div class='indicator'><span class='label'>CPU 1</span><span class='val' id='vCpu1'>--%</span></div>
 <div class='indicator'><span class='label'>Heap</span><span class='val' id='vHeap'>--</span></div>
 <div class='indicator'><span class='label'>WiFi</span><div class='wifi-info'><div class='wifi-bars' id='wifiBars'><span></span><span></span><span></span><span></span></div><span class='val' id='vWifi'>--</span></div></div>
+<div class='indicator'><span class='label'>Build</span><span class='val' id='vBuild' style='font-size:11px'>--</span></div>
 </div>
 </div>
 
@@ -120,7 +123,7 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <option value='168'>7 Days</option>
 </select>
 </h3>
-<div id='chartStatus' style='text-align:center;color:#999;font-size:12px;margin:4px 0;'></div>
+<div id='chartStatus' style='text-align:center;color:var(--text-muted);font-size:12px;margin:4px 0;'></div>
 <div id='charts'></div>
 </div>
 
@@ -203,7 +206,7 @@ function update(d){
     if(val!==undefined){
       html+="<div class='temp-row'><span class='temp-name'>"+name+"</span><span class='temp-value'>"+val.toFixed(1)+"&deg;F</span></div>";
     }else{
-      html+="<div class='temp-row'><span class='temp-name'>"+name+"</span><span class='temp-value' style='color:#999'>--</span></div>";
+      html+="<div class='temp-row'><span class='temp-name'>"+name+"</span><span class='temp-value' style='color:var(--text-muted)'>--</span></div>";
     }
   }
   tc.innerHTML=html;
@@ -212,6 +215,7 @@ function update(d){
   setText('vCpu0',d.cpuLoad0!==undefined?d.cpuLoad0+'%':'--%');
   setText('vCpu1',d.cpuLoad1!==undefined?d.cpuLoad1+'%':'--%');
   if(d.freeHeap!==undefined){var kb=Math.round(d.freeHeap/1024);setText('vHeap',kb+'KB');}
+  if(d.buildDate)setText('vBuild',d.buildDate);
   if(d.wifiRSSI!==undefined){
     var rssi=d.wifiRSSI;
     setText('vWifi',rssi+'dBm');
@@ -378,11 +382,21 @@ function onAllLoaded(range){
   renderAllCharts();
 }
 
+function getThemeColors(){
+  var cs=getComputedStyle(document.documentElement);
+  return {
+    grid: cs.getPropertyValue('--border-light').trim()||'#eee',
+    text: cs.getPropertyValue('--text-muted').trim()||'#999',
+    bg: cs.getPropertyValue('--surface').trim()||'#fff'
+  };
+}
+
 function renderChart(sensorIdx){
   var s=chartSensors[sensorIdx];
   var canvas=chartCanvases[s.key];
   if(!canvas) return;
   var data=chartData[s.key];
+  var tc=getThemeColors();
 
   var rect=canvas.getBoundingClientRect();
   var dpr=window.devicePixelRatio||1;
@@ -399,7 +413,7 @@ function renderChart(sensorIdx){
   ctx.clearRect(0,0,W,H);
 
   if(data.length<2){
-    ctx.fillStyle='#999';ctx.font='12px Arial';ctx.textAlign='center';
+    ctx.fillStyle=tc.text;ctx.font='12px Arial';ctx.textAlign='center';
     ctx.fillText('No data',W/2,H/2);
     return;
   }
@@ -421,8 +435,8 @@ function renderChart(sensorIdx){
   function yPx(v){return pad.top+plotH-((v-minV)/yR)*plotH;}
 
   // Grid lines
-  ctx.strokeStyle='#eee';ctx.lineWidth=1;
-  ctx.font='10px Arial';ctx.fillStyle='#999';ctx.textAlign='right';
+  ctx.strokeStyle=tc.grid;ctx.lineWidth=1;
+  ctx.font='10px Arial';ctx.fillStyle=tc.text;ctx.textAlign='right';
   for(var i=0;i<=5;i++){
     var val=minV+(yR*i/5);
     var y=yPx(val);
@@ -431,7 +445,7 @@ function renderChart(sensorIdx){
   }
 
   // X axis labels
-  ctx.textAlign='center';ctx.fillStyle='#999';
+  ctx.textAlign='center';ctx.fillStyle=tc.text;
   for(var i=0;i<=6;i++){
     var t=tMin+(tR*i/6);
     var x=xPx(t);
@@ -490,5 +504,6 @@ initCharts();
 loadHistory();
 document.getElementById('timeRange').addEventListener('change',function(){loadHistory();});
 window.addEventListener('resize',function(){if(chartInited) renderAllCharts();});
+fetch('/theme').then(function(r){return r.json()}).then(function(d){var t=d.theme||'light';document.documentElement.dataset.theme=t;localStorage.setItem('hp-theme',t);if(chartInited)renderAllCharts();}).catch(function(){});
 </script>
 </body></html>

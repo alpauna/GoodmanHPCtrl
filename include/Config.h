@@ -8,7 +8,6 @@
 #include "TempSensor.h"
 #include "mbedtls/base64.h"
 #include "mbedtls/gcm.h"
-#include "mbedtls/sha256.h"
 
 struct ProjectInfo {
     String name;
@@ -22,6 +21,7 @@ struct ProjectInfo {
     int32_t gmtOffsetSec;        // GMT offset in seconds (default -21600 = UTC-6)
     int32_t daylightOffsetSec;   // DST offset in seconds (default 3600 = 1hr)
     float lowTempThreshold;      // Ambient temp threshold in F below which compressor is blocked (default 20.0)
+    String theme;                // UI theme: "light" or "dark" (default "light")
 };
 
 class Config {
@@ -53,12 +53,10 @@ class Config {
     void setMqttUser(const String& user) { _mqttUser = user; }
     void setMqttPassword(const String& password) { _mqttPassword = password; }
 
-    // Admin password (salted SHA-256 hash)
+    // Admin password (encrypted with $AES$ or $ENC$, same as WiFi/MQTT)
     bool hasAdminPassword() const { return _adminPasswordHash.length() > 0; }
     void setAdminPassword(const String& plaintext);
     bool verifyAdminPassword(const String& plaintext) const;
-    static String hashPassword(const String& plaintext);
-    static bool verifyPasswordHash(const String& plaintext, const String& stored);
 
     // Certificate loading for HTTPS
     bool loadCertificates(const char* certFile, const char* keyFile);

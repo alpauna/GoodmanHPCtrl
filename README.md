@@ -17,8 +17,9 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **Temperature monitoring** — 4 OneWire (Dallas DS18B20) sensors (compressor, suction, ambient, condenser) + 1 MCP9600 I2C thermocouple (liquid line)
 - **Remote access** — REST API, WebSocket, and MQTT for monitoring and control
 - **HTTPS/SSL** — Self-signed ECC P-256 certificate on port 443 for secure `/config`, `/update`, and `/ftp` endpoints. Graceful fallback to HTTP-only if no certs found on SD card
-- **Admin password protection** — Salted SHA-256 hashed admin password with HTTP Basic Auth on sensitive endpoints (`/config`, `/update`, `/ftp`). No password = open access
-- **AES-256-GCM password encryption** — WiFi and MQTT passwords encrypted at rest on SD card using hardware-derived keys from ESP32 eFuse HMAC peripheral. Auto-migrates from legacy XOR format
+- **Dark/light theme** — Configurable dark/light theme with shared `theme.css` stylesheet. Persisted to SD card config, cached in localStorage for flash-free page loads. Instant preview on config page
+- **Admin password protection** — Encrypted admin password with HTTP Basic Auth on sensitive endpoints (`/config`, `/update`, `/ftp`). No password = open access
+- **AES-256-GCM password encryption** — All passwords (WiFi, MQTT, admin) encrypted at rest on SD card using hardware-derived keys from ESP32 eFuse HMAC peripheral. Falls back to XOR obfuscation with a stable key from `secrets.ini` when no eFuse key is provisioned
 - **Live dashboard** — Real-time dashboard at `/dashboard` with state banner, protection status pills (startup lockout countdown, short cycle), input/output grid, temperatures, and reboot button
 - **Temperature history** — CSV logging every 30s per sensor to SD card (`/temps/<sensor>/YYYY-MM-DD.csv`), rolling Canvas line charts on dashboard with 1h/6h/24h/7d timeframe selector, auto-purge after 31 days
 - **Web-based configuration** — HTML pages served from `/www/` on SD card for configuration, OTA updates, and monitoring
@@ -185,7 +186,10 @@ Create `secrets.ini` in the project root (gitignored — never committed):
 [secrets]
 build_flags =
 	-D AP_PASSWORD=\"your-ap-password\"
+	-D XOR_KEY=\"your-random-base64-key\"
 ```
+
+`AP_PASSWORD` is used for WiFi AP fallback mode. `XOR_KEY` is used as the password obfuscation key when no eFuse HMAC key is provisioned (see [Password Encryption](#password-encryption)). Generate a random key with: `openssl rand -base64 32`
 
 ### Build and Upload
 
@@ -210,6 +214,7 @@ The SD card should contain:
 /www/dashboard.html      — Live dashboard with charts
 /www/config.html         — Configuration page
 /www/update.html         — OTA update page
+/www/theme.css           — Shared dark/light theme stylesheet
 /cert.pem                — HTTPS certificate (optional, see below)
 /key.pem                 — HTTPS private key (optional, see below)
 /temps/<sensor>/*.csv    — Temperature history CSVs (auto-created)
@@ -253,6 +258,9 @@ This prompts for WiFi and MQTT credentials and writes `data/config.txt`. Copy it
   },
   "lowTemp": {
     "threshold": 20.0
+  },
+  "ui": {
+    "theme": "dark"
   },
   "admin": {
     "password": ""
@@ -317,7 +325,7 @@ This creates `cert.pem` and `key.pem` (ECC P-256, 10-year validity). Copy both t
 
 ### Admin Password
 
-Sensitive endpoints (`/config`, `/update`, `/ftp`) are protected by HTTP Basic Auth when an admin password is set. The password is stored as a salted SHA-256 hash (`$HASH$<base64(salt+digest)>`) in the `admin.password` config field.
+Sensitive endpoints (`/config`, `/update`, `/ftp`) are protected by HTTP Basic Auth when an admin password is set. The password is encrypted at rest using the same AES-256-GCM or XOR obfuscation scheme as WiFi/MQTT passwords.
 
 - **No password set** — All endpoints are open, no authentication required
 - **Password set** — Browser prompts for Basic Auth (username: `admin`, password: your admin password)
@@ -326,15 +334,21 @@ Sensitive endpoints (`/config`, `/update`, `/ftp`) are protected by HTTP Basic A
 
 ### Password Encryption
 
-WiFi and MQTT passwords are encrypted at rest on the SD card using AES-256-GCM. The encryption key is derived from a hardware key stored in the ESP32's eFuse HMAC peripheral — the key never leaves the silicon.
+All passwords (WiFi, MQTT, admin) are encrypted at rest on the SD card. Two encryption tiers are supported:
 
-**One-time eFuse key provisioning:**
+1. **AES-256-GCM** (preferred) — Key derived from ESP32 eFuse HMAC peripheral via `esp_hmac_calculate()`. The hardware key never leaves the silicon. Encrypted passwords are stored as `$AES$<base64(IV+ciphertext+tag)>`.
+
+2. **XOR obfuscation** (fallback) — Used when no eFuse key is provisioned. Uses a stable random key defined as `XOR_KEY` in `secrets.ini` (compile-time build flag). Encrypted passwords are stored as `$ENC$<base64(xored)>`.
+
+Plaintext passwords on the SD card are automatically encrypted on the next config save. The XOR key is stable across firmware updates, so OTA updates do not break password decryption.
+
+**One-time eFuse key provisioning (optional):**
 
 ```bash
 ./scripts/burn-efuse-key.sh [/dev/ttyUSB0]
 ```
 
-This permanently burns a random 256-bit HMAC key to eFuse BLOCK_KEY0. The firmware uses `esp_hmac_calculate()` to derive AES keys from this hardware secret. Plaintext passwords on the SD card are automatically encrypted on the next config save. If no eFuse key is provisioned, passwords are stored in plaintext.
+This permanently burns a random 256-bit HMAC key to eFuse BLOCK_KEY0. Once provisioned, all passwords are upgraded to AES-256-GCM on the next config save.
 
 ### FTP Server
 
@@ -364,15 +378,7 @@ If the device cannot connect to WiFi for 20 minutes, it automatically switches t
 - AP credentials are logged overtly at WARN level to both serial and log file
 - AP mode persists until reboot
 
-**Setup:** Create `secrets.ini` in the project root (gitignored):
-
-```ini
-[secrets]
-build_flags =
-	-D AP_PASSWORD=\"your-ap-password\"
-```
-
-The build will fail with a clear `#error` if `secrets.ini` is missing or `AP_PASSWORD` is not defined.
+**Setup:** The AP password is defined in `secrets.ini` (see [Secrets Setup](#secrets-setup)). The build will fail with a clear `#error` if `secrets.ini` is missing or `AP_PASSWORD` is not defined.
 
 **Recovery workflow:**
 1. Connect to `GoodmanHP` WiFi network with the AP password
@@ -484,6 +490,8 @@ Burn a random 256-bit HMAC key to ESP32-S3 eFuse BLOCK_KEY0 for AES-256-GCM pass
 | POST | `/log/level` | | Set log level |
 | GET | `/log/config` | | Logger output configuration |
 | POST | `/log/config` | | Configure logger outputs (serial, mqtt, sdcard, websocket) |
+| GET | `/theme` | | Current theme setting (`{"theme":"dark"}`) |
+| GET | `/theme.css` | | Shared dark/light theme CSS stylesheet |
 | GET | `/i2c/scan` | | Scan I2C bus for connected devices |
 | GET | `/config` | Yes | Configuration page / JSON (`?format=json`) |
 | POST | `/config` | Yes | Update configuration (JSON body) |
@@ -525,7 +533,8 @@ Returns the full controller state as JSON. Used by the dashboard for real-time p
   "wifiSSID": "your-ssid",
   "wifiRSSI": -48,
   "wifiIP": "192.168.1.136",
-  "apMode": false
+  "apMode": false,
+  "buildDate": "Feb 12 2026 03:18:44"
 }
 ```
 
@@ -541,6 +550,7 @@ Returns the full controller state as JSON. Used by the dashboard for real-time p
 | `wifiRSSI` | number | WiFi signal strength in dBm |
 | `wifiIP` | string | Device IP address |
 | `apMode` | bool | Whether the device is in AP fallback mode |
+| `buildDate` | string | Firmware build date and time (compile timestamp) |
 
 ### `GET /temps/history`
 

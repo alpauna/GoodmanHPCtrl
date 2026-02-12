@@ -4,6 +4,8 @@
 #include "TempSensor.h"
 #include "OtaUtils.h"
 
+extern const char compile_date[];
+
 extern uint8_t getCpuLoadCore0();
 extern uint8_t getCpuLoadCore1();
 extern bool _apModeActive;
@@ -29,7 +31,7 @@ bool WebHandler::checkAuth(AsyncWebServerRequest* request) {
 
     String authHeader = request->header("Authorization");
     if (!authHeader.startsWith("Basic ")) {
-        request->requestAuthentication();
+        request->requestAuthentication(nullptr, false);
         return false;
     }
 
@@ -47,7 +49,7 @@ bool WebHandler::checkAuth(AsyncWebServerRequest* request) {
 
     int colonIdx = credentials.indexOf(':');
     if (colonIdx < 0) {
-        request->requestAuthentication();
+        request->requestAuthentication(nullptr, false);
         return false;
     }
 
@@ -56,7 +58,7 @@ bool WebHandler::checkAuth(AsyncWebServerRequest* request) {
         return true;
     }
 
-    request->requestAuthentication();
+    request->requestAuthentication(nullptr, false);
     return false;
 }
 
@@ -190,6 +192,10 @@ void WebHandler::serveFile(AsyncWebServerRequest* request, const String& path) {
 void WebHandler::setupRoutes() {
     _server.on("/ws", HTTP_GET, [this](AsyncWebServerRequest *request) {
         _ws.handleRequest(request);
+    });
+
+    _server.on("/theme.css", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        serveFile(request, "/theme.css");
     });
 
     _server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request) {
@@ -331,6 +337,15 @@ void WebHandler::setupRoutes() {
         request->send(200, "application/json", json);
     });
 
+    _server.on("/theme", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        String theme = "dark";
+        if (_config && _config->getProjectInfo()) {
+            theme = _config->getProjectInfo()->theme;
+            if (theme.length() == 0) theme = "dark";
+        }
+        request->send(200, "application/json", "{\"theme\":\"" + theme + "\"}");
+    });
+
     _server.on("/state", HTTP_GET, [this](AsyncWebServerRequest *request) {
         JsonDocument doc;
         doc["state"] = _hpController->getStateString();
@@ -363,6 +378,7 @@ void WebHandler::setupRoutes() {
         doc["wifiRSSI"] = WiFi.RSSI();
         doc["wifiIP"] = WiFi.localIP().toString();
         doc["apMode"] = _apModeActive;
+                doc["buildDate"] = compile_date;
 
         JsonObject temps = doc["temps"].to<JsonObject>();
         for (const auto& m : _hpController->getTempSensorMap()) {
@@ -552,6 +568,7 @@ void WebHandler::setupRoutes() {
                 doc["maxLogSize"] = proj->maxLogSize;
                 doc["maxOldLogCount"] = proj->maxOldLogCount;
                 doc["adminPasswordSet"] = _config->hasAdminPassword();
+                doc["theme"] = proj->theme.length() > 0 ? proj->theme : "dark";
                 String json;
                 serializeJson(doc, json);
                 request->send(200, "application/json", json);
@@ -659,6 +676,11 @@ void WebHandler::setupRoutes() {
             uint8_t maxOldLogCount = data["maxOldLogCount"] | proj->maxOldLogCount;
             proj->maxLogSize = maxLogSize;
             proj->maxOldLogCount = maxOldLogCount;
+
+            String theme = data["theme"] | proj->theme;
+            if (theme == "dark" || theme == "light") {
+                proj->theme = theme;
+            }
 
             TempSensorMap& tempSensors = _hpController->getTempSensorMap();
             bool saved = _config->updateConfig("/config.txt", tempSensors, *proj);
@@ -930,7 +952,19 @@ void WebHandler::setupRoutes() {
         _server.addHandler(wifiTestHandler);
 
     } else {
-        // HTTPS is active — redirect HTTP /admin/setup, /config and /update to HTTPS
+        // HTTPS is active — redirect HTTP pages to HTTPS
+        _server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/");
+        });
+        _server.on("/dashboard", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/dashboard");
+        });
+        _server.on("/log/view", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/log/view");
+        });
+        _server.on("/heap/view", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/heap/view");
+        });
         _server.on("/admin/setup", HTTP_GET, [this](AsyncWebServerRequest *request) {
             request->redirect("https://" + String(getWiFiIP()) + "/admin/setup");
         });

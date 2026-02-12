@@ -23,7 +23,7 @@
 #error "AP_PASSWORD not defined — create secrets.ini with: -D AP_PASSWORD=\\\"yourpassword\\\""
 #endif
 
-const char compile_date[] = __DATE__ " " __TIME__;
+extern const char compile_date[] = __DATE__ " " __TIME__;
 IPAddress _MQTT_HOST_DEFAULT = IPAddress(192, 168, 0, 46);
 const char* _filename = "/config.txt";
 const float MB_MULTIPLIER = 1.0/(1024.0*1024.0);
@@ -166,7 +166,8 @@ ProjectInfo proj = {
   0,                  // heatRuntimeAccumulatedMs: restored from config
   -21600,             // gmtOffsetSec: UTC-6 (US Central)
   3600,               // daylightOffsetSec: 1hr DST
-  20.0f               // lowTempThreshold: 20°F default
+  20.0f,              // lowTempThreshold: 20°F default
+  "dark"              // theme: dark default
 };
 
 
@@ -393,7 +394,8 @@ void setup() {
   sensors.begin();
 
   // Set XOR obfuscation key (used as fallback when eFuse HMAC is not available)
-  Config::setObfuscationKey(compile_date);
+  // Use a fixed key from secrets.ini so passwords survive OTA updates
+  Config::setObfuscationKey(XOR_KEY);
 
   // Derive AES-256 key from eFuse HMAC for password encryption
   if (!config.initEncryption()) {

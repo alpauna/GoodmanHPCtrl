@@ -161,6 +161,7 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["maxLogSize"] = proj->maxLogSize;
         doc["maxOldLogCount"] = proj->maxOldLogCount;
         doc["adminPasswordSet"] = ctx->config->hasAdminPassword();
+        doc["theme"] = proj->theme.length() > 0 ? proj->theme : "dark";
         String json;
         serializeJson(doc, json);
         httpd_resp_set_type(req, "application/json");
@@ -316,6 +317,12 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     uint8_t maxOldLogCount = data["maxOldLogCount"] | proj->maxOldLogCount;
     proj->maxLogSize = maxLogSize;
     proj->maxOldLogCount = maxOldLogCount;
+
+    // UI theme
+    String theme = data["theme"] | proj->theme;
+    if (theme == "dark" || theme == "light") {
+        proj->theme = theme;
+    }
 
     // Save to SD card
     TempSensorMap& tempSensors = ctx->hpController->getTempSensorMap();
@@ -895,6 +902,12 @@ static esp_err_t scanGetHandler(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// --- Theme CSS handler ---
+
+static esp_err_t themeCssGetHandler(httpd_req_t* req) {
+    return serveFileHttps(req, "/www/theme.css");
+}
+
 // --- Root/index handler ---
 
 static esp_err_t rootGetHandler(httpd_req_t* req) {
@@ -1095,6 +1108,14 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
     }
 
     // Register URI handlers
+    httpd_uri_t themeCssGet = {
+        .uri = "/theme.css",
+        .method = HTTP_GET,
+        .handler = themeCssGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &themeCssGet);
+
     httpd_uri_t rootGet = {
         .uri = "/",
         .method = HTTP_GET,
