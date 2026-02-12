@@ -19,6 +19,7 @@
 extern uint8_t getCpuLoadCore0();
 extern uint8_t getCpuLoadCore1();
 extern bool _apModeActive;
+extern const char compile_date[];
 
 // --- HTTPS Basic Auth helper ---
 
@@ -707,6 +708,7 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     doc["wifiRSSI"] = WiFi.RSSI();
     doc["wifiIP"] = WiFi.localIP().toString();
     doc["apMode"] = _apModeActive;
+    doc["buildDate"] = compile_date;
 
     JsonObject temps = doc["temps"].to<JsonObject>();
     for (const auto& m : ctx->hpController->getTempSensorMap()) {
@@ -1103,7 +1105,7 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
     cfg.prvtkey_pem = key;
     cfg.prvtkey_len = keyLen + 1;
     cfg.port_secure = 443;
-    cfg.httpd.max_uri_handlers = 26;
+    cfg.httpd.max_uri_handlers = 30;
 
     httpd_handle_t server = nullptr;
     esp_err_t err = httpd_ssl_start(&server, &cfg);
