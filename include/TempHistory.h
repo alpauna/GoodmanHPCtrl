@@ -12,7 +12,7 @@ struct TempSample {
 class TempHistory {
 public:
     static const int MAX_SENSORS = 5;
-    static const int MAX_SAMPLES = 2016;  // 7 days * 24h * 60min / 5min
+    static const int MAX_SAMPLES = 5040;  // 7 days * 24h * 60min / 2min
 
     void begin();
     void addSample(int sensorIdx, uint32_t epoch, float temp);

@@ -212,7 +212,7 @@ Task tSaveRuntime(5 * TASK_MINUTE, TASK_FOREVER, &onSaveRuntime, &ts, false);
 // Log temperature history to per-sensor CSV files every 30 seconds
 void onLogTempsCSV();
 void cleanOldTempFiles(int maxAgeDays);
-Task tLogTempsCSV(5 * TASK_MINUTE, TASK_FOREVER, &onLogTempsCSV, &ts, false);
+Task tLogTempsCSV(2 * TASK_MINUTE, TASK_FOREVER, &onLogTempsCSV, &ts, false);
 static char _tempsCsvDate[12] = "";
 
 // CPU load calculation every 1 second
