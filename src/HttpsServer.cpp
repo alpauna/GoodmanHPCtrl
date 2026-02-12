@@ -718,6 +718,148 @@ static esp_err_t wifiViewGetHandler(httpd_req_t* req) {
     return serveFileHttps(req, "/www/wifi.html");
 }
 
+static esp_err_t wifiStatusGetHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+    String json = "{\"status\":\"" + *ctx->wifiTestState + "\"";
+    if (ctx->wifiTestMessage->length() > 0) {
+        json += ",\"message\":\"" + *ctx->wifiTestMessage + "\"";
+    }
+    json += "}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json.c_str());
+    return ESP_OK;
+}
+
+static esp_err_t wifiTestPostHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+
+    if (*ctx->wifiTestState == "testing") {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"Test already in progress\"}");
+        return ESP_OK;
+    }
+
+    int remaining = req->content_len;
+    if (remaining <= 0 || remaining > 1024) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"Invalid body\"}");
+        return ESP_OK;
+    }
+
+    char* body = (char*)malloc(remaining + 1);
+    if (!body) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"Out of memory\"}");
+        return ESP_OK;
+    }
+
+    int received = 0;
+    while (received < remaining) {
+        int ret = httpd_req_recv(req, body + received, remaining - received);
+        if (ret <= 0) { free(body); return ESP_OK; }
+        received += ret;
+    }
+    body[received] = '\0';
+
+    JsonDocument doc;
+    if (deserializeJson(doc, body) != DeserializationError::Ok) {
+        free(body);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"Invalid JSON\"}");
+        return ESP_OK;
+    }
+    free(body);
+
+    String ssid = doc["ssid"] | String("");
+    String password = doc["password"] | String("");
+    String curPassword = doc["curPassword"] | String("");
+
+    if (ssid.length() == 0) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"SSID required\"}");
+        return ESP_OK;
+    }
+
+    bool verified = false;
+    if (ctx->config->getWifiPassword().length() > 0) {
+        verified = (curPassword == ctx->config->getWifiPassword());
+    } else if (ctx->config->hasAdminPassword()) {
+        verified = ctx->config->verifyAdminPassword(curPassword);
+    } else {
+        verified = true;
+    }
+    if (!verified) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"Current password incorrect\"}");
+        return ESP_OK;
+    }
+
+    // Store old credentials and start test
+    *ctx->wifiOldSSID = ctx->config->getWifiSSID();
+    *ctx->wifiOldPassword = ctx->config->getWifiPassword();
+    *ctx->wifiTestNewSSID = ssid;
+    *ctx->wifiTestNewPassword = password;
+    *ctx->wifiTestState = "testing";
+    *ctx->wifiTestMessage = "";
+    *ctx->wifiTestCountdown = 15;
+
+    if (!*ctx->wifiTestTask) {
+        *ctx->wifiTestTask = new Task(TASK_SECOND, TASK_FOREVER, [ctx]() {
+            if (*ctx->wifiTestCountdown == 15) {
+                extern bool _apModeActive;
+                if (_apModeActive) {
+                    WiFi.mode(WIFI_AP_STA);
+                } else {
+                    WiFi.disconnect(true);
+                }
+                WiFi.begin(ctx->wifiTestNewSSID->c_str(), ctx->wifiTestNewPassword->c_str());
+                Log.info("WiFi", "Testing connection to '%s'...", ctx->wifiTestNewSSID->c_str());
+            }
+            (*ctx->wifiTestCountdown)--;
+            if (WiFi.status() == WL_CONNECTED) {
+                String newIP = WiFi.localIP().toString();
+                ctx->config->setWifiSSID(*ctx->wifiTestNewSSID);
+                ctx->config->setWifiPassword(*ctx->wifiTestNewPassword);
+                TempSensorMap& tempSensors = ctx->hpController->getTempSensorMap();
+                ProjectInfo* proj = ctx->config->getProjectInfo();
+                ctx->config->updateConfig("/config.txt", tempSensors, *proj);
+                *ctx->wifiTestState = "success";
+                *ctx->wifiTestMessage = newIP;
+                Log.info("WiFi", "Test OK — connected to '%s' at %s. Rebooting...",
+                         ctx->wifiTestNewSSID->c_str(), newIP.c_str());
+                (*ctx->wifiTestTask)->disable();
+                if (!*ctx->delayedReboot) {
+                    *ctx->delayedReboot = new Task(3 * TASK_SECOND, TASK_ONCE, [ctx]() {
+                        *ctx->shouldReboot = true;
+                    }, ctx->scheduler, false);
+                }
+                (*ctx->delayedReboot)->restartDelayed(3 * TASK_SECOND);
+                return;
+            }
+            if (*ctx->wifiTestCountdown == 0) {
+                Log.warn("WiFi", "Test FAILED — could not connect to '%s'", ctx->wifiTestNewSSID->c_str());
+                WiFi.disconnect(true);
+                extern bool _apModeActive;
+                if (_apModeActive) {
+                    WiFi.mode(WIFI_AP);
+                } else {
+                    WiFi.begin(ctx->wifiOldSSID->c_str(), ctx->wifiOldPassword->c_str());
+                }
+                *ctx->wifiTestState = "failed";
+                *ctx->wifiTestMessage = "Could not connect to " + *ctx->wifiTestNewSSID;
+                (*ctx->wifiTestTask)->disable();
+            }
+        }, ctx->scheduler, false);
+    }
+    (*ctx->wifiTestTask)->restartDelayed(TASK_SECOND);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"testing\"}");
+    return ESP_OK;
+}
+
 static esp_err_t scanGetHandler(httpd_req_t* req) {
     String json = "[";
     int n = WiFi.scanComplete();
@@ -919,6 +1061,22 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &scanGet);
+
+    httpd_uri_t wifiStatusGet = {
+        .uri = "/wifi/status",
+        .method = HTTP_GET,
+        .handler = wifiStatusGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &wifiStatusGet);
+
+    httpd_uri_t wifiTestPost = {
+        .uri = "/wifi/test",
+        .method = HTTP_POST,
+        .handler = wifiTestPostHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &wifiTestPost);
 
     httpd_uri_t stateGet = {
         .uri = "/state",

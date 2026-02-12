@@ -24,6 +24,15 @@ struct HttpsContext {
     std::function<void()> ftpDisableCb;
     bool* ftpActive;
     unsigned long* ftpStopTime;
+    // WiFi test state (shared with WebHandler)
+    String* wifiTestState;
+    String* wifiTestMessage;
+    String* wifiTestNewSSID;
+    String* wifiTestNewPassword;
+    String* wifiOldSSID;
+    String* wifiOldPassword;
+    uint8_t* wifiTestCountdown;
+    Task** wifiTestTask;
 };
 
 // Opaque handle

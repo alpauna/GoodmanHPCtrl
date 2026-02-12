@@ -1051,6 +1051,14 @@ bool WebHandler::beginSecure(const uint8_t* cert, size_t certLen, const uint8_t*
     _httpsCtx.ftpDisableCb = _ftpDisableCb;
     _httpsCtx.ftpActive = _ftpActivePtr;
     _httpsCtx.ftpStopTime = _ftpStopTimePtr;
+    _httpsCtx.wifiTestState = &_wifiTestState;
+    _httpsCtx.wifiTestMessage = &_wifiTestMessage;
+    _httpsCtx.wifiTestNewSSID = &_wifiTestNewSSID;
+    _httpsCtx.wifiTestNewPassword = &_wifiTestNewPassword;
+    _httpsCtx.wifiOldSSID = &_wifiOldSSID;
+    _httpsCtx.wifiOldPassword = &_wifiOldPassword;
+    _httpsCtx.wifiTestCountdown = &_wifiTestCountdown;
+    _httpsCtx.wifiTestTask = &_tWifiTest;
 
     _httpsServer = httpsStart(cert, certLen, key, keyLen, &_httpsCtx);
     return _httpsServer != nullptr;
