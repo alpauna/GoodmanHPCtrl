@@ -493,7 +493,45 @@ void WebHandler::setupRoutes() {
             serveFile(request, "/update.html");
         });
 
+        _server.on("/admin/setup", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            serveFile(request, "/admin.html");
+        });
+
+        auto* adminPostHandler = new AsyncCallbackJsonWebHandler("/admin/setup", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+            if (!_config) {
+                request->send(500, "application/json", "{\"error\":\"Config not available\"}");
+                return;
+            }
+            if (_config->hasAdminPassword()) {
+                request->send(400, "application/json", "{\"error\":\"Admin password already set. Change it from the config page.\"}");
+                return;
+            }
+            JsonObject data = json.as<JsonObject>();
+            String pw = data["password"] | String("");
+            String confirm = data["confirm"] | String("");
+            if (pw.length() < 4) {
+                request->send(400, "application/json", "{\"error\":\"Password must be at least 4 characters.\"}");
+                return;
+            }
+            if (pw != confirm) {
+                request->send(400, "application/json", "{\"error\":\"Passwords do not match.\"}");
+                return;
+            }
+            _config->setAdminPassword(pw);
+            if (_ftpDisableCb) _ftpDisableCb();
+            TempSensorMap& tempSensors = _hpController->getTempSensorMap();
+            ProjectInfo* proj = _config->getProjectInfo();
+            _config->updateConfig("/config.txt", tempSensors, *proj);
+            Log.info("AUTH", "Admin password set via setup page");
+            request->send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Admin password set.\"}");
+        });
+        _server.addHandler(adminPostHandler);
+
         _server.on("/config", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            if (_config && !_config->hasAdminPassword()) {
+                request->redirect("/admin/setup");
+                return;
+            }
             if (!checkAuth(request)) return;
             if (request->hasParam("format") && request->getParam("format")->value() == "json") {
                 if (!_config || !_config->getProjectInfo()) {
@@ -542,7 +580,7 @@ void WebHandler::setupRoutes() {
             String wifiPw = data["wifiPassword"] | String("******");
             if (wifiPw != "******" && wifiPw.length() > 0) {
                 String curPw = data["curWifiPw"] | String("");
-                if (curPw == _config->getWifiPassword()) {
+                if (curPw == _config->getWifiPassword() || _config->verifyAdminPassword(curPw)) {
                     _config->setWifiPassword(wifiPw);
                     needsReboot = true;
                 } else {
@@ -573,7 +611,7 @@ void WebHandler::setupRoutes() {
             String mqttPw = data["mqttPassword"] | String("******");
             if (mqttPw != "******" && mqttPw.length() > 0) {
                 String curPw = data["curMqttPw"] | String("");
-                if (curPw == _config->getMqttPassword()) {
+                if (curPw == _config->getMqttPassword() || _config->verifyAdminPassword(curPw)) {
                     _config->setMqttPassword(mqttPw);
                     needsReboot = true;
                 } else {
@@ -892,7 +930,13 @@ void WebHandler::setupRoutes() {
         _server.addHandler(wifiTestHandler);
 
     } else {
-        // HTTPS is active — redirect HTTP /config and /update to HTTPS
+        // HTTPS is active — redirect HTTP /admin/setup, /config and /update to HTTPS
+        _server.on("/admin/setup", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/admin/setup");
+        });
+        _server.on("/admin/setup", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/admin/setup");
+        });
         _server.on("/config", HTTP_GET, [this](AsyncWebServerRequest *request) {
             String url = "https://" + String(getWiFiIP()) + "/config";
             if (request->hasParam("format")) {

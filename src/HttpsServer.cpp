@@ -115,8 +115,17 @@ static esp_err_t serveFileHttps(httpd_req_t* req, const char* sdPath) {
 // --- ESP-IDF httpd handler callbacks ---
 
 static esp_err_t configGetHandler(httpd_req_t* req) {
-    if (!checkHttpsAuth(req)) return ESP_OK;
     HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+
+    // Gate: redirect to admin setup if no admin password set
+    if (ctx->config && !ctx->config->hasAdminPassword()) {
+        httpd_resp_set_status(req, "302 Found");
+        httpd_resp_set_hdr(req, "Location", "/admin/setup");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
+    if (!checkHttpsAuth(req)) return ESP_OK;
 
     // Check for ?format=json
     size_t qLen = httpd_req_get_url_query_len(req);
@@ -223,7 +232,7 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     String wifiPw = data["wifiPassword"] | String("******");
     if (wifiPw != "******" && wifiPw.length() > 0) {
         String curPw = data["curWifiPw"] | String("");
-        if (curPw == ctx->config->getWifiPassword()) {
+        if (curPw == ctx->config->getWifiPassword() || ctx->config->verifyAdminPassword(curPw)) {
             ctx->config->setWifiPassword(wifiPw);
             needsReboot = true;
         } else {
@@ -256,7 +265,7 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     String mqttPw = data["mqttPassword"] | String("******");
     if (mqttPw != "******" && mqttPw.length() > 0) {
         String curPw = data["curMqttPw"] | String("");
-        if (curPw == ctx->config->getMqttPassword()) {
+        if (curPw == ctx->config->getMqttPassword() || ctx->config->verifyAdminPassword(curPw)) {
             ctx->config->setMqttPassword(mqttPw);
             needsReboot = true;
         } else {
@@ -993,6 +1002,78 @@ static esp_err_t rebootPostHandler(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// --- Admin setup handlers ---
+
+static esp_err_t adminSetupGetHandler(httpd_req_t* req) {
+    return serveFileHttps(req, "/www/admin.html");
+}
+
+static esp_err_t adminSetupPostHandler(httpd_req_t* req) {
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+
+    if (ctx->config->hasAdminPassword()) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Admin password already set. Change it from the config page.\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    int remaining = req->content_len;
+    if (remaining <= 0 || remaining > 1024) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Invalid body\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    char* body = (char*)malloc(remaining + 1);
+    if (!body) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Out of memory\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    int received = 0;
+    while (received < remaining) {
+        int ret = httpd_req_recv(req, body + received, remaining - received);
+        if (ret <= 0) { free(body); return ESP_OK; }
+        received += ret;
+    }
+    body[received] = '\0';
+
+    JsonDocument doc;
+    if (deserializeJson(doc, body)) {
+        free(body);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Invalid JSON\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+    free(body);
+
+    String pw = doc["password"] | String("");
+    String confirm = doc["confirm"] | String("");
+
+    if (pw.length() < 4) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Password must be at least 4 characters.\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+    if (pw != confirm) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Passwords do not match.\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    ctx->config->setAdminPassword(pw);
+    if (ctx->ftpDisableCb) ctx->ftpDisableCb();
+    TempSensorMap& tempSensors = ctx->hpController->getTempSensorMap();
+    ProjectInfo* proj = ctx->config->getProjectInfo();
+    ctx->config->updateConfig("/config.txt", tempSensors, *proj);
+    Log.info("AUTH", "Admin password set via setup page (HTTPS)");
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"status\":\"ok\",\"message\":\"Admin password set.\"}", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
 // --- Public API ---
 
 HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
@@ -1004,7 +1085,7 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
     cfg.prvtkey_pem = key;
     cfg.prvtkey_len = keyLen + 1;
     cfg.port_secure = 443;
-    cfg.httpd.max_uri_handlers = 24;
+    cfg.httpd.max_uri_handlers = 26;
 
     httpd_handle_t server = nullptr;
     esp_err_t err = httpd_ssl_start(&server, &cfg);
@@ -1021,6 +1102,22 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &rootGet);
+
+    httpd_uri_t adminGet = {
+        .uri = "/admin/setup",
+        .method = HTTP_GET,
+        .handler = adminSetupGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &adminGet);
+
+    httpd_uri_t adminPost = {
+        .uri = "/admin/setup",
+        .method = HTTP_POST,
+        .handler = adminSetupPostHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &adminPost);
 
     httpd_uri_t dashGet = {
         .uri = "/dashboard",
