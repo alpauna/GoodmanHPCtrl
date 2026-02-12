@@ -8,3 +8,4 @@
 efuse_hmac_key.bin
 *.pem
 secrets.ini
+backups/
