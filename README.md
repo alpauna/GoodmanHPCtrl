@@ -382,13 +382,91 @@ The build will fail with a clear `#error` if `secrets.ini` is missing or `AP_PAS
 
 ## Scripts
 
-| Script | Description |
-|--------|-------------|
-| `scripts/configure.sh` | Configure WiFi/MQTT credentials. `--local` writes `config.txt` for SD card; without flag, pushes config to device via HTTPS API |
-| `scripts/update-www.sh` | Upload HTML files from `data/www/` to device SD card via FTP (auto-enables FTP for 10 min) |
-| `scripts/ota-update.sh` | OTA firmware update via HTTPS: upload to SD, verify, apply, wait for reboot. `--revert` to roll back |
-| `scripts/generate-cert.sh` | Generate self-signed ECC P-256 certificate for HTTPS (`cert.pem` + `key.pem`) |
-| `scripts/burn-efuse-key.sh` | Burn random 256-bit HMAC key to ESP32-S3 eFuse BLOCK_KEY0 for AES-256-GCM encryption (irreversible) |
+All scripts prompt interactively for required parameters (device IP, admin password, etc.).
+
+| Script | Description | Parameters |
+|--------|-------------|------------|
+| `configure.sh` | Configure WiFi/MQTT credentials on device or generate local config | `--local` (optional): generate `data/config.txt` instead of pushing to device |
+| `configure.sh --local` | Generate `data/config.txt` for SD card provisioning | None (interactive prompts only) |
+| `ota-update.sh` | OTA firmware upload, verify, flash, and reboot via HTTPS | `--revert` (optional): roll back to previous firmware backup |
+| `update-www.sh` | Upload HTML files from `data/www/` to device SD card via FTP | None (interactive prompts only) |
+| `backup-config.sh` | Download `config.txt` from device SD card for local backup | None (interactive prompts only) |
+| `generate-cert.sh` | Generate self-signed ECC P-256 cert for HTTPS | None (no prompts, requires `openssl`) |
+| `burn-efuse-key.sh` | Burn HMAC key to ESP32-S3 eFuse for AES-256-GCM encryption | `[PORT]` (optional, default: `/dev/ttyUSB0`) |
+
+**Interactive prompts** (where applicable): Device IP, Admin password, WiFi/MQTT credentials, confirmation prompts.
+
+### `scripts/configure.sh`
+
+Configure WiFi and MQTT credentials on the device or generate a local config file for SD card provisioning.
+
+```
+./scripts/configure.sh           # Push config to device via HTTPS API
+./scripts/configure.sh --local   # Generate data/config.txt for SD card
+```
+
+**Prompts (network mode):** Device IP, Admin password, WiFi SSID, WiFi password, Current WiFi password (if changing), MQTT host/port/user, MQTT password, Current MQTT password (if changing)
+
+**Prompts (local mode):** WiFi SSID, WiFi password, MQTT host/port/user, MQTT password
+
+### `scripts/ota-update.sh`
+
+OTA firmware update via HTTPS. Uploads the PlatformIO build output to the device SD card, verifies the upload size, applies (backs up current firmware + flashes new), and waits for reboot.
+
+```
+./scripts/ota-update.sh           # Upload and flash firmware
+./scripts/ota-update.sh --revert  # Roll back to previous firmware backup
+```
+
+**Prompts:** Device IP, Admin password
+
+**Requires:** Built firmware at `.pio/build/freenove_esp32_s3_wroom/firmware.bin`
+
+### `scripts/update-www.sh`
+
+Upload all HTML files from `data/www/` to the device SD card `/www/` directory via FTP. Automatically enables FTP for 10 minutes.
+
+```
+./scripts/update-www.sh
+```
+
+**Prompts:** Device IP, Admin password
+
+### `scripts/backup-config.sh`
+
+Download `config.txt` from the device SD card for local backup via FTP. Saves timestamped copies to `backups/<YYYYMMDD-HHMMSS>/config.txt` and a latest copy at `backups/config-latest.txt`.
+
+```
+./scripts/backup-config.sh
+```
+
+**Prompts:** Device IP, Admin password
+
+**Note:** The `backups/` directory is gitignored since config files contain credentials.
+
+### `scripts/generate-cert.sh`
+
+Generate a self-signed ECC P-256 certificate (10-year validity) for the ESP32 HTTPS server. Outputs `cert.pem` and `key.pem` to the project root.
+
+```
+./scripts/generate-cert.sh
+```
+
+**No prompts.** Requires `openssl`. Copy output files to SD card root.
+
+### `scripts/burn-efuse-key.sh`
+
+Burn a random 256-bit HMAC key to ESP32-S3 eFuse BLOCK_KEY0 for AES-256-GCM password encryption. The key is read-protected — only the hardware HMAC peripheral can access it.
+
+```
+./scripts/burn-efuse-key.sh [PORT]
+```
+
+**Parameters:** `PORT` — serial port (default: `/dev/ttyUSB0`)
+
+**Prompts:** Two confirmation prompts (type `yes`, then `BURN`)
+
+**WARNING:** eFuse burning is permanent and irreversible. Each key block can only be written once per chip. A backup of the key is saved to `efuse_hmac_key.bin` (gitignored).
 
 ## API Endpoints
 
