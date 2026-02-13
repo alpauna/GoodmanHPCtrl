@@ -81,7 +81,7 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
   - RV (reversing valve) automatically controlled: ON in COOL mode, OFF in HEAT/OFF mode
   - W (auxiliary heat) automatically controlled: ON in DEFROST, ERROR (HEAT only), and LOW_TEMP (HEAT only) modes; never turned on in COOL mode
   - Auto-activates CNT relay when Y input becomes active, with 5-minute short cycle protection: if CNT was off for less than 5 minutes, enforces a 30-second delay before reactivation; if off for 5+ minutes (or never activated), CNT activates immediately
-  - **Automatic defrost (3-phase sequencing)**: After 90 min accumulated CNT runtime in HEAT mode, initiates software defrost via a 3-phase output sequence:
+  - **Automatic defrost (3-phase sequencing)**: After accumulated CNT runtime in HEAT mode exceeds `_heatRuntimeThresholdMs` (default 90 min, configurable 30–90 min), initiates software defrost via a 3-phase output sequence:
     - **Phase 1** (`_defrostTransition`): All outputs off (CNT, FAN, W, RV) for pressure equalization. Duration: `_rvShortCycleMs` (default 30s, configurable).
     - **Phase 2** (`_defrostCntPending`): RV and W turned on, CNT remains off for short cycle delay. Duration: `_cntShortCycleMs` (default 30s, configurable).
     - **Phase 3**: CNT turned on, defrost fully active. Runs for at least `defrostMinRuntimeMs` (default 3 min, configurable), then exits when CONDENSER_TEMP >= `defrostExitTempF` (default 60°F, configurable) or 15-min safety timeout.
@@ -99,7 +99,7 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
   - **DFT emergency defrost**: DFT input triggers the same unified 3-phase defrost cycle from HEAT mode. Uses the same `_softwareDefrost` path as automatic defrost.
   - **LPS fault protection**: When LPS input goes LOW (low refrigerant pressure), immediately shuts down CNT if running and blocks CNT activation. If in HEAT mode (Y active, O not active), turns on W for auxiliary heat. Auto-recovers when LPS goes HIGH (W turned off). Publishes fault events via `LPSFaultCallback`. `lpsFault` field included in `goodman/state` MQTT payload.
   - **Low ambient temperature protection**: When AMBIENT_TEMP drops below configurable threshold (default 20°F), enters `LOW_TEMP` state: shuts down CNT, turns off FAN and RV. Turns on W (auxiliary heat) only if not in COOL mode (O active). W is never turned on in COOL mode. Blocks CNT activation and state updates while active. Auto-recovers when temp rises above threshold. `lowTemp` field included in `goodman/state` MQTT payload.
-  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `isDefrostTransitionActive()`, `isDefrostCntPendingActive()`, `isDefrostExitingActive()`, `getDefrostTransitionRemainingMs()`, `getDefrostCntPendingRemainingMs()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `setLowTempThreshold()`, `getLowTempThreshold()`, `setDefrostMinRuntimeMs()`, `getDefrostMinRuntimeMs()`, `setDefrostExitTempF()`, `getDefrostExitTempF()`
+  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `isDefrostTransitionActive()`, `isDefrostCntPendingActive()`, `isDefrostExitingActive()`, `getDefrostTransitionRemainingMs()`, `getDefrostCntPendingRemainingMs()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `setLowTempThreshold()`, `getLowTempThreshold()`, `setDefrostMinRuntimeMs()`, `getDefrostMinRuntimeMs()`, `setDefrostExitTempF()`, `getDefrostExitTempF()`, `setHeatRuntimeThresholdMs()`, `getHeatRuntimeThresholdMs()`
 - **OutPin** (`OutPin.h/cpp`): Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
 - **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, debouncing via delayed verification (circular buffer queue checked by `_tGetInputs`), and callback on change.
 - **TempSensor** (`TempSensor.h/cpp`): Temperature sensor wrapper with encapsulated state and callbacks. Supports OneWire (via `update()`) and external sources like MCP9600 I2C thermocouple (via `updateValue()`):
@@ -154,6 +154,7 @@ struct ProjectInfo {
     uint32_t cntShortCycleMs;    // CNT short cycle delay on Y activation (default 30000)
     uint32_t defrostMinRuntimeMs; // Defrost minimum runtime in ms (default 180000 = 3 min)
     float defrostExitTempF;      // Condenser temp cutoff to end defrost in F (default 60.0)
+    uint32_t heatRuntimeThresholdMs; // Heat runtime threshold to trigger defrost in ms (default 5400000 = 90 min)
     uint32_t apFallbackSeconds;  // WiFi disconnect time before AP fallback (default 600 = 10 min)
     uint32_t tempHistoryIntervalSec; // Temp history capture interval in seconds (30-300, default 120)
     String theme;                // UI theme: "light" or "dark" (default "light")
@@ -206,7 +207,7 @@ JSON config stored on SD card at `/config.txt` (Arduino SD library, SPI interfac
     "lowTemp": { "threshold": 20.0 },
     "highSuctionTemp": { "threshold": 140.0, "rvFail": false },
     "shortCycle": { "rv": 30000, "cnt": 30000 },
-    "defrost": { "minRuntimeMs": 180000, "exitTempF": 60.0 }
+    "defrost": { "minRuntimeMs": 180000, "exitTempF": 60.0, "heatRuntimeThresholdMs": 5400000 }
   },
   "tempHistory": { "intervalSec": 120 },
   "ui": { "theme": "dark" },
