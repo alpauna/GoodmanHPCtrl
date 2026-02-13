@@ -130,7 +130,8 @@ alert('RV Fail cleared');
 }
 function save(e){
 e.preventDefault();
-var d={};fields.forEach(f=>{var e=document.getElementById(f);d[f]=e?e.value:'';});
+var d={};var numFields=['mqttPort','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec'];
+fields.forEach(f=>{var e=document.getElementById(f);var v=e?e.value:'';d[f]=numFields.indexOf(f)>=0&&v!==''?Number(v):v;});
 var mbVal=document.getElementById('maxLogSizeMB').value;
 d.maxLogSize=mbVal?parseInt(mbVal)*1024*1024:'';
 d.curWifiPw=document.getElementById('curWifiPw').value;
