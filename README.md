@@ -100,7 +100,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - Auto-recovers when temperature rises above threshold
   - Threshold is configurable via `lowTemp.threshold` in SD card config
 
-- **Automatic Defrost (3-Phase Sequencing)** — After 90 minutes of accumulated CNT runtime in HEAT mode, initiates a 3-phase software defrost cycle for safe pressure equalization and output sequencing:
+- **Automatic Defrost (3-Phase Sequencing)** — After a configurable heat runtime threshold (default 90 minutes, range 30–90 min) of accumulated CNT runtime in HEAT mode, initiates a 3-phase software defrost cycle for safe pressure equalization and output sequencing:
 
   **Phase 1 — Pressure Equalization** (`defrostTransition`):
   - All outputs OFF (CNT, FAN, W, RV)
@@ -308,7 +308,7 @@ This prompts for WiFi and MQTT credentials and writes `data/config.txt`. Copy it
     "lowTemp": { "threshold": 20.0 },
     "highSuctionTemp": { "threshold": 140.0, "rvFail": false },
     "shortCycle": { "rv": 30000, "cnt": 30000 },
-    "defrost": { "minRuntimeMs": 180000, "exitTempF": 60.0 }
+    "defrost": { "minRuntimeMs": 180000, "exitTempF": 60.0, "heatRuntimeThresholdMs": 5400000 }
   },
   "tempHistory": {
     "intervalSec": 120
@@ -340,6 +340,7 @@ This prompts for WiFi and MQTT credentials and writes `data/config.txt`. Copy it
 - `heatpump.shortCycle.cnt` — Phase 2 CNT short cycle delay in ms (default: 30000)
 - `heatpump.defrost.minRuntimeMs` — Minimum Phase 3 runtime in ms before checking exit conditions (default: 180000 = 3 min)
 - `heatpump.defrost.exitTempF` — Condenser temp (°F) at which Phase 3 exits (default: 60.0)
+- `heatpump.defrost.heatRuntimeThresholdMs` — Accumulated HEAT runtime in ms before triggering defrost (default: 5400000 = 90 min, range: 30–90 min via config page)
 
 **Log file rotation:**
 - Active log: `/log.txt` (uncompressed)
