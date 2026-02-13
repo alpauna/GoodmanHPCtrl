@@ -578,6 +578,8 @@ void WebHandler::setupRoutes() {
             doc["manualOverrideRemainSec"] = _hpController->getManualOverrideRemainingMs() / 1000;
             doc["shortCycleActive"] = _hpController->isShortCycleProtectionActive();
             doc["state"] = _hpController->getStateString();
+            doc["defrost"] = _hpController->isSoftwareDefrostActive();
+            doc["defrostTransition"] = _hpController->isDefrostTransitionActive();
 
             JsonArray inputs = doc["inputs"].to<JsonArray>();
             for (auto& pair : _hpController->getInputMap()) {
@@ -642,6 +644,21 @@ void WebHandler::setupRoutes() {
                 resp["status"] = "ok";
                 resp["output"] = name;
                 resp["state"] = state;
+            }
+            String json;
+            serializeJson(resp, json);
+            request->send(200, "application/json", json);
+            return;
+        }
+
+        // Force defrost
+        if (data["forceDefrost"].is<bool>() && data["forceDefrost"]) {
+            String err = _hpController->forceDefrost();
+            if (err.length() > 0) {
+                resp["error"] = err;
+            } else {
+                resp["status"] = "ok";
+                resp["message"] = "Defrost initiated";
             }
             String json;
             serializeJson(resp, json);

@@ -899,6 +899,8 @@ static esp_err_t pinsGetHandler(httpd_req_t* req) {
         doc["manualOverrideRemainSec"] = ctx->hpController->getManualOverrideRemainingMs() / 1000;
         doc["shortCycleActive"] = ctx->hpController->isShortCycleProtectionActive();
         doc["state"] = ctx->hpController->getStateString();
+        doc["defrost"] = ctx->hpController->isSoftwareDefrostActive();
+        doc["defrostTransition"] = ctx->hpController->isDefrostTransitionActive();
 
         JsonArray inputs = doc["inputs"].to<JsonArray>();
         for (auto& pair : ctx->hpController->getInputMap()) {
@@ -999,6 +1001,22 @@ static esp_err_t pinsPostHandler(httpd_req_t* req) {
             resp["status"] = "ok";
             resp["output"] = name;
             resp["state"] = state;
+        }
+        String json;
+        serializeJson(resp, json);
+        httpd_resp_send(req, json.c_str(), json.length());
+        return ESP_OK;
+    }
+
+    // Force defrost
+    if (data["forceDefrost"].is<bool>() && data["forceDefrost"]) {
+        String err = ctx->hpController->forceDefrost();
+        JsonDocument resp;
+        if (err.length() > 0) {
+            resp["error"] = err;
+        } else {
+            resp["status"] = "ok";
+            resp["message"] = "Defrost initiated";
         }
         String json;
         serializeJson(resp, json);

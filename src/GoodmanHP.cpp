@@ -979,6 +979,20 @@ String GoodmanHP::setManualOutput(const String& name, bool on) {
     return "";
 }
 
+String GoodmanHP::forceDefrost() {
+    if (_manualOverride) return "Disable manual override first";
+    if (_softwareDefrost) return "Defrost already active";
+    if (_state != State::HEAT) return "Must be in HEAT mode (current: " + String(getStateString()) + ")";
+    if (_lpsFault) return "LPS fault active";
+    if (_compressorOverTemp) return "Compressor over-temp active";
+    if (_lowTemp) return "Low temp protection active";
+    if (_rvFail) return "RV fail active";
+
+    Log.warn("HP", "FORCE DEFROST initiated from web interface");
+    startSoftwareDefrost();
+    return "";
+}
+
 // Static callback delegates to instance method
 bool GoodmanHP::outPinRuntimeCallback(OutPin* pin, uint32_t onDuration) {
     if (_instance != nullptr) {

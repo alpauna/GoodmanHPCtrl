@@ -30,6 +30,11 @@ tr:hover td{background:var(--hover-bg);}
 .btn-off{background:#e74c3c;color:#fff;}
 .btn-off:hover{background:#c0392b;}
 .btn-toggle:disabled{opacity:0.4;cursor:not-allowed;}
+.btn-defrost{background:#ff9800;color:#fff;padding:6px 18px;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:bold;margin-top:8px;}
+.btn-defrost:hover{background:#f57c00;}
+.btn-defrost:disabled{opacity:0.4;cursor:not-allowed;}
+.defrost-status{font-size:12px;margin-top:6px;padding:6px 10px;border-radius:4px;display:none;}
+.defrost-status.active{display:block;background:#fff3cd;color:#856404;}
 .sc-badge{background:#ff9800;color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;margin-left:6px;}
 .state-badge{display:inline-block;padding:4px 14px;border-radius:12px;font-weight:bold;font-size:13px;color:#fff;margin-bottom:8px;}
 .footer{text-align:center;color:var(--text-muted);font-size:11px;margin-top:8px;}
@@ -54,6 +59,11 @@ tr:hover td{background:var(--hover-bg);}
 Manual override is ACTIVE. All automatic control is disabled. Outputs can be toggled manually below.<br>
 This will auto shut off after <span class='countdown' id='countdown'>30:00</span>.
 </div>
+</div>
+
+<div style='margin:8px 0'>
+<button class='btn-defrost' id='defrostBtn' onclick='forceDefrost()' disabled>Force Defrost</button>
+<div class='defrost-status' id='defrostStatus'></div>
 </div>
 
 <h2>Inputs</h2>
@@ -89,14 +99,8 @@ function getAuth(){
 }
 
 function toggleOverride(on){
-  var hdr;
-  if(on){
-    hdr=getAuth();
-    if(!hdr){document.getElementById('overrideChk').checked=manualActive;return;}
-  }else{
-    hdr=authHeader;
-    if(!hdr){document.getElementById('overrideChk').checked=manualActive;alert('No active session.');return;}
-  }
+  var hdr=authHeader||getAuth();
+  if(!hdr){document.getElementById('overrideChk').checked=manualActive;return;}
   fetch('/pins',{method:'POST',headers:{'Content-Type':'application/json','Authorization':hdr},body:JSON.stringify({manualOverride:on})}).then(function(r){return r.json();}).then(function(d){
     if(d.error){alert(d.error);document.getElementById('overrideChk').checked=manualActive;return;}
     manualActive=d.manualOverride;
@@ -118,6 +122,16 @@ function setOutput(name,on){
   }).catch(function(e){alert('Error: '+e);});
 }
 
+function forceDefrost(){
+  var hdr=authHeader||getAuth();
+  if(!hdr) return;
+  fetch('/pins',{method:'POST',headers:{'Content-Type':'application/json','Authorization':hdr},body:JSON.stringify({forceDefrost:true})}).then(function(r){return r.json();}).then(function(d){
+    if(d.error){alert(d.error);return;}
+    authHeader=hdr;
+    refresh();
+  }).catch(function(e){alert('Error: '+e);});
+}
+
 function updateWarnBox(){
   var box=document.getElementById('warnBox');
   box.className='warn-box'+(manualActive?' active':'');
@@ -132,7 +146,9 @@ function updateCountdown(sec){
 }
 
 function refresh(){
-  fetch('/pins?format=json').then(function(r){return r.json();}).then(function(d){
+  var hdrs={};
+  if(authHeader) hdrs['Authorization']=authHeader;
+  fetch('/pins?format=json',{headers:hdrs,credentials:'include'}).then(function(r){return r.json();}).then(function(d){
     // State badge
     var badge=document.getElementById('stateBadge');
     badge.textContent=d.state||'--';
@@ -145,6 +161,19 @@ function refresh(){
     document.getElementById('overrideChk').checked=manualActive;
     updateWarnBox();
     updateCountdown(d.manualOverrideRemainSec||0);
+
+    // Defrost button: enabled only in HEAT mode, not already in defrost, not in manual override
+    var dfBtn=document.getElementById('defrostBtn');
+    var dfSt=document.getElementById('defrostStatus');
+    var canDefrost=(d.state==='HEAT'&&!d.defrost&&!d.defrostTransition&&!manualActive);
+    dfBtn.disabled=!canDefrost;
+    if(d.defrost||d.defrostTransition){
+      dfSt.className='defrost-status active';
+      dfSt.textContent=d.defrostTransition?'Defrost transition (RV pressure equalization)...':'Defrost cycle active';
+    }else{
+      dfSt.className='defrost-status';
+      dfSt.textContent='';
+    }
 
     // Inputs
     var ib=document.getElementById('inputBody'),ih='';

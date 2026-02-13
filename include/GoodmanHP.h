@@ -111,6 +111,7 @@ class GoodmanHP {
     uint32_t getManualOverrideRemainingMs() const;
     void setManualOverride(bool on);
     String setManualOutput(const String& name, bool on);
+    String forceDefrost();
 
     void setStateChangeCallback(StateChangeCallback cb);
     void setLPSFaultCallback(LPSFaultCallback cb);
