@@ -12,6 +12,8 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _yWasActive(false)
     , _cntActivated(false)
     , _cntShortCycleMs(DEFAULT_CNT_SHORT_CYCLE_MS)
+    , _defrostMinRuntimeMs(DEFROST_MIN_RUNTIME_MS)
+    , _defrostExitTempF(DEFROST_EXIT_F)
     , _heatRuntimeMs(0)
     , _heatRuntimeLastTick(0)
     , _heatRuntimeLastLogMs(0)
@@ -689,6 +691,24 @@ uint32_t GoodmanHP::getDefrostTransitionRemainingMs() const {
     return _rvShortCycleMs - elapsed;
 }
 
+void GoodmanHP::setDefrostMinRuntimeMs(uint32_t ms) {
+    _defrostMinRuntimeMs = ms;
+    Log.info("HP", "Defrost min runtime set to %lu ms", ms);
+}
+
+uint32_t GoodmanHP::getDefrostMinRuntimeMs() const {
+    return _defrostMinRuntimeMs;
+}
+
+void GoodmanHP::setDefrostExitTempF(float f) {
+    _defrostExitTempF = f;
+    Log.info("HP", "Defrost exit temp set to %.1fF", f);
+}
+
+float GoodmanHP::getDefrostExitTempF() const {
+    return _defrostExitTempF;
+}
+
 void GoodmanHP::checkHighSuctionTemp() {
     // Only check during active defrost (after transition)
     if (!_softwareDefrost || _defrostTransition) return;
@@ -834,7 +854,7 @@ void GoodmanHP::checkDefrostNeeded() {
         uint32_t elapsed = now - _defrostStartTick;
 
         // Enforce minimum runtime
-        if (elapsed < DEFROST_MIN_RUNTIME_MS) {
+        if (elapsed < _defrostMinRuntimeMs) {
             return;
         }
 
@@ -852,10 +872,10 @@ void GoodmanHP::checkDefrostNeeded() {
             if (condenser != nullptr && condenser->isValid()) {
                 float condTemp = condenser->getValue();
                 Log.info("HP", "Defrost condenser check: %.1fF (target > %.1fF, elapsed %lu sec)",
-                         condTemp, DEFROST_EXIT_F, elapsed / 1000UL);
-                if (condTemp >= DEFROST_EXIT_F) {
+                         condTemp, _defrostExitTempF, elapsed / 1000UL);
+                if (condTemp >= _defrostExitTempF) {
                     Log.info("HP", "Defrost complete: condenser %.1fF >= %.1fF",
-                             condTemp, DEFROST_EXIT_F);
+                             condTemp, _defrostExitTempF);
                     stopSoftwareDefrost();
                     return;
                 }

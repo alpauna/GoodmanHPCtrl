@@ -164,6 +164,8 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["rvFail"] = proj->rvFail;
         doc["rvShortCycleSec"] = proj->rvShortCycleMs / 1000;
         doc["cntShortCycleSec"] = proj->cntShortCycleMs / 1000;
+        doc["defrostMinRuntimeSec"] = proj->defrostMinRuntimeMs / 1000;
+        doc["defrostExitTempF"] = proj->defrostExitTempF;
         doc["apFallbackMinutes"] = proj->apFallbackSeconds / 60;
         doc["maxLogSize"] = proj->maxLogSize;
         doc["maxOldLogCount"] = proj->maxOldLogCount;
@@ -338,6 +340,19 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     if (cntSC != proj->cntShortCycleMs) {
         proj->cntShortCycleMs = cntSC;
         ctx->hpController->setCntShortCycleMs(cntSC);
+    }
+
+    uint32_t dfMinSec = data["defrostMinRuntimeSec"] | (int)(proj->defrostMinRuntimeMs / 1000);
+    uint32_t dfMinMs = dfMinSec * 1000UL;
+    if (dfMinMs != proj->defrostMinRuntimeMs) {
+        proj->defrostMinRuntimeMs = dfMinMs;
+        ctx->hpController->setDefrostMinRuntimeMs(dfMinMs);
+    }
+
+    float dfExitTemp = data["defrostExitTempF"] | proj->defrostExitTempF;
+    if (dfExitTemp != proj->defrostExitTempF) {
+        proj->defrostExitTempF = dfExitTemp;
+        ctx->hpController->setDefrostExitTempF(dfExitTemp);
     }
 
     // Clear RV Fail

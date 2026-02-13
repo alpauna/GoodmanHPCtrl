@@ -261,6 +261,8 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.rvFail = false;
         proj.rvShortCycleMs = 30000;
         proj.cntShortCycleMs = 30000;
+        proj.defrostMinRuntimeMs = 180000;
+        proj.defrostExitTempF = 60.0f;
         Serial.println("Config migration: old lowTemp format detected, will migrate on next save");
     } else {
         proj.lowTempThreshold = heatpump["lowTemp"]["threshold"] | 20.0f;
@@ -268,10 +270,13 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.rvFail = heatpump["highSuctionTemp"]["rvFail"] | false;
         proj.rvShortCycleMs = heatpump["shortCycle"]["rv"] | 30000;
         proj.cntShortCycleMs = heatpump["shortCycle"]["cnt"] | 30000;
+        proj.defrostMinRuntimeMs = heatpump["defrost"]["minRuntimeMs"] | 180000;
+        proj.defrostExitTempF = heatpump["defrost"]["exitTempF"] | 60.0f;
     }
-    Serial.printf("Read heatpump: lowTemp=%.1fF highSuct=%.1fF rvFail=%d rvSC=%lu cntSC=%lu\n",
+    Serial.printf("Read heatpump: lowTemp=%.1fF highSuct=%.1fF rvFail=%d rvSC=%lu cntSC=%lu defrostMin=%lu defrostExit=%.1fF\n",
                   proj.lowTempThreshold, proj.highSuctionTempThreshold, proj.rvFail,
-                  proj.rvShortCycleMs, proj.cntShortCycleMs);
+                  proj.rvShortCycleMs, proj.cntShortCycleMs,
+                  proj.defrostMinRuntimeMs, proj.defrostExitTempF);
 
     // Load temp history capture interval
     proj.tempHistoryIntervalSec = doc["tempHistory"]["intervalSec"] | 120;
@@ -381,6 +386,9 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     JsonObject hpShortCycle = heatpump["shortCycle"].to<JsonObject>();
     hpShortCycle["rv"] = proj.rvShortCycleMs;
     hpShortCycle["cnt"] = proj.cntShortCycleMs;
+    JsonObject hpDefrost = heatpump["defrost"].to<JsonObject>();
+    hpDefrost["minRuntimeMs"] = proj.defrostMinRuntimeMs;
+    hpDefrost["exitTempF"] = proj.defrostExitTempF;
 
     JsonObject tempHistObj = doc["tempHistory"].to<JsonObject>();
     tempHistObj["intervalSec"] = proj.tempHistoryIntervalSec;
@@ -471,6 +479,9 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     JsonObject hpShortCycle = heatpump["shortCycle"].to<JsonObject>();
     hpShortCycle["rv"] = proj.rvShortCycleMs;
     hpShortCycle["cnt"] = proj.cntShortCycleMs;
+    JsonObject hpDefrost = heatpump["defrost"].to<JsonObject>();
+    hpDefrost["minRuntimeMs"] = proj.defrostMinRuntimeMs;
+    hpDefrost["exitTempF"] = proj.defrostExitTempF;
 
     JsonObject tempHistObj = doc["tempHistory"].to<JsonObject>();
     tempHistObj["intervalSec"] = proj.tempHistoryIntervalSec;

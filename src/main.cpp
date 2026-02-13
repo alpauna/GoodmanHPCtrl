@@ -172,6 +172,8 @@ ProjectInfo proj = {
   false,              // rvFail: not latched
   30000,              // rvShortCycleMs: 30s default
   30000,              // cntShortCycleMs: 30s default
+  180000,             // defrostMinRuntimeMs: 3 min default
+  60.0f,              // defrostExitTempF: 60°F default
   600,                // apFallbackSeconds: 10 minutes
   120,                // tempHistoryIntervalSec: 2 minutes default
   "dark"              // theme: dark default
@@ -437,6 +439,8 @@ void setup() {
       hpController.setHighSuctionTempThreshold(proj.highSuctionTempThreshold);
       hpController.setRvShortCycleMs(proj.rvShortCycleMs);
       hpController.setCntShortCycleMs(proj.cntShortCycleMs);
+      hpController.setDefrostMinRuntimeMs(proj.defrostMinRuntimeMs);
+      hpController.setDefrostExitTempF(proj.defrostExitTempF);
       if (proj.rvFail) hpController.setRvFail();  // Restore latched state
       // Apply temp history capture interval from config
       if (proj.tempHistoryIntervalSec >= 30 && proj.tempHistoryIntervalSec <= 300) {

@@ -106,6 +106,12 @@ class GoodmanHP {
     uint32_t getCntShortCycleMs() const;
     uint32_t getDefrostTransitionRemainingMs() const;
 
+    // Configurable defrost parameters
+    void setDefrostMinRuntimeMs(uint32_t ms);
+    uint32_t getDefrostMinRuntimeMs() const;
+    void setDefrostExitTempF(float f);
+    float getDefrostExitTempF() const;
+
     // Manual override for pin control page
     bool isManualOverrideActive() const;
     uint32_t getManualOverrideRemainingMs() const;
@@ -132,6 +138,8 @@ class GoodmanHP {
     bool _cntActivated;
 
     uint32_t _cntShortCycleMs;  // Configurable CNT short cycle delay (default 30s)
+    uint32_t _defrostMinRuntimeMs;  // Configurable defrost min runtime (default 3 min)
+    float _defrostExitTempF;        // Configurable condenser temp cutoff (default 60°F)
 
     // Heat runtime accumulation & automatic defrost
     uint32_t _heatRuntimeMs;
