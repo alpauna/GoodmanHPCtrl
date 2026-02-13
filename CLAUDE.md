@@ -86,13 +86,20 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
     - **Phase 2** (`_defrostCntPending`): RV and W turned on, CNT remains off for short cycle delay. Duration: `_cntShortCycleMs` (default 30s, configurable).
     - **Phase 3**: CNT turned on, defrost fully active. Runs for at least `defrostMinRuntimeMs` (default 3 min, configurable), then exits when CONDENSER_TEMP >= `defrostExitTempF` (default 60°F, configurable) or 15-min safety timeout.
     - Runtime resets on COOL mode or after defrost completes. Runtime persists to SD card every 5 min via `tSaveRuntime` task.
-    - **Y drop during defrost**: All outputs off (including W), transition flags cleared, but `_softwareDefrost` stays set. Defrost restarts from Phase 1 when Y reactivates in HEAT mode.
+    - **Y drop during defrost entry**: All outputs off (including W), transition flags cleared, but `_softwareDefrost` stays set. Defrost restarts from Phase 1 when Y reactivates in HEAT mode.
     - **COOL cancellation**: If thermostat switches to COOL (O active) during a pending defrost, defrost is cancelled entirely, heat runtime is cleared, and normal COOL mode proceeds.
     - CNT activation is blocked by `_softwareDefrost` in `checkYAndActivateCNT()` — during defrost, CNT is managed exclusively by `checkDefrostNeeded()`.
+  - **Defrost exit transition (reverse 3-phase)**: When defrost completes (`stopSoftwareDefrost()`), the system performs a reverse 3-phase sequence to safely switch the reversing valve back to heat position:
+    - **Exit Phase 1** (`_defrostTransition` + `_defrostExiting`): CNT and FAN off, RV and W stay ON from defrost. Duration: `_rvShortCycleMs` (default 30s). Pressure equalization after compressor stops.
+    - **Exit Phase 2** (`_defrostCntPending` + `_defrostExiting`): RV and W turned OFF (RV switches back to heat position), CNT remains off. Duration: `_cntShortCycleMs` (default 30s). Allows RV to physically seat.
+    - **Exit Complete**: CNT and FAN turned ON — normal HEAT mode resumes. `_defrostExiting` cleared.
+    - `_softwareDefrost` is cleared at exit start, so `updateState()` transitions DEFROST → HEAT. Guards on `_defrostExiting` prevent RV/W/FAN from being modified by `updateState()` during exit.
+    - **Y drop during exit**: Cancels exit transition, all outputs off. Normal state machine resumes on Y reactivation.
+    - CNT activation is also blocked by `_defrostExiting` in `checkYAndActivateCNT()`.
   - **DFT emergency defrost**: DFT input triggers the same unified 3-phase defrost cycle from HEAT mode. Uses the same `_softwareDefrost` path as automatic defrost.
   - **LPS fault protection**: When LPS input goes LOW (low refrigerant pressure), immediately shuts down CNT if running and blocks CNT activation. If in HEAT mode (Y active, O not active), turns on W for auxiliary heat. Auto-recovers when LPS goes HIGH (W turned off). Publishes fault events via `LPSFaultCallback`. `lpsFault` field included in `goodman/state` MQTT payload.
   - **Low ambient temperature protection**: When AMBIENT_TEMP drops below configurable threshold (default 20°F), enters `LOW_TEMP` state: shuts down CNT, turns off FAN and RV. Turns on W (auxiliary heat) only if not in COOL mode (O active). W is never turned on in COOL mode. Blocks CNT activation and state updates while active. Auto-recovers when temp rises above threshold. `lowTemp` field included in `goodman/state` MQTT payload.
-  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `isDefrostTransitionActive()`, `isDefrostCntPendingActive()`, `getDefrostTransitionRemainingMs()`, `getDefrostCntPendingRemainingMs()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `setLowTempThreshold()`, `getLowTempThreshold()`, `setDefrostMinRuntimeMs()`, `getDefrostMinRuntimeMs()`, `setDefrostExitTempF()`, `getDefrostExitTempF()`
+  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `isDefrostTransitionActive()`, `isDefrostCntPendingActive()`, `isDefrostExitingActive()`, `getDefrostTransitionRemainingMs()`, `getDefrostCntPendingRemainingMs()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `setLowTempThreshold()`, `getLowTempThreshold()`, `setDefrostMinRuntimeMs()`, `getDefrostMinRuntimeMs()`, `setDefrostExitTempF()`, `getDefrostExitTempF()`
 - **OutPin** (`OutPin.h/cpp`): Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
 - **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, debouncing via delayed verification (circular buffer queue checked by `_tGetInputs`), and callback on change.
 - **TempSensor** (`TempSensor.h/cpp`): Temperature sensor wrapper with encapsulated state and callbacks. Supports OneWire (via `update()`) and external sources like MCP9600 I2C thermocouple (via `updateValue()`):
@@ -120,7 +127,7 @@ I2C: SDA=GPIO8, SCL=GPIO9 — MCP9600 thermocouple amplifier at 0x67 (LIQUID_TEM
 - **MQTT** (`MQTTHandler` wrapping AsyncMqttClient) to configurable broker, default `192.168.0.46:1883`
   - `goodman/log` — log messages (Logger output)
   - `goodman/temps` — all valid temp sensor values as JSON, published on any sensor change. Format: `{"COMPRESSOR_TEMP":72.5,"SUCTION_TEMP":65.2,"LIQUID_TEMP":185.3,...}`
-  - `goodman/state` — state + inputs/outputs as JSON, published on state transitions. Format: `{"state":"HEAT","inputs":{...},"outputs":{...},"heatRuntimeMin":42,"defrost":false,"defrostTransition":false,"defrostCntPending":false,"lpsFault":false,"lowTemp":false}`
+  - `goodman/state` — state + inputs/outputs as JSON, published on state transitions. Format: `{"state":"HEAT","inputs":{...},"outputs":{...},"heatRuntimeMin":42,"defrost":false,"defrostTransition":false,"defrostCntPending":false,"defrostExiting":false,"lpsFault":false,"lowTemp":false}`
   - `goodman/fault` — fault events as JSON, published when faults activate/clear. Format: `{"fault":"LPS","message":"Low refrigerant pressure","active":true}`
 
 ### Configuration
