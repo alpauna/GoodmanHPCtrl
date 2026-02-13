@@ -97,6 +97,7 @@ class GoodmanHP {
     bool isHighSuctionTempActive() const;
     bool isDefrostTransitionActive() const;
     bool isDefrostCntPendingActive() const;
+    bool isDefrostExitingActive() const;
     uint32_t getDefrostCntPendingRemainingMs() const;
     void clearRvFail();
     void setRvFail();
@@ -167,6 +168,7 @@ class GoodmanHP {
     uint32_t _defrostTransitionStart; // millis() when Phase 1 started
     bool _defrostCntPending;          // True during Phase 2 (RV+W on, waiting for CNT SC)
     uint32_t _defrostCntPendingStart; // millis() when Phase 2 started
+    bool _defrostExiting;             // True during defrost exit transition (reverse 3-phase)
     bool _manualOverride;
     uint32_t _manualOverrideStart;
     bool _startupLockout;
