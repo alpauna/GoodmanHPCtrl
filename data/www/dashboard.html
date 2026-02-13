@@ -75,7 +75,7 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <span class='pill ok' id='fLowTemp'>Temp Ok</span>
 <span class='pill ok' id='fCompOT'>Comp Ok</span>
 <span class='pill ok' id='fSuctLT'>Suct LT Ok</span>
-<span class='pill ok' id='fHighSuct'>High Suct: --&deg;F</span>
+<span class='pill ok' id='fHighSuct'>Suct Temp: --&deg;F</span>
 <span class='pill ok' id='fRvFail'>RV Pass</span><button class='btn-clear' id='clearRvFailBtn' style='display:none' onclick='clearRvFail()'>Clear</button>
 </div>
 </div>
@@ -186,7 +186,7 @@ function update(d){
   var cotEl=document.getElementById('fCompOT');if(cotEl){cotEl.textContent=d.compressorOverTemp?'Comp OT':'Comp Ok';setPill('fCompOT',d.compressorOverTemp);}
   var slEl=document.getElementById('fSuctLT');if(slEl){slEl.textContent=d.suctionLowTemp?'Suct LT':'Suct LT Ok';setPill('fSuctLT',d.suctionLowTemp);}
   var hsEl=document.getElementById('fHighSuct');
-  if(hsEl){var suctVal=(d.temps&&d.temps.SUCTION_TEMP!==undefined)?d.temps.SUCTION_TEMP.toFixed(0):'--';hsEl.textContent='High Suct: '+suctVal+'\u00B0F';setPill('fHighSuct',d.highSuctionTemp);}
+  if(hsEl){var suctVal=(d.temps&&d.temps.SUCTION_TEMP!==undefined)?d.temps.SUCTION_TEMP.toFixed(0):'--';hsEl.textContent=(d.highSuctionTemp?'High Suct: ':'Suct Temp: ')+suctVal+'\u00B0F';setPill('fHighSuct',d.highSuctionTemp);}
   var rvEl=document.getElementById('fRvFail');if(rvEl){rvEl.textContent=d.rvFail?'RV Fail':'RV Pass';setPill('fRvFail',d.rvFail);}
   var rvBtn=document.getElementById('clearRvFailBtn');if(rvBtn)rvBtn.style.display=d.rvFail?'inline-block':'none';
   setPill('fRvDFH',d.defrostTransition);
