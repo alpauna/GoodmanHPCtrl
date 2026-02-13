@@ -7,7 +7,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 | Page | Screenshot |
 |------|-----------|
 | Home | ![Home](docs/screenshots/home.png?v=4) |
-| Dashboard | ![Dashboard](docs/screenshots/dashboard.png?v=6) |
+| Dashboard | ![Dashboard](docs/screenshots/dashboard.png?v=7) |
 | Pins | ![Pins](docs/screenshots/pins.png?v=2) |
 | Configuration | ![Configuration](docs/screenshots/config.png?v=4) |
 | OTA Update | ![OTA Update](docs/screenshots/update.png?v=4) |
@@ -23,7 +23,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **Dark/light theme** — Configurable dark/light theme with shared `theme.css` stylesheet. Persisted to SD card config, cached in localStorage for flash-free page loads. Instant preview on config page
 - **Admin password protection** — HTTP Basic Auth on sensitive endpoints (`/config`, `/update`, `/ftp`). No password = open access
 - **Password encryption** — All passwords (WiFi, MQTT, admin) encrypted at rest on SD card
-- **Live dashboard** — Real-time dashboard at `/dashboard` with state banner, protection status pills with dynamic labels (LPS No Fault/Fault, Temp Ok/Low Temp, Comp Ok/OT, Suct LT Ok/LT, RV Pass/Fail with inline clear button, high suction temp), input/output grid, temperatures, and reboot button. Output indicators include inline status pills:
+- **Live dashboard** — Real-time dashboard at `/dashboard` with state banner, protection status pills with dynamic labels (LPS No Fault/Fault, Temp Ok/Low Temp, Comp Ok/OT, Suct LT Ok/LT, Suct Temp/High Suct with live temp reading, RV Pass/Fail with inline clear button), input/output grid, temperatures, and reboot button. Output indicators include inline status pills:
   - ![SC](docs/screenshots/pill-sc.png) **SC** (Short Cycle) — Shown on CNT output. Green when inactive, red when CNT short cycle protection delay is active (CNT was off < 5 min, waiting 30s before reactivation)
   - ![DFH](docs/screenshots/pill-dfh.png) **DFH** (Defrost Hold) — Shown on CNT, W, and RV outputs during the 3-phase defrost entry and exit transitions. On RV and W: red during entry Phase 1 or exit Phase 1 (pressure equalization). On CNT: red during entry Phase 2 or exit Phase 2 (waiting for CNT short cycle before compressor starts)
 - **Pin table with manual override** — Auth-protected `/pins` page showing all GPIO inputs, outputs, and temperatures in a table. "Normal Mode Lockout" checkbox enables manual output control, bypassing the state machine for up to 30 minutes (auto-timeout). CNT enforces short cycle protection even in manual mode. Single auth prompt covers the entire lockout session. "Force Defrost" button triggers a software defrost cycle from HEAT mode (requires no active faults or manual override)
