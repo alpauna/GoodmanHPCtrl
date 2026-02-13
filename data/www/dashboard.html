@@ -76,7 +76,7 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <span class='pill ok' id='fCompOT'>Comp OT</span>
 <span class='pill ok' id='fSuctLT'>Suct LT</span>
 <span class='pill ok' id='fHighSuct'>High Suct: --&deg;F</span>
-<span class='pill ok' id='fRvFail'>RV Fail</span><button class='btn-clear' id='clearRvFailBtn' style='display:none' onclick='clearRvFail()'>Clear</button>
+<span class='pill ok' id='fRvFail'>RV Pass</span><button class='btn-clear' id='clearRvFailBtn' style='display:none' onclick='clearRvFail()'>Clear</button>
 </div>
 </div>
 
@@ -187,7 +187,7 @@ function update(d){
   setPill('fSuctLT',d.suctionLowTemp);
   var hsEl=document.getElementById('fHighSuct');
   if(hsEl){var suctVal=(d.temps&&d.temps.SUCTION_TEMP!==undefined)?d.temps.SUCTION_TEMP.toFixed(0):'--';hsEl.textContent='High Suct: '+suctVal+'\u00B0F';setPill('fHighSuct',d.highSuctionTemp);}
-  setPill('fRvFail',d.rvFail);
+  var rvEl=document.getElementById('fRvFail');if(rvEl){rvEl.textContent=d.rvFail?'RV Fail':'RV Pass';setPill('fRvFail',d.rvFail);}
   var rvBtn=document.getElementById('clearRvFailBtn');if(rvBtn)rvBtn.style.display=d.rvFail?'inline-block':'none';
   setPill('fRvDFH',d.defrostTransition);
   setPill('fWDFH',d.defrostTransition);
