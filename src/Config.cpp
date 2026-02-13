@@ -273,6 +273,12 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
                   proj.lowTempThreshold, proj.highSuctionTempThreshold, proj.rvFail,
                   proj.rvShortCycleMs, proj.cntShortCycleMs);
 
+    // Load temp history capture interval
+    proj.tempHistoryIntervalSec = doc["tempHistory"]["intervalSec"] | 120;
+    if (proj.tempHistoryIntervalSec < 30) proj.tempHistoryIntervalSec = 30;
+    if (proj.tempHistoryIntervalSec > 300) proj.tempHistoryIntervalSec = 300;
+    Serial.printf("Read tempHistory interval: %us\n", proj.tempHistoryIntervalSec);
+
     // Load UI theme
     const char* uiTheme = doc["ui"]["theme"];
     proj.theme = (uiTheme != nullptr) ? String(uiTheme) : "dark";
@@ -376,6 +382,9 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     hpShortCycle["rv"] = proj.rvShortCycleMs;
     hpShortCycle["cnt"] = proj.cntShortCycleMs;
 
+    JsonObject tempHistObj = doc["tempHistory"].to<JsonObject>();
+    tempHistObj["intervalSec"] = proj.tempHistoryIntervalSec;
+
     JsonObject ui = doc["ui"].to<JsonObject>();
     ui["theme"] = proj.theme.length() > 0 ? proj.theme : "dark";
 
@@ -462,6 +471,9 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     JsonObject hpShortCycle = heatpump["shortCycle"].to<JsonObject>();
     hpShortCycle["rv"] = proj.rvShortCycleMs;
     hpShortCycle["cnt"] = proj.cntShortCycleMs;
+
+    JsonObject tempHistObj = doc["tempHistory"].to<JsonObject>();
+    tempHistObj["intervalSec"] = proj.tempHistoryIntervalSec;
 
     JsonObject ui = doc["ui"].to<JsonObject>();
     ui["theme"] = proj.theme.length() > 0 ? proj.theme : "dark";

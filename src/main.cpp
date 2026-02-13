@@ -173,6 +173,7 @@ ProjectInfo proj = {
   30000,              // rvShortCycleMs: 30s default
   30000,              // cntShortCycleMs: 30s default
   600,                // apFallbackSeconds: 10 minutes
+  120,                // tempHistoryIntervalSec: 2 minutes default
   "dark"              // theme: dark default
 };
 
@@ -437,6 +438,10 @@ void setup() {
       hpController.setRvShortCycleMs(proj.rvShortCycleMs);
       hpController.setCntShortCycleMs(proj.cntShortCycleMs);
       if (proj.rvFail) hpController.setRvFail();  // Restore latched state
+      // Apply temp history capture interval from config
+      if (proj.tempHistoryIntervalSec >= 30 && proj.tempHistoryIntervalSec <= 300) {
+          tLogTempsCSV.setInterval(proj.tempHistoryIntervalSec * (unsigned long)TASK_SECOND);
+      }
     }
     // Load TLS certificates for HTTPS server
     config.loadCertificates("/cert.pem", "/key.pem");
@@ -450,6 +455,10 @@ void setup() {
   webHandler.setTimezone(proj.gmtOffsetSec, proj.daylightOffsetSec);
   tempHistory.begin();
   webHandler.setTempHistory(&tempHistory);
+  webHandler.setTempHistoryIntervalCallback([](uint32_t intervalSec) {
+      tLogTempsCSV.setInterval(intervalSec * (unsigned long)TASK_SECOND);
+      Log.info("MAIN", "Temp history interval changed to %us", intervalSec);
+  });
 
   bool sdCardReady = config.isSDCardInitialized();
 

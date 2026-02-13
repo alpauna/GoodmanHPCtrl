@@ -167,6 +167,7 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["apFallbackMinutes"] = proj->apFallbackSeconds / 60;
         doc["maxLogSize"] = proj->maxLogSize;
         doc["maxOldLogCount"] = proj->maxOldLogCount;
+        doc["tempHistoryIntervalSec"] = proj->tempHistoryIntervalSec;
         doc["adminPasswordSet"] = ctx->config->hasAdminPassword();
         doc["theme"] = proj->theme.length() > 0 ? proj->theme : "dark";
         String json;
@@ -355,6 +356,15 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     uint8_t maxOldLogCount = data["maxOldLogCount"] | proj->maxOldLogCount;
     proj->maxLogSize = maxLogSize;
     proj->maxOldLogCount = maxOldLogCount;
+
+    // Temp history interval (live)
+    uint32_t thInterval = data["tempHistoryIntervalSec"] | proj->tempHistoryIntervalSec;
+    if (thInterval < 30) thInterval = 30;
+    if (thInterval > 300) thInterval = 300;
+    if (thInterval != proj->tempHistoryIntervalSec) {
+        proj->tempHistoryIntervalSec = thInterval;
+        if (ctx->tempHistIntervalCb) ctx->tempHistIntervalCb(thInterval);
+    }
 
     // UI theme
     String theme = data["theme"] | proj->theme;

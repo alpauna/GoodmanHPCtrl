@@ -726,6 +726,7 @@ void WebHandler::setupRoutes() {
                 doc["apFallbackMinutes"] = proj->apFallbackSeconds / 60;
                 doc["maxLogSize"] = proj->maxLogSize;
                 doc["maxOldLogCount"] = proj->maxOldLogCount;
+                doc["tempHistoryIntervalSec"] = proj->tempHistoryIntervalSec;
                 doc["adminPasswordSet"] = _config->hasAdminPassword();
                 doc["theme"] = proj->theme.length() > 0 ? proj->theme : "dark";
                 String json;
@@ -863,6 +864,14 @@ void WebHandler::setupRoutes() {
             uint8_t maxOldLogCount = data["maxOldLogCount"] | proj->maxOldLogCount;
             proj->maxLogSize = maxLogSize;
             proj->maxOldLogCount = maxOldLogCount;
+
+            uint32_t thInterval = data["tempHistoryIntervalSec"] | proj->tempHistoryIntervalSec;
+            if (thInterval < 30) thInterval = 30;
+            if (thInterval > 300) thInterval = 300;
+            if (thInterval != proj->tempHistoryIntervalSec) {
+                proj->tempHistoryIntervalSec = thInterval;
+                if (_tempHistIntervalCb) _tempHistIntervalCb(thInterval);
+            }
 
             String theme = data["theme"] | proj->theme;
             if (theme == "dark" || theme == "light") {
@@ -1325,6 +1334,7 @@ bool WebHandler::beginSecure(const uint8_t* cert, size_t certLen, const uint8_t*
     _httpsCtx.wifiTestCountdown = &_wifiTestCountdown;
     _httpsCtx.wifiTestTask = &_tWifiTest;
     _httpsCtx.tempHistory = _tempHistory;
+    _httpsCtx.tempHistIntervalCb = _tempHistIntervalCb;
 
     _httpsServer = httpsStart(cert, certLen, key, keyLen, &_httpsCtx);
     return _httpsServer != nullptr;

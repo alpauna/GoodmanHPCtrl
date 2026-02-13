@@ -27,6 +27,7 @@ struct ProjectInfo {
     uint32_t rvShortCycleMs;             // RV pressure equalization delay in defrost transition (default 30000)
     uint32_t cntShortCycleMs;            // CNT short cycle delay on Y activation (default 30000)
     uint32_t apFallbackSeconds;  // WiFi disconnect time before AP fallback (default 600 = 10 min)
+    uint32_t tempHistoryIntervalSec; // Temp history capture interval in seconds (30-300, default 120)
     String theme;                // UI theme: "light" or "dark" (default "light")
 };
 
