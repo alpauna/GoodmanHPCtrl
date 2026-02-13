@@ -8,7 +8,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 |------|-----------|
 | Home | ![Home](docs/screenshots/home.png?v=4) |
 | Dashboard | ![Dashboard](docs/screenshots/dashboard.png?v=5) |
-| Pins | ![Pins](docs/screenshots/pins.png?v=1) |
+| Pins | ![Pins](docs/screenshots/pins.png?v=2) |
 | Configuration | ![Configuration](docs/screenshots/config.png?v=4) |
 | OTA Update | ![OTA Update](docs/screenshots/update.png?v=4) |
 | Log | ![Log](docs/screenshots/log.png?v=1) |
@@ -24,7 +24,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **Admin password protection** — HTTP Basic Auth on sensitive endpoints (`/config`, `/update`, `/ftp`). No password = open access
 - **Password encryption** — All passwords (WiFi, MQTT, admin) encrypted at rest on SD card
 - **Live dashboard** — Real-time dashboard at `/dashboard` with state banner, protection status pills (startup lockout countdown, short cycle, RV fail, high suction temp), input/output grid, temperatures, and reboot button
-- **Pin table with manual override** — Auth-protected `/pins` page showing all GPIO inputs, outputs, and temperatures in a table. "Normal Mode Lockout" checkbox enables manual output control, bypassing the state machine for up to 30 minutes (auto-timeout). CNT enforces short cycle protection even in manual mode. Single auth prompt covers the entire lockout session
+- **Pin table with manual override** — Auth-protected `/pins` page showing all GPIO inputs, outputs, and temperatures in a table. "Normal Mode Lockout" checkbox enables manual output control, bypassing the state machine for up to 30 minutes (auto-timeout). CNT enforces short cycle protection even in manual mode. Single auth prompt covers the entire lockout session. "Force Defrost" button triggers a software defrost cycle from HEAT mode (requires no active faults or manual override)
 - **Temperature history** — Configurable CSV logging interval (30s-5min, default 2min) per sensor to SD card (`/temps/<sensor>/YYYY-MM-DD.csv`), rolling Canvas line charts on dashboard with 1h/6h/24h/7d timeframe selector, auto-purge after 31 days
 - **Web-based configuration** — HTML pages served from `/www/` on SD card for configuration, OTA updates, and monitoring
 - **FTP server** — SimpleFTPServer with timed enable/disable (10/30/60 min) from config page. Defaults to OFF; auto-disables after timeout
@@ -494,7 +494,7 @@ Burn a hardware encryption key to ESP32-S3 eFuse for password encryption at rest
 | GET | `/` | | Home page (served from SD `/www/index.html`) |
 | GET | `/dashboard` | | Live dashboard with state, I/O, temps, and charts |
 | GET | `/pins` | Yes | Pin table page / JSON (`?format=json`) with manual override control |
-| POST | `/pins` | Yes | Toggle manual override or set output state (JSON body) |
+| POST | `/pins` | Yes | Toggle manual override, set output state, or force defrost (JSON body) |
 | GET | `/state` | | Full controller state as JSON (see below) |
 | GET | `/temps` | | Current temperature readings |
 | GET | `/temps/history` | | Temperature history CSV data (`?sensor=<name>`, optional `&date=YYYY-MM-DD`) |
