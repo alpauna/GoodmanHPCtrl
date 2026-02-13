@@ -74,7 +74,7 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <span class='pill ok' id='fLPS'>LPS No Fault</span>
 <span class='pill ok' id='fLowTemp'>Temp Ok</span>
 <span class='pill ok' id='fCompOT'>Comp Ok</span>
-<span class='pill ok' id='fSuctLT'>Suct LT</span>
+<span class='pill ok' id='fSuctLT'>Suct LT Ok</span>
 <span class='pill ok' id='fHighSuct'>High Suct: --&deg;F</span>
 <span class='pill ok' id='fRvFail'>RV Pass</span><button class='btn-clear' id='clearRvFailBtn' style='display:none' onclick='clearRvFail()'>Clear</button>
 </div>
@@ -184,7 +184,7 @@ function update(d){
   var lpsEl=document.getElementById('fLPS');if(lpsEl){lpsEl.textContent=d.lpsFault?'LPS Fault':'LPS No Fault';setPill('fLPS',d.lpsFault);}
   var ltEl=document.getElementById('fLowTemp');if(ltEl){ltEl.textContent=d.lowTemp?'Low Temp':'Temp Ok';setPill('fLowTemp',d.lowTemp);}
   var cotEl=document.getElementById('fCompOT');if(cotEl){cotEl.textContent=d.compressorOverTemp?'Comp OT':'Comp Ok';setPill('fCompOT',d.compressorOverTemp);}
-  setPill('fSuctLT',d.suctionLowTemp);
+  var slEl=document.getElementById('fSuctLT');if(slEl){slEl.textContent=d.suctionLowTemp?'Suct LT':'Suct LT Ok';setPill('fSuctLT',d.suctionLowTemp);}
   var hsEl=document.getElementById('fHighSuct');
   if(hsEl){var suctVal=(d.temps&&d.temps.SUCTION_TEMP!==undefined)?d.temps.SUCTION_TEMP.toFixed(0):'--';hsEl.textContent='High Suct: '+suctVal+'\u00B0F';setPill('fHighSuct',d.highSuctionTemp);}
   var rvEl=document.getElementById('fRvFail');if(rvEl){rvEl.textContent=d.rvFail?'RV Fail':'RV Pass';setPill('fRvFail',d.rvFail);}
