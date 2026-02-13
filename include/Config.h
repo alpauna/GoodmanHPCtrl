@@ -28,6 +28,7 @@ struct ProjectInfo {
     uint32_t cntShortCycleMs;            // CNT short cycle delay on Y activation (default 30000)
     uint32_t defrostMinRuntimeMs;        // Defrost minimum runtime in ms (default 180000 = 3 min)
     float defrostExitTempF;              // Condenser temp cutoff to end defrost (default 60.0°F)
+    uint32_t heatRuntimeThresholdMs;     // Heat runtime threshold to trigger defrost in ms (default 5400000 = 90 min)
     uint32_t apFallbackSeconds;  // WiFi disconnect time before AP fallback (default 600 = 10 min)
     uint32_t tempHistoryIntervalSec; // Temp history capture interval in seconds (30-300, default 120)
     String theme;                // UI theme: "light" or "dark" (default "light")

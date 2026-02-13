@@ -14,6 +14,7 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _cntShortCycleMs(DEFAULT_CNT_SHORT_CYCLE_MS)
     , _defrostMinRuntimeMs(DEFROST_MIN_RUNTIME_MS)
     , _defrostExitTempF(DEFROST_EXIT_F)
+    , _heatRuntimeThresholdMs(HEAT_RUNTIME_THRESHOLD_MS)
     , _heatRuntimeMs(0)
     , _heatRuntimeLastTick(0)
     , _heatRuntimeLastLogMs(0)
@@ -755,6 +756,15 @@ float GoodmanHP::getDefrostExitTempF() const {
     return _defrostExitTempF;
 }
 
+void GoodmanHP::setHeatRuntimeThresholdMs(uint32_t ms) {
+    _heatRuntimeThresholdMs = ms;
+    Log.info("HP", "Heat runtime threshold set to %lu ms (%lu min)", ms, ms / 60000UL);
+}
+
+uint32_t GoodmanHP::getHeatRuntimeThresholdMs() const {
+    return _heatRuntimeThresholdMs;
+}
+
 void GoodmanHP::checkHighSuctionTemp() {
     // Only check during active defrost (after both transition phases)
     if (!_softwareDefrost || _defrostTransition || _defrostCntPending) return;
@@ -981,9 +991,9 @@ void GoodmanHP::checkDefrostNeeded() {
     }
 
     // Check if heat runtime threshold reached
-    if (_heatRuntimeMs >= HEAT_RUNTIME_THRESHOLD_MS) {
+    if (_heatRuntimeMs >= _heatRuntimeThresholdMs) {
         Log.info("HP", "Heat runtime %lu min >= %lu min threshold, starting defrost",
-                 _heatRuntimeMs / 60000UL, HEAT_RUNTIME_THRESHOLD_MS / 60000UL);
+                 _heatRuntimeMs / 60000UL, _heatRuntimeThresholdMs / 60000UL);
         startSoftwareDefrost();
     }
 }

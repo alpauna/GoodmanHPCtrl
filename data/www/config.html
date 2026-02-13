@@ -87,6 +87,7 @@ button:hover{background:#45a049;}
 <button type='button' class='btn-sm btn-red' id='clearRvFailBtn' style='display:none' onclick='clearRvFail()'>Clear RV Fail</button>
 </fieldset>
 <fieldset><legend>Defrost Controls <span class='tag tag-live'>live</span></legend>
+<label>Heat Runtime Threshold (minutes, 30-90)</label><input type='number' min='30' max='90' step='1' id='heatRuntimeThresholdMin'>
 <label>Minimum Defrost Time (seconds)</label><input type='number' step='1' id='defrostMinRuntimeSec'>
 <label>Condenser Temp Cutoff (&deg;F)</label><input type='number' step='0.1' id='defrostExitTempF'>
 </fieldset>
@@ -107,7 +108,7 @@ button:hover{background:#45a049;}
 <div id='status'></div>
 </div>
 <script>
-var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','theme'];
+var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','theme'];
 var adminPwSet=false;
 fetch('/config?format=json').then(r=>r.json()).then(d=>{
 fields.forEach(f=>{var e=document.getElementById(f);if(e)e.value=d[f]!=null?d[f]:'';});
@@ -134,7 +135,7 @@ alert('RV Fail cleared');
 }
 function save(e){
 e.preventDefault();
-var d={};var numFields=['mqttPort','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec'];
+var d={};var numFields=['mqttPort','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec'];
 fields.forEach(f=>{var e=document.getElementById(f);var v=e?e.value:'';d[f]=numFields.indexOf(f)>=0&&v!==''?Number(v):v;});
 var mbVal=document.getElementById('maxLogSizeMB').value;
 d.maxLogSize=mbVal?parseInt(mbVal)*1024*1024:'';

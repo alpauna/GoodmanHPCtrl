@@ -263,6 +263,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.cntShortCycleMs = 30000;
         proj.defrostMinRuntimeMs = 180000;
         proj.defrostExitTempF = 60.0f;
+        proj.heatRuntimeThresholdMs = 5400000;
         Serial.println("Config migration: old lowTemp format detected, will migrate on next save");
     } else {
         proj.lowTempThreshold = heatpump["lowTemp"]["threshold"] | 20.0f;
@@ -272,6 +273,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.cntShortCycleMs = heatpump["shortCycle"]["cnt"] | 30000;
         proj.defrostMinRuntimeMs = heatpump["defrost"]["minRuntimeMs"] | 180000;
         proj.defrostExitTempF = heatpump["defrost"]["exitTempF"] | 60.0f;
+        proj.heatRuntimeThresholdMs = heatpump["defrost"]["heatRuntimeThresholdMs"] | 5400000;
     }
     Serial.printf("Read heatpump: lowTemp=%.1fF highSuct=%.1fF rvFail=%d rvSC=%lu cntSC=%lu defrostMin=%lu defrostExit=%.1fF\n",
                   proj.lowTempThreshold, proj.highSuctionTempThreshold, proj.rvFail,
@@ -389,6 +391,7 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     JsonObject hpDefrost = heatpump["defrost"].to<JsonObject>();
     hpDefrost["minRuntimeMs"] = proj.defrostMinRuntimeMs;
     hpDefrost["exitTempF"] = proj.defrostExitTempF;
+    hpDefrost["heatRuntimeThresholdMs"] = proj.heatRuntimeThresholdMs;
 
     JsonObject tempHistObj = doc["tempHistory"].to<JsonObject>();
     tempHistObj["intervalSec"] = proj.tempHistoryIntervalSec;
@@ -482,6 +485,7 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     JsonObject hpDefrost = heatpump["defrost"].to<JsonObject>();
     hpDefrost["minRuntimeMs"] = proj.defrostMinRuntimeMs;
     hpDefrost["exitTempF"] = proj.defrostExitTempF;
+    hpDefrost["heatRuntimeThresholdMs"] = proj.heatRuntimeThresholdMs;
 
     JsonObject tempHistObj = doc["tempHistory"].to<JsonObject>();
     tempHistObj["intervalSec"] = proj.tempHistoryIntervalSec;

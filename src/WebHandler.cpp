@@ -747,6 +747,7 @@ void WebHandler::setupRoutes() {
                 doc["cntShortCycleSec"] = proj->cntShortCycleMs / 1000;
                 doc["defrostMinRuntimeSec"] = proj->defrostMinRuntimeMs / 1000;
                 doc["defrostExitTempF"] = proj->defrostExitTempF;
+                doc["heatRuntimeThresholdMin"] = proj->heatRuntimeThresholdMs / 60000;
                 doc["apFallbackMinutes"] = proj->apFallbackSeconds / 60;
                 doc["maxLogSize"] = proj->maxLogSize;
                 doc["maxOldLogCount"] = proj->maxOldLogCount;
@@ -885,6 +886,15 @@ void WebHandler::setupRoutes() {
             if (dfExitTemp != proj->defrostExitTempF) {
                 proj->defrostExitTempF = dfExitTemp;
                 _hpController->setDefrostExitTempF(dfExitTemp);
+            }
+
+            uint32_t hrtMin = data["heatRuntimeThresholdMin"] | (int)(proj->heatRuntimeThresholdMs / 60000);
+            if (hrtMin < 30) hrtMin = 30;
+            if (hrtMin > 90) hrtMin = 90;
+            uint32_t hrtMs = hrtMin * 60000UL;
+            if (hrtMs != proj->heatRuntimeThresholdMs) {
+                proj->heatRuntimeThresholdMs = hrtMs;
+                _hpController->setHeatRuntimeThresholdMs(hrtMs);
             }
 
             // Clear RV Fail

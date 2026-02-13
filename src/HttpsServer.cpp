@@ -166,6 +166,7 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["cntShortCycleSec"] = proj->cntShortCycleMs / 1000;
         doc["defrostMinRuntimeSec"] = proj->defrostMinRuntimeMs / 1000;
         doc["defrostExitTempF"] = proj->defrostExitTempF;
+        doc["heatRuntimeThresholdMin"] = proj->heatRuntimeThresholdMs / 60000;
         doc["apFallbackMinutes"] = proj->apFallbackSeconds / 60;
         doc["maxLogSize"] = proj->maxLogSize;
         doc["maxOldLogCount"] = proj->maxOldLogCount;
@@ -353,6 +354,15 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     if (dfExitTemp != proj->defrostExitTempF) {
         proj->defrostExitTempF = dfExitTemp;
         ctx->hpController->setDefrostExitTempF(dfExitTemp);
+    }
+
+    uint32_t hrtMin = data["heatRuntimeThresholdMin"] | (int)(proj->heatRuntimeThresholdMs / 60000);
+    if (hrtMin < 30) hrtMin = 30;
+    if (hrtMin > 90) hrtMin = 90;
+    uint32_t hrtMs = hrtMin * 60000UL;
+    if (hrtMs != proj->heatRuntimeThresholdMs) {
+        proj->heatRuntimeThresholdMs = hrtMs;
+        ctx->hpController->setHeatRuntimeThresholdMs(hrtMs);
     }
 
     // Clear RV Fail
