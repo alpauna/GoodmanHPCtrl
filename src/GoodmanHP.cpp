@@ -33,6 +33,8 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _rvShortCycleMs(DEFAULT_RV_SHORT_CYCLE_MS)
     , _defrostTransition(false)
     , _defrostTransitionStart(0)
+    , _manualOverride(false)
+    , _manualOverrideStart(0)
     , _startupLockout(true)
     , _startupTick(0)
 {
@@ -148,6 +150,15 @@ void GoodmanHP::update() {
         } else {
             return;
         }
+    }
+
+    // Manual override: skip state machine, only check timeout
+    if (_manualOverride) {
+        if (millis() - _manualOverrideStart >= MANUAL_OVERRIDE_TIMEOUT_MS) {
+            Log.warn("HP", "Manual override timeout (30 min), disabling");
+            setManualOverride(false);
+        }
+        return;
     }
 
     checkCompressorTemp();
@@ -904,6 +915,68 @@ void GoodmanHP::stopSoftwareDefrost() {
     _defrostTransition = false;
     _highSuctionTemp = false;
     resetHeatRuntime();
+}
+
+bool GoodmanHP::isManualOverrideActive() const {
+    return _manualOverride;
+}
+
+uint32_t GoodmanHP::getManualOverrideRemainingMs() const {
+    if (!_manualOverride) return 0;
+    uint32_t elapsed = millis() - _manualOverrideStart;
+    if (elapsed >= MANUAL_OVERRIDE_TIMEOUT_MS) return 0;
+    return MANUAL_OVERRIDE_TIMEOUT_MS - elapsed;
+}
+
+void GoodmanHP::setManualOverride(bool on) {
+    if (on && !_manualOverride) {
+        _manualOverride = true;
+        _manualOverrideStart = millis();
+        Log.warn("HP", "MANUAL OVERRIDE enabled (30 min timeout)");
+        // Stop any active defrost
+        if (_softwareDefrost) {
+            stopSoftwareDefrost();
+        }
+    } else if (!on && _manualOverride) {
+        _manualOverride = false;
+        // Turn all outputs off and let state machine resume
+        for (auto& pair : _outputMap) {
+            if (pair.second != nullptr) {
+                pair.second->turnOff();
+            }
+        }
+        _cntActivated = false;
+        Log.warn("HP", "MANUAL OVERRIDE disabled, all outputs OFF");
+    }
+}
+
+String GoodmanHP::setManualOutput(const String& name, bool on) {
+    if (!_manualOverride) return "Manual override not active";
+
+    OutPin* pin = getOutput(name);
+    if (pin == nullptr) return "Output not found: " + name;
+
+    if (on && name == "CNT") {
+        // Apply same short cycle protection as normal mode
+        if (pin->getOffTick() > 0) {
+            uint32_t offElapsed = millis() - pin->getOffTick();
+            if (offElapsed < 5UL * 60 * 1000 && offElapsed < _cntShortCycleMs) {
+                uint32_t remainSec = (_cntShortCycleMs - offElapsed + 999) / 1000;
+                return "Short cycle protection: " + String(remainSec) + "s remaining";
+            }
+        }
+    }
+
+    if (on) {
+        pin->turnOn();
+    } else {
+        pin->turnOff();
+    }
+
+    if (name == "CNT") _cntActivated = on;
+
+    Log.info("HP", "Manual override: %s %s", name.c_str(), on ? "ON" : "OFF");
+    return "";
 }
 
 // Static callback delegates to instance method

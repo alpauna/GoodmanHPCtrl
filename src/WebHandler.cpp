@@ -433,6 +433,8 @@ void WebHandler::setupRoutes() {
         doc["highSuctionTemp"] = _hpController->isHighSuctionTempActive();
         doc["defrostTransition"] = _hpController->isDefrostTransitionActive();
         doc["defrostTransitionRemainSec"] = _hpController->getDefrostTransitionRemainingMs() / 1000;
+        doc["manualOverride"] = _hpController->isManualOverrideActive();
+        doc["manualOverrideRemainSec"] = _hpController->getManualOverrideRemainingMs() / 1000;
         doc["cpuLoad0"] = getCpuLoadCore0();
         doc["cpuLoad1"] = getCpuLoadCore1();
         doc["freeHeap"] = ESP.getFreeHeap();
@@ -566,6 +568,90 @@ void WebHandler::setupRoutes() {
         json += "]";
         request->send(200, "application/json", json);
     });
+
+    // --- Pin table / manual override ---
+    _server.on("/pins", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!checkAuth(request)) return;
+        if (request->hasParam("format") && request->getParam("format")->value() == "json") {
+            JsonDocument doc;
+            doc["manualOverride"] = _hpController->isManualOverrideActive();
+            doc["manualOverrideRemainSec"] = _hpController->getManualOverrideRemainingMs() / 1000;
+            doc["shortCycleActive"] = _hpController->isShortCycleProtectionActive();
+            doc["state"] = _hpController->getStateString();
+
+            JsonArray inputs = doc["inputs"].to<JsonArray>();
+            for (auto& pair : _hpController->getInputMap()) {
+                if (pair.second != nullptr) {
+                    JsonObject inp = inputs.add<JsonObject>();
+                    inp["pin"] = pair.second->getPin();
+                    inp["name"] = pair.first;
+                    inp["active"] = pair.second->isActive();
+                }
+            }
+
+            JsonArray outputs = doc["outputs"].to<JsonArray>();
+            for (auto& pair : _hpController->getOutputMap()) {
+                if (pair.second != nullptr) {
+                    JsonObject out = outputs.add<JsonObject>();
+                    out["pin"] = pair.second->getPin();
+                    out["name"] = pair.first;
+                    out["on"] = pair.second->isPinOn();
+                }
+            }
+
+            JsonObject temps = doc["temps"].to<JsonObject>();
+            for (const auto& m : _hpController->getTempSensorMap()) {
+                if (m.second != nullptr && m.second->isValid())
+                    temps[m.first] = m.second->getValue();
+            }
+
+            String json;
+            serializeJson(doc, json);
+            request->send(200, "application/json", json);
+            return;
+        }
+        serveFile(request, "/pins.html");
+    });
+
+    auto* pinsPostHandler = new AsyncCallbackJsonWebHandler("/pins", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+        if (!checkAuth(request)) return;
+        JsonObject data = json.as<JsonObject>();
+        JsonDocument resp;
+
+        // Toggle manual override
+        if (data["manualOverride"].is<bool>()) {
+            bool on = data["manualOverride"] | false;
+            _hpController->setManualOverride(on);
+            resp["status"] = "ok";
+            resp["manualOverride"] = _hpController->isManualOverrideActive();
+            resp["message"] = on ? "Manual override enabled (30 min timeout)" : "Manual override disabled, all outputs OFF";
+            String json;
+            serializeJson(resp, json);
+            request->send(200, "application/json", json);
+            return;
+        }
+
+        // Set output state
+        if (data["output"].is<const char*>()) {
+            String name = data["output"] | String("");
+            bool state = data["state"] | false;
+            String err = _hpController->setManualOutput(name, state);
+            if (err.length() > 0) {
+                resp["error"] = err;
+            } else {
+                resp["status"] = "ok";
+                resp["output"] = name;
+                resp["state"] = state;
+            }
+            String json;
+            serializeJson(resp, json);
+            request->send(200, "application/json", json);
+            return;
+        }
+
+        request->send(400, "application/json", "{\"error\":\"Invalid request\"}");
+    });
+    _server.addHandler(pinsPostHandler);
 
     // /config and /update are served via HTTPS when certificates are available.
     // If HTTPS is active, these redirect HTTP->HTTPS. If no certs, they serve directly on HTTP.

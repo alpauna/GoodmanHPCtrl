@@ -833,6 +833,8 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     doc["highSuctionTemp"] = ctx->hpController->isHighSuctionTempActive();
     doc["defrostTransition"] = ctx->hpController->isDefrostTransitionActive();
     doc["defrostTransitionRemainSec"] = ctx->hpController->getDefrostTransitionRemainingMs() / 1000;
+    doc["manualOverride"] = ctx->hpController->isManualOverrideActive();
+    doc["manualOverrideRemainSec"] = ctx->hpController->getManualOverrideRemainingMs() / 1000;
     doc["cpuLoad0"] = getCpuLoadCore0();
     doc["cpuLoad1"] = getCpuLoadCore1();
     doc["freeHeap"] = ESP.getFreeHeap();
@@ -858,6 +860,143 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     serializeJson(doc, json);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
+// --- Pins handler ---
+
+static esp_err_t pinsGetHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+
+    // Check for ?format=json
+    size_t qLen = httpd_req_get_url_query_len(req);
+    bool wantJson = false;
+    if (qLen > 0) {
+        char* qBuf = (char*)malloc(qLen + 1);
+        if (qBuf && httpd_req_get_url_query_str(req, qBuf, qLen + 1) == ESP_OK) {
+            char val[16] = {};
+            if (httpd_query_key_value(qBuf, "format", val, sizeof(val)) == ESP_OK) {
+                wantJson = (strcmp(val, "json") == 0);
+            }
+        }
+        free(qBuf);
+    }
+
+    if (wantJson) {
+        JsonDocument doc;
+        doc["manualOverride"] = ctx->hpController->isManualOverrideActive();
+        doc["manualOverrideRemainSec"] = ctx->hpController->getManualOverrideRemainingMs() / 1000;
+        doc["shortCycleActive"] = ctx->hpController->isShortCycleProtectionActive();
+        doc["state"] = ctx->hpController->getStateString();
+
+        JsonArray inputs = doc["inputs"].to<JsonArray>();
+        for (auto& pair : ctx->hpController->getInputMap()) {
+            if (pair.second != nullptr) {
+                JsonObject inp = inputs.add<JsonObject>();
+                inp["pin"] = pair.second->getPin();
+                inp["name"] = pair.first;
+                inp["active"] = pair.second->isActive();
+            }
+        }
+
+        JsonArray outputs = doc["outputs"].to<JsonArray>();
+        for (auto& pair : ctx->hpController->getOutputMap()) {
+            if (pair.second != nullptr) {
+                JsonObject out = outputs.add<JsonObject>();
+                out["pin"] = pair.second->getPin();
+                out["name"] = pair.first;
+                out["on"] = pair.second->isPinOn();
+            }
+        }
+
+        JsonObject temps = doc["temps"].to<JsonObject>();
+        for (const auto& m : ctx->hpController->getTempSensorMap()) {
+            if (m.second != nullptr && m.second->isValid())
+                temps[m.first] = m.second->getValue();
+        }
+
+        String json;
+        serializeJson(doc, json);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, json.c_str(), json.length());
+        return ESP_OK;
+    }
+
+    return serveFileHttps(req, "/www/pins.html");
+}
+
+static esp_err_t pinsPostHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+
+    int remaining = req->content_len;
+    if (remaining <= 0 || remaining > 1024) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Invalid body\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    char* body = (char*)malloc(remaining + 1);
+    if (!body) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Out of memory\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    int received = 0;
+    while (received < remaining) {
+        int ret = httpd_req_recv(req, body + received, remaining - received);
+        if (ret <= 0) { free(body); return ESP_OK; }
+        received += ret;
+    }
+    body[received] = '\0';
+
+    JsonDocument data;
+    if (deserializeJson(data, body)) {
+        free(body);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Invalid JSON\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+    free(body);
+
+    httpd_resp_set_type(req, "application/json");
+
+    // Toggle manual override
+    if (data["manualOverride"].is<bool>()) {
+        bool on = data["manualOverride"] | false;
+        ctx->hpController->setManualOverride(on);
+        JsonDocument resp;
+        resp["status"] = "ok";
+        resp["manualOverride"] = ctx->hpController->isManualOverrideActive();
+        resp["message"] = on ? "Manual override enabled (30 min timeout)" : "Manual override disabled, all outputs OFF";
+        String json;
+        serializeJson(resp, json);
+        httpd_resp_send(req, json.c_str(), json.length());
+        return ESP_OK;
+    }
+
+    // Set output state
+    if (data["output"].is<const char*>()) {
+        String name = data["output"] | String("");
+        bool state = data["state"] | false;
+        String err = ctx->hpController->setManualOutput(name, state);
+        JsonDocument resp;
+        if (err.length() > 0) {
+            resp["error"] = err;
+        } else {
+            resp["status"] = "ok";
+            resp["output"] = name;
+            resp["state"] = state;
+        }
+        String json;
+        serializeJson(resp, json);
+        httpd_resp_send(req, json.c_str(), json.length());
+        return ESP_OK;
+    }
+
+    httpd_resp_send(req, "{\"error\":\"Invalid request\"}", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
 
@@ -1284,6 +1423,22 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &adminPost);
+
+    httpd_uri_t pinsGet = {
+        .uri = "/pins",
+        .method = HTTP_GET,
+        .handler = pinsGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &pinsGet);
+
+    httpd_uri_t pinsPost = {
+        .uri = "/pins",
+        .method = HTTP_POST,
+        .handler = pinsPostHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &pinsPost);
 
     httpd_uri_t dashGet = {
         .uri = "/dashboard",

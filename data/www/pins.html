@@ -1,0 +1,201 @@
+<html><head><title>Pin Map - Goodman HP</title>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<link rel='stylesheet' href='/theme.css'>
+<script>document.documentElement.dataset.theme=localStorage.getItem('hp-theme')||'dark'</script>
+<style>
+body{font-family:Arial,sans-serif;margin:0;padding:0;background:var(--bg);color:var(--text);}
+nav{background:var(--nav-bg);padding:10px 20px;display:flex;align-items:center;gap:18px;}
+nav a{color:#fff;text-decoration:none;font-size:14px;padding:6px 12px;border-radius:4px;}
+nav a:hover,nav a.active{background:#4CAF50;}
+nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
+.content{max-width:700px;margin:10px auto;padding:0 15px;}
+h2{color:var(--text);margin:18px 0 8px;font-size:15px;border-bottom:2px solid #4CAF50;padding-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;}
+table{width:100%;border-collapse:collapse;margin-bottom:16px;font-size:13px;}
+th{text-align:left;padding:6px 10px;background:var(--surface);color:#4CAF50;border-bottom:2px solid var(--border);font-size:12px;text-transform:uppercase;letter-spacing:0.5px;}
+td{padding:6px 10px;border-bottom:1px solid var(--border-light);color:var(--text);}
+tr:hover td{background:var(--hover-bg);}
+.pin{font-family:monospace;font-weight:bold;color:#4CAF50;}
+.v{font-family:monospace;font-weight:bold;}
+.v-on{color:#66bb6a;}
+.v-off{color:var(--text-muted);}
+.override-box{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:15px;margin:12px 0;}
+.override-box label{font-weight:bold;font-size:14px;cursor:pointer;display:flex;align-items:center;gap:8px;}
+.override-box input[type=checkbox]{width:18px;height:18px;cursor:pointer;}
+.warn-box{background:#fff3cd;color:#856404;border:1px solid #ffc107;border-radius:4px;padding:10px 14px;margin-top:10px;font-size:13px;display:none;}
+.warn-box.active{display:block;}
+.countdown{font-weight:bold;}
+.btn-toggle{padding:4px 14px;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;}
+.btn-on{background:#4CAF50;color:#fff;}
+.btn-on:hover{background:#45a049;}
+.btn-off{background:#e74c3c;color:#fff;}
+.btn-off:hover{background:#c0392b;}
+.btn-toggle:disabled{opacity:0.4;cursor:not-allowed;}
+.sc-badge{background:#ff9800;color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;margin-left:6px;}
+.state-badge{display:inline-block;padding:4px 14px;border-radius:12px;font-weight:bold;font-size:13px;color:#fff;margin-bottom:8px;}
+.footer{text-align:center;color:var(--text-muted);font-size:11px;margin-top:8px;}
+</style></head><body>
+<nav><span class='brand'>Goodman HP</span>
+<a href='/'>Home</a>
+<a href='/dashboard'>Dashboard</a>
+<a href='/pins' class='active'>Pins</a>
+<a href='/config'>Config</a>
+<a href='/update'>Update</a>
+<a href='/log/view'>Log</a>
+<a href='/heap/view'>Heap</a>
+<a href='#' onclick="if(confirm('Reboot device?')){fetch('/reboot',{method:'POST',headers:{'Authorization':'Basic '+btoa(prompt('user:pass','admin:'))}}).then(r=>r.ok?alert('Rebooting...'):alert('Failed'))};return false" style='margin-left:auto;background:#d32f2f;'>Reboot</a>
+</nav>
+<div class='content'>
+
+<div id='stateBadge' class='state-badge' style='background:#9e9e9e;'>--</div>
+
+<div class='override-box'>
+<label><input type='checkbox' id='overrideChk' onchange='toggleOverride(this.checked)'>Normal Mode Lockout (Manual Override)</label>
+<div class='warn-box' id='warnBox'>
+Manual override is ACTIVE. All automatic control is disabled. Outputs can be toggled manually below.<br>
+This will auto shut off after <span class='countdown' id='countdown'>30:00</span>.
+</div>
+</div>
+
+<h2>Inputs</h2>
+<table>
+<thead><tr><th>GPIO</th><th>Name</th><th>State</th></tr></thead>
+<tbody id='inputBody'></tbody>
+</table>
+
+<h2>Outputs</h2>
+<table>
+<thead><tr><th>GPIO</th><th>Name</th><th>State</th><th>Control</th></tr></thead>
+<tbody id='outputBody'></tbody>
+</table>
+
+<h2>Temperatures</h2>
+<table>
+<thead><tr><th>Sensor</th><th>Value</th></tr></thead>
+<tbody id='tempBody'></tbody>
+</table>
+
+<div class='footer' id='footer'>Connecting...</div>
+</div>
+<script>
+var stateColors={'COOL':'#2196F3','HEAT':'#f44336','DEFROST':'#ff9800','OFF':'#9e9e9e','ERROR':'#d32f2f','LOW_TEMP':'#7b1fa2'};
+var tempNames={'COMPRESSOR_TEMP':'Compressor','SUCTION_TEMP':'Suction','AMBIENT_TEMP':'Ambient','CONDENSER_TEMP':'Condenser','LIQUID_TEMP':'Liquid Line'};
+var manualActive=false;
+var authHeader='';
+
+function getAuth(){
+  var creds=prompt('Enter credentials (user:pass)','admin:');
+  if(!creds) return null;
+  return 'Basic '+btoa(creds);
+}
+
+function toggleOverride(on){
+  var hdr;
+  if(on){
+    hdr=getAuth();
+    if(!hdr){document.getElementById('overrideChk').checked=manualActive;return;}
+  }else{
+    hdr=authHeader;
+    if(!hdr){document.getElementById('overrideChk').checked=manualActive;alert('No active session.');return;}
+  }
+  fetch('/pins',{method:'POST',headers:{'Content-Type':'application/json','Authorization':hdr},body:JSON.stringify({manualOverride:on})}).then(function(r){return r.json();}).then(function(d){
+    if(d.error){alert(d.error);document.getElementById('overrideChk').checked=manualActive;return;}
+    manualActive=d.manualOverride;
+    if(manualActive){authHeader=hdr;}else{authHeader='';}
+    document.getElementById('overrideChk').checked=manualActive;
+    updateWarnBox();
+    refresh();
+  }).catch(function(e){alert('Error: '+e);document.getElementById('overrideChk').checked=manualActive;});
+}
+
+function setOutput(name,on){
+  if(!manualActive){alert('Enable manual override first.');return;}
+  var hdr=authHeader||getAuth();
+  if(!hdr) return;
+  fetch('/pins',{method:'POST',headers:{'Content-Type':'application/json','Authorization':hdr},body:JSON.stringify({output:name,state:on})}).then(function(r){return r.json();}).then(function(d){
+    if(d.error){alert(d.error);return;}
+    authHeader=hdr;
+    refresh();
+  }).catch(function(e){alert('Error: '+e);});
+}
+
+function updateWarnBox(){
+  var box=document.getElementById('warnBox');
+  box.className='warn-box'+(manualActive?' active':'');
+}
+
+function updateCountdown(sec){
+  var el=document.getElementById('countdown');
+  if(sec<=0){el.textContent='0:00';return;}
+  var m=Math.floor(sec/60);
+  var s=sec%60;
+  el.textContent=m+':'+(s<10?'0':'')+s;
+}
+
+function refresh(){
+  fetch('/pins?format=json').then(function(r){return r.json();}).then(function(d){
+    // State badge
+    var badge=document.getElementById('stateBadge');
+    badge.textContent=d.state||'--';
+    badge.style.background=stateColors[d.state]||'#9e9e9e';
+
+    // Override state
+    var wasActive=manualActive;
+    manualActive=d.manualOverride;
+    if(wasActive&&!manualActive) authHeader='';
+    document.getElementById('overrideChk').checked=manualActive;
+    updateWarnBox();
+    updateCountdown(d.manualOverrideRemainSec||0);
+
+    // Inputs
+    var ib=document.getElementById('inputBody'),ih='';
+    var ins=d.inputs||[];
+    for(var i=0;i<ins.length;i++){
+      var r=ins[i];
+      var vc=r.active?'v-on':'v-off';
+      var vt=r.active?'ON':'OFF';
+      ih+='<tr><td class="pin">GPIO'+r.pin+'</td><td>'+r.name+'</td><td><span class="v '+vc+'">'+vt+'</span></td></tr>';
+    }
+    ib.innerHTML=ih;
+
+    // Outputs
+    var ob=document.getElementById('outputBody'),oh='';
+    var outs=d.outputs||[];
+    for(var i=0;i<outs.length;i++){
+      var r=outs[i];
+      var vc=r.on?'v-on':'v-off';
+      var vt=r.on?'ON':'OFF';
+      var sc='';
+      if(r.name==='CNT'&&d.shortCycleActive) sc='<span class="sc-badge">SC</span>';
+      var dis=manualActive?'':'disabled';
+      var btnOn='<button class="btn-toggle btn-on" '+dis+' onclick="setOutput(\''+r.name+'\',true)">ON</button>';
+      var btnOff='<button class="btn-toggle btn-off" '+dis+' onclick="setOutput(\''+r.name+'\',false)">OFF</button>';
+      oh+='<tr><td class="pin">GPIO'+r.pin+'</td><td>'+r.name+sc+'</td><td><span class="v '+vc+'">'+vt+'</span></td><td>'+btnOn+' '+btnOff+'</td></tr>';
+    }
+    ob.innerHTML=oh;
+
+    // Temps
+    var tb=document.getElementById('tempBody'),th='';
+    var ts=d.temps||{};
+    var order=['AMBIENT_TEMP','COMPRESSOR_TEMP','SUCTION_TEMP','CONDENSER_TEMP','LIQUID_TEMP'];
+    for(var i=0;i<order.length;i++){
+      var k=order[i];
+      var name=tempNames[k]||k;
+      var val=ts[k];
+      th+='<tr><td>'+name+'</td><td>'+(val!==undefined?val.toFixed(1)+'\u00B0F':'<span class="v-off">--</span>')+'</td></tr>';
+    }
+    tb.innerHTML=th;
+
+    var now=new Date();
+    var tstr=now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0')+':'+now.getSeconds().toString().padStart(2,'0');
+    var ft=document.getElementById('footer');
+    ft.textContent='Last updated: '+tstr;
+  }).catch(function(e){
+    document.getElementById('footer').textContent='Connection error';
+  });
+}
+
+fetch('/theme').then(function(r){return r.json();}).then(function(d){
+  if(d.theme){document.documentElement.dataset.theme=d.theme;localStorage.setItem('hp-theme',d.theme);}
+});
+refresh();setInterval(refresh,2000);
+</script></body></html>

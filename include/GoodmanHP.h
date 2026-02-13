@@ -32,6 +32,9 @@ class GoodmanHP {
     // Startup lockout — keep all outputs OFF until sensors stabilize
     static const uint32_t STARTUP_LOCKOUT_MS = 3UL * 60 * 1000;  // 3 min
 
+    // Manual override timeout
+    static const uint32_t MANUAL_OVERRIDE_TIMEOUT_MS = 30UL * 60 * 1000;  // 30 min
+
     // Compressor over-temperature protection
     static constexpr float COMPRESSOR_OVERTEMP_ON_F = 240.0f;   // Shut down CNT above this
     static constexpr float COMPRESSOR_OVERTEMP_OFF_F = 190.0f;  // Resume CNT below this
@@ -103,6 +106,12 @@ class GoodmanHP {
     uint32_t getCntShortCycleMs() const;
     uint32_t getDefrostTransitionRemainingMs() const;
 
+    // Manual override for pin control page
+    bool isManualOverrideActive() const;
+    uint32_t getManualOverrideRemainingMs() const;
+    void setManualOverride(bool on);
+    String setManualOutput(const String& name, bool on);
+
     void setStateChangeCallback(StateChangeCallback cb);
     void setLPSFaultCallback(LPSFaultCallback cb);
 
@@ -145,6 +154,8 @@ class GoodmanHP {
     uint32_t _rvShortCycleMs;         // RV short cycle duration (configurable)
     bool _defrostTransition;          // True during RV pressure equalization
     uint32_t _defrostTransitionStart; // millis() when transition started
+    bool _manualOverride;
+    uint32_t _manualOverrideStart;
     bool _startupLockout;
     uint32_t _startupTick;
     StateChangeCallback _stateChangeCb;
