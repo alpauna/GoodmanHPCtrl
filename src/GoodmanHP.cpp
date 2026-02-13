@@ -549,12 +549,15 @@ void GoodmanHP::updateState() {
             }
         }
 
-        // Control W: ON only in DEFROST (after Phase 1 transition), OFF otherwise
+        // Control W: ON in DEFROST (after Phase 1), HEAT with RV fail; OFF otherwise
         OutPin* w = getOutput("W");
         if (w != nullptr) {
             if (newState == State::DEFROST && !_defrostTransition) {
                 w->turnOn();
                 Log.info("HP", "W turned ON for DEFROST mode");
+            } else if (newState == State::HEAT && _rvFail) {
+                w->turnOn();
+                Log.info("HP", "W turned ON for HEAT mode (RV fail — auxiliary heat)");
             } else if (!_defrostExiting) {
                 w->turnOff();
                 Log.info("HP", "W turned OFF for %s mode", getStateString());
@@ -681,6 +684,12 @@ bool GoodmanHP::isDefrostTransitionActive() const {
 void GoodmanHP::clearRvFail() {
     _rvFail = false;
     _highSuctionTemp = false;
+    // Turn off W that was enabled for auxiliary heat during RV fail
+    OutPin* w = getOutput("W");
+    if (w != nullptr && w->isOn()) {
+        w->turnOff();
+        Log.info("HP", "W turned OFF (RV fail cleared)");
+    }
     Log.info("HP", "RV fail cleared");
 }
 
@@ -793,6 +802,13 @@ void GoodmanHP::checkHighSuctionTemp() {
         if (fan != nullptr && !fan->isOn()) {
             fan->turnOn();
             Log.info("HP", "FAN turned ON (RV fail — dissipate heat)");
+        }
+
+        // Turn on W for auxiliary heat if in HEAT mode (Y active, O not active)
+        OutPin* w = getOutput("W");
+        if (w != nullptr && isYActive() && !isOActive()) {
+            w->turnOn();
+            Log.info("HP", "W turned ON for RV fail (auxiliary heat)");
         }
 
         // Stop defrost
