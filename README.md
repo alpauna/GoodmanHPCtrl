@@ -100,7 +100,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - Auto-recovers when temperature rises above threshold
   - Threshold is configurable via `lowTemp.threshold` in SD card config
 
-- **Automatic Defrost (3-Phase Sequencing)** — After a configurable heat runtime threshold (default 90 minutes, range 30–90 min) of accumulated CNT runtime in HEAT mode, initiates a 3-phase software defrost cycle for safe pressure equalization and output sequencing:
+- **Automatic Defrost (3-Phase Sequencing)** — After a configurable heat runtime threshold (default 90 minutes, range 30–90 min) of accumulated CNT runtime in HEAT mode while DFT is active (coil temp ≤ 32°F, indicating icing conditions), initiates a 3-phase software defrost cycle for safe pressure equalization and output sequencing:
 
   **Phase 1 — Pressure Equalization** (`defrostTransition`):
   - All outputs OFF (CNT, FAN, W, RV)
