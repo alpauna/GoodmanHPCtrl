@@ -62,7 +62,7 @@ Task-based cooperative scheduling using TaskScheduler with two scheduler instanc
 | `_tReconnect` (MQTTHandler) | 10s | MQTT reconnection (disables itself on success) |
 | `tWaitOnWiFi` | 1s x60 | WiFi connection wait |
 | `tNtpSync` | 2h | NTP time sync (enabled on WiFi connect) |
-| `tSaveRuntime` | 5min | Persist heat runtime accumulation to SD card |
+| `tSaveRuntime` | 5min | Persist heat runtime, defrost state, and rvFail to SD card |
 
 ### Memory Management
 
@@ -86,6 +86,7 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
     - **Phase 2** (`_defrostCntPending`): RV and W turned on, CNT remains off for short cycle delay. Duration: `_cntShortCycleMs` (default 30s, configurable).
     - **Phase 3**: CNT turned on, defrost fully active. Runs for at least `defrostMinRuntimeMs` (default 3 min, configurable), then exits when CONDENSER_TEMP >= `defrostExitTempF` (default 60°F, configurable) or 15-min safety timeout.
     - Runtime resets on COOL mode or after defrost completes. Runtime persists to SD card every 5 min via `tSaveRuntime` task.
+    - **Defrost state persistence**: `_softwareDefrost` is persisted to `heatpump.defrost.active` in config JSON via `tSaveRuntime` (every 5 min, on change detection). On boot, `restoreSoftwareDefrost()` sets `_softwareDefrost = true` without initiating transitions. When Y activates in HEAT mode, `updateState()` sees the flag and transitions to DEFROST, restarting from Phase 1.
     - **Y drop during defrost entry**: All outputs off (including W), transition flags cleared, but `_softwareDefrost` stays set. Defrost restarts from Phase 1 when Y reactivates in HEAT mode.
     - **COOL cancellation**: If thermostat switches to COOL (O active) during a pending defrost, defrost is cancelled entirely, heat runtime is cleared, and normal COOL mode proceeds.
     - CNT activation is blocked by `_softwareDefrost` in `checkYAndActivateCNT()` — during defrost, CNT is managed exclusively by `checkDefrostNeeded()`.
@@ -99,7 +100,7 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
   - **DFT emergency defrost**: DFT input triggers the same unified 3-phase defrost cycle from HEAT mode. Uses the same `_softwareDefrost` path as automatic defrost.
   - **LPS fault protection**: When LPS input goes LOW (low refrigerant pressure), immediately shuts down CNT if running and blocks CNT activation. If in HEAT mode (Y active, O not active), turns on W for auxiliary heat. Auto-recovers when LPS goes HIGH (W turned off). Publishes fault events via `LPSFaultCallback`. `lpsFault` field included in `goodman/state` MQTT payload.
   - **Low ambient temperature protection**: When AMBIENT_TEMP drops below configurable threshold (default 20°F), enters `LOW_TEMP` state: shuts down CNT, turns off FAN and RV. Turns on W (auxiliary heat) only if not in COOL mode (O active). W is never turned on in COOL mode. Blocks CNT activation and state updates while active. Auto-recovers when temp rises above threshold. `lowTemp` field included in `goodman/state` MQTT payload.
-  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `isDefrostTransitionActive()`, `isDefrostCntPendingActive()`, `isDefrostExitingActive()`, `getDefrostTransitionRemainingMs()`, `getDefrostCntPendingRemainingMs()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `setLowTempThreshold()`, `getLowTempThreshold()`, `setDefrostMinRuntimeMs()`, `getDefrostMinRuntimeMs()`, `setDefrostExitTempF()`, `getDefrostExitTempF()`, `setHeatRuntimeThresholdMs()`, `getHeatRuntimeThresholdMs()`
+  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `restoreSoftwareDefrost()`, `isDefrostTransitionActive()`, `isDefrostCntPendingActive()`, `isDefrostExitingActive()`, `getDefrostTransitionRemainingMs()`, `getDefrostCntPendingRemainingMs()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `setLowTempThreshold()`, `getLowTempThreshold()`, `setDefrostMinRuntimeMs()`, `getDefrostMinRuntimeMs()`, `setDefrostExitTempF()`, `getDefrostExitTempF()`, `setHeatRuntimeThresholdMs()`, `getHeatRuntimeThresholdMs()`
 - **OutPin** (`OutPin.h/cpp`): Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
 - **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, debouncing via delayed verification (circular buffer queue checked by `_tGetInputs`), and callback on change.
 - **TempSensor** (`TempSensor.h/cpp`): Temperature sensor wrapper with encapsulated state and callbacks. Supports OneWire (via `update()`) and external sources like MCP9600 I2C thermocouple (via `updateValue()`):
@@ -155,6 +156,7 @@ struct ProjectInfo {
     uint32_t defrostMinRuntimeMs; // Defrost minimum runtime in ms (default 180000 = 3 min)
     float defrostExitTempF;      // Condenser temp cutoff to end defrost in F (default 60.0)
     uint32_t heatRuntimeThresholdMs; // Heat runtime threshold to trigger defrost in ms (default 5400000 = 90 min)
+    bool softwareDefrost;        // Persisted software defrost state (survives reboot)
     uint32_t apFallbackSeconds;  // WiFi disconnect time before AP fallback (default 600 = 10 min)
     uint32_t tempHistoryIntervalSec; // Temp history capture interval in seconds (30-300, default 120)
     String theme;                // UI theme: "light" or "dark" (default "light")
@@ -166,7 +168,7 @@ struct ProjectInfo {
 - `openConfigFile(filename, config, proj)` — Open or create config file
 - `loadTempConfig(filename, config, proj)` — Load JSON config into TempSensorMap and ProjectInfo
 - `saveConfiguration(filename, config, proj)` — Write config to SD card
-- `updateRuntime(filename, heatRuntimeMs)` — Update only the runtime field in config JSON
+- `updateRuntime(filename, heatRuntimeMs, softwareDefrost)` — Update runtime and defrost active fields in config JSON
 - `clearConfig(config)` — Free memory and clear TempSensorMap
 
 **Config Getters/Setters:**
@@ -207,7 +209,7 @@ JSON config stored on SD card at `/config.txt` (Arduino SD library, SPI interfac
     "lowTemp": { "threshold": 20.0 },
     "highSuctionTemp": { "threshold": 140.0, "rvFail": false },
     "shortCycle": { "rv": 30000, "cnt": 30000 },
-    "defrost": { "minRuntimeMs": 180000, "exitTempF": 60.0, "heatRuntimeThresholdMs": 5400000 }
+    "defrost": { "minRuntimeMs": 180000, "exitTempF": 60.0, "heatRuntimeThresholdMs": 5400000, "active": false }
   },
   "tempHistory": { "intervalSec": 120 },
   "ui": { "theme": "dark" },
