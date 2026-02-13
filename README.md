@@ -6,7 +6,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 
 | Page | Screenshot |
 |------|-----------|
-| Home | ![Home](docs/screenshots/home.png?v=4) |
+| Home | ![Home](docs/screenshots/home.png?v=5) |
 | Dashboard | ![Dashboard](docs/screenshots/dashboard.png?v=7) |
 | Pins | ![Pins](docs/screenshots/pins.png?v=2) |
 | Configuration | ![Configuration](docs/screenshots/config.png?v=4) |
@@ -537,7 +537,7 @@ Burn a hardware encryption key to ESP32-S3 eFuse for password encryption at rest
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/` | | Home page (served from SD `/www/index.html`) |
+| GET | `/` | | Home page with clickable cards linking to each section (served from SD `/www/index.html`) |
 | GET | `/dashboard` | | Live dashboard with state, I/O, temps, and charts |
 | GET | `/pins` | Yes | Pin table page / JSON (`?format=json`) with manual override control |
 | POST | `/pins` | Yes | Toggle manual override, set output state, or force defrost (JSON body) |
