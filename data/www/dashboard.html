@@ -34,6 +34,7 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 .sc-pill{padding:2px 6px;font-size:10px;}
 .sep{color:#ccc;font-size:14px;}
 .footer.error{color:#d32f2f;}
+.btn-clear{background:#e74c3c;color:#fff;border:none;border-radius:12px;padding:4px 10px;font-size:11px;font-weight:bold;cursor:pointer;}.btn-clear:hover{background:#c0392b;}
 .wifi-bars{display:flex;align-items:flex-end;gap:2px;height:16px;}
 .wifi-bars span{width:4px;background:#ccc;border-radius:1px;transition:background 0.3s;}
 .wifi-bars span.active{background:#4CAF50;}
@@ -75,7 +76,7 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <span class='pill ok' id='fCompOT'>Comp OT</span>
 <span class='pill ok' id='fSuctLT'>Suct LT</span>
 <span class='pill ok' id='fHighSuct'>High Suct: --&deg;F</span>
-<span class='pill ok' id='fRvFail'>RV Fail</span>
+<span class='pill ok' id='fRvFail'>RV Fail</span><button class='btn-clear' id='clearRvFailBtn' style='display:none' onclick='clearRvFail()'>Clear</button>
 </div>
 </div>
 
@@ -155,6 +156,13 @@ function setText(id,txt){
   var el=document.getElementById(id);
   if(el) el.textContent=txt;
 }
+function clearRvFail(){
+  if(!confirm('Clear RV Fail latch?'))return;
+  fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clearRvFail:true})}).then(function(r){return r.json();}).then(function(){
+    var btn=document.getElementById('clearRvFailBtn');if(btn)btn.style.display='none';
+    setPill('fRvFail',false);
+  });
+}
 
 function update(d){
   // State banner
@@ -180,6 +188,7 @@ function update(d){
   var hsEl=document.getElementById('fHighSuct');
   if(hsEl){var suctVal=(d.temps&&d.temps.SUCTION_TEMP!==undefined)?d.temps.SUCTION_TEMP.toFixed(0):'--';hsEl.textContent='High Suct: '+suctVal+'\u00B0F';setPill('fHighSuct',d.highSuctionTemp);}
   setPill('fRvFail',d.rvFail);
+  var rvBtn=document.getElementById('clearRvFailBtn');if(rvBtn)rvBtn.style.display=d.rvFail?'inline-block':'none';
   setPill('fRvDFH',d.defrostTransition);
   setPill('fWDFH',d.defrostTransition);
   setPill('fCntDFH',d.defrostCntPending);
