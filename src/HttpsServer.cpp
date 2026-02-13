@@ -858,6 +858,8 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     doc["highSuctionTemp"] = ctx->hpController->isHighSuctionTempActive();
     doc["defrostTransition"] = ctx->hpController->isDefrostTransitionActive();
     doc["defrostTransitionRemainSec"] = ctx->hpController->getDefrostTransitionRemainingMs() / 1000;
+    doc["defrostCntPending"] = ctx->hpController->isDefrostCntPendingActive();
+    doc["defrostCntPendingRemainSec"] = ctx->hpController->getDefrostCntPendingRemainingMs() / 1000;
     doc["manualOverride"] = ctx->hpController->isManualOverrideActive();
     doc["manualOverrideRemainSec"] = ctx->hpController->getManualOverrideRemainingMs() / 1000;
     doc["cpuLoad0"] = getCpuLoadCore0();
@@ -916,6 +918,7 @@ static esp_err_t pinsGetHandler(httpd_req_t* req) {
         doc["state"] = ctx->hpController->getStateString();
         doc["defrost"] = ctx->hpController->isSoftwareDefrostActive();
         doc["defrostTransition"] = ctx->hpController->isDefrostTransitionActive();
+        doc["defrostCntPending"] = ctx->hpController->isDefrostCntPendingActive();
 
         JsonArray inputs = doc["inputs"].to<JsonArray>();
         for (auto& pair : ctx->hpController->getInputMap()) {

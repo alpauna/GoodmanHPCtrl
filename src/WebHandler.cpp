@@ -433,6 +433,8 @@ void WebHandler::setupRoutes() {
         doc["highSuctionTemp"] = _hpController->isHighSuctionTempActive();
         doc["defrostTransition"] = _hpController->isDefrostTransitionActive();
         doc["defrostTransitionRemainSec"] = _hpController->getDefrostTransitionRemainingMs() / 1000;
+        doc["defrostCntPending"] = _hpController->isDefrostCntPendingActive();
+        doc["defrostCntPendingRemainSec"] = _hpController->getDefrostCntPendingRemainingMs() / 1000;
         doc["manualOverride"] = _hpController->isManualOverrideActive();
         doc["manualOverrideRemainSec"] = _hpController->getManualOverrideRemainingMs() / 1000;
         doc["cpuLoad0"] = getCpuLoadCore0();
@@ -580,6 +582,7 @@ void WebHandler::setupRoutes() {
             doc["state"] = _hpController->getStateString();
             doc["defrost"] = _hpController->isSoftwareDefrostActive();
             doc["defrostTransition"] = _hpController->isDefrostTransitionActive();
+            doc["defrostCntPending"] = _hpController->isDefrostCntPendingActive();
 
             JsonArray inputs = doc["inputs"].to<JsonArray>();
             for (auto& pair : _hpController->getInputMap()) {

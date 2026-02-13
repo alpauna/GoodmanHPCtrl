@@ -96,6 +96,8 @@ class GoodmanHP {
     bool isRvFailActive() const;
     bool isHighSuctionTempActive() const;
     bool isDefrostTransitionActive() const;
+    bool isDefrostCntPendingActive() const;
+    uint32_t getDefrostCntPendingRemainingMs() const;
     void clearRvFail();
     void setRvFail();
     void setHighSuctionTempThreshold(float f);
@@ -161,8 +163,10 @@ class GoodmanHP {
     bool _highSuctionTemp;            // Current high suction temp condition
     float _highSuctionTempThreshold;  // Configurable threshold (default 140°F)
     uint32_t _rvShortCycleMs;         // RV short cycle duration (configurable)
-    bool _defrostTransition;          // True during RV pressure equalization
-    uint32_t _defrostTransitionStart; // millis() when transition started
+    bool _defrostTransition;          // True during Phase 1 (RV pressure equalization)
+    uint32_t _defrostTransitionStart; // millis() when Phase 1 started
+    bool _defrostCntPending;          // True during Phase 2 (RV+W on, waiting for CNT SC)
+    uint32_t _defrostCntPendingStart; // millis() when Phase 2 started
     bool _manualOverride;
     uint32_t _manualOverrideStart;
     bool _startupLockout;
