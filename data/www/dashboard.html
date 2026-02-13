@@ -73,6 +73,8 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <span class='pill ok' id='fLowTemp'>Low Temp</span>
 <span class='pill ok' id='fCompOT'>Comp OT</span>
 <span class='pill ok' id='fSuctLT'>Suct LT</span>
+<span class='pill ok' id='fHighSuct'>High Suct: --&deg;F</span>
+<span class='pill ok' id='fRvFail'>RV Fail</span>
 </div>
 </div>
 
@@ -92,7 +94,7 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <div class='indicator'><span class='dot off' id='dFAN'></span><span class='label'>FAN</span><span class='val' id='vFAN'>--</span></div>
 <div class='indicator'><span class='dot off' id='dCNT'></span><span class='label'>CNT</span><div class='sc-group'><span class='pill ok sc-pill' id='fShortCycle'>SC</span><span class='sep'>|</span><span class='val' id='vCNT'>--</span></div></div>
 <div class='indicator'><span class='dot off' id='dW'></span><span class='label'>W</span><span class='val' id='vW'>--</span></div>
-<div class='indicator'><span class='dot off' id='dRV'></span><span class='label'>RV</span><span class='val' id='vRV'>--</span></div>
+<div class='indicator'><span class='dot off' id='dRV'></span><span class='label'>RV</span><div class='sc-group'><span class='pill ok sc-pill' id='fRvSC'>SC</span><span class='sep'>|</span><span class='val' id='vRV'>--</span></div></div>
 </div>
 </div>
 
@@ -174,6 +176,10 @@ function update(d){
   setPill('fLowTemp',d.lowTemp);
   setPill('fCompOT',d.compressorOverTemp);
   setPill('fSuctLT',d.suctionLowTemp);
+  var hsEl=document.getElementById('fHighSuct');
+  if(hsEl){var suctVal=(d.temps&&d.temps.SUCTION_TEMP!==undefined)?d.temps.SUCTION_TEMP.toFixed(0):'--';hsEl.textContent='High Suct: '+suctVal+'\u00B0F';setPill('fHighSuct',d.highSuctionTemp);}
+  setPill('fRvFail',d.rvFail);
+  setPill('fRvSC',d.defrostTransition);
 
   // Inputs
   var ins=d.inputs||{};

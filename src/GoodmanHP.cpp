@@ -11,6 +11,7 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _yActiveStartTick(0)
     , _yWasActive(false)
     , _cntActivated(false)
+    , _cntShortCycleMs(DEFAULT_CNT_SHORT_CYCLE_MS)
     , _heatRuntimeMs(0)
     , _heatRuntimeLastTick(0)
     , _heatRuntimeLastLogMs(0)
@@ -26,6 +27,12 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _suctionLowTemp(false)
     , _suctionLowTempStartTick(0)
     , _suctionLowTempLastCheckTick(0)
+    , _rvFail(false)
+    , _highSuctionTemp(false)
+    , _highSuctionTempThreshold(DEFAULT_HIGH_SUCTION_TEMP_F)
+    , _rvShortCycleMs(DEFAULT_RV_SHORT_CYCLE_MS)
+    , _defrostTransition(false)
+    , _defrostTransitionStart(0)
     , _startupLockout(true)
     , _startupTick(0)
 {
@@ -145,6 +152,7 @@ void GoodmanHP::update() {
 
     checkCompressorTemp();
     checkSuctionTemp();
+    checkHighSuctionTemp();
     checkLPSFault();
     checkAmbientTemp();
     checkYAndActivateCNT();
@@ -426,13 +434,13 @@ void GoodmanHP::checkYAndActivateCNT() {
             Log.info("HP", "Y dropped during defrost, system shutdown (defrost pending)");
         }
     } else if (yActive && _yWasActive && !_cntActivated) {
-        if (_lpsFault || _lowTemp || _compressorOverTemp || _suctionLowTemp) return;
-        // Check if CNT was off for less than 5 minutes - if so, enforce 30s delay
+        if (_lpsFault || _lowTemp || _compressorOverTemp || _suctionLowTemp || _rvFail) return;
+        // Check if CNT was off for less than 5 minutes - if so, enforce short cycle delay
         uint32_t offElapsed = millis() - cnt->getOffTick();
-        if (cnt->getOffTick() > 0 && offElapsed < 5 * 60 * 1000UL) {
-            // Y still active, CNT off < 5 min - check if 30 seconds have passed
+        if (cnt->getOffTick() > 0 && offElapsed < 5UL * 60 * 1000) {
+            // Y still active, CNT off < 5 min - check if short cycle delay has passed
             uint32_t elapsed = millis() - _yActiveStartTick;
-            if (elapsed >= Y_DELAY_MS) {
+            if (elapsed >= _cntShortCycleMs) {
                 cnt->turnOn();
                 _cntActivated = true;
                 Log.info("HP", "Y active for 30s, CNT activated (short cycle protection)");
@@ -613,6 +621,103 @@ bool GoodmanHP::isSuctionLowTempActive() const {
     return _suctionLowTemp;
 }
 
+bool GoodmanHP::isRvFailActive() const {
+    return _rvFail;
+}
+
+bool GoodmanHP::isHighSuctionTempActive() const {
+    return _highSuctionTemp;
+}
+
+bool GoodmanHP::isDefrostTransitionActive() const {
+    return _defrostTransition;
+}
+
+void GoodmanHP::clearRvFail() {
+    _rvFail = false;
+    _highSuctionTemp = false;
+    Log.info("HP", "RV fail cleared");
+}
+
+void GoodmanHP::setRvFail() {
+    _rvFail = true;
+    Log.warn("HP", "RV fail state restored from config");
+}
+
+void GoodmanHP::setHighSuctionTempThreshold(float f) {
+    _highSuctionTempThreshold = f;
+    Log.info("HP", "High suction temp threshold set to %.1fF", f);
+}
+
+float GoodmanHP::getHighSuctionTempThreshold() const {
+    return _highSuctionTempThreshold;
+}
+
+void GoodmanHP::setRvShortCycleMs(uint32_t ms) {
+    _rvShortCycleMs = ms;
+    Log.info("HP", "RV short cycle set to %lu ms", ms);
+}
+
+uint32_t GoodmanHP::getRvShortCycleMs() const {
+    return _rvShortCycleMs;
+}
+
+void GoodmanHP::setCntShortCycleMs(uint32_t ms) {
+    _cntShortCycleMs = ms;
+    Log.info("HP", "CNT short cycle set to %lu ms", ms);
+}
+
+uint32_t GoodmanHP::getCntShortCycleMs() const {
+    return _cntShortCycleMs;
+}
+
+uint32_t GoodmanHP::getDefrostTransitionRemainingMs() const {
+    if (!_defrostTransition) return 0;
+    uint32_t elapsed = millis() - _defrostTransitionStart;
+    if (elapsed >= _rvShortCycleMs) return 0;
+    return _rvShortCycleMs - elapsed;
+}
+
+void GoodmanHP::checkHighSuctionTemp() {
+    // Only check during active defrost (after transition)
+    if (!_softwareDefrost || _defrostTransition) return;
+
+    TempSensor* suction = getTempSensor("SUCTION_TEMP");
+    if (suction == nullptr || !suction->isValid()) return;
+
+    float temp = suction->getValue();
+
+    if (temp >= _highSuctionTempThreshold && !_highSuctionTemp) {
+        _highSuctionTemp = true;
+        _rvFail = true;
+        Log.error("HP", "HIGH SUCTION TEMP: %.1fF >= %.1fF during defrost — RV FAIL detected",
+                  temp, _highSuctionTempThreshold);
+        Log.error("HP", "RV fail latched — CNT blocked until cleared via config page");
+
+        // Stop CNT immediately, keep FAN on
+        OutPin* cnt = getOutput("CNT");
+        if (cnt != nullptr && cnt->isOn()) {
+            cnt->turnOff();
+            _cntActivated = false;
+        }
+
+        // Keep FAN on to dissipate heat
+        OutPin* fan = getOutput("FAN");
+        if (fan != nullptr && !fan->isOn()) {
+            fan->turnOn();
+            Log.info("HP", "FAN turned ON (RV fail — dissipate heat)");
+        }
+
+        // Stop defrost
+        OutPin* rv = getOutput("RV");
+        if (rv != nullptr) rv->turnOff();
+        _softwareDefrost = false;
+        resetHeatRuntime();
+
+        if (_stateChangeCb) _stateChangeCb(_state, _state);
+    }
+}
+
 bool GoodmanHP::isStartupLockoutActive() const {
     return _startupLockout;
 }
@@ -694,6 +799,25 @@ void GoodmanHP::accumulateHeatRuntime() {
 void GoodmanHP::checkDefrostNeeded() {
     uint32_t now = millis();
 
+    // Handle defrost transition (pressure equalization before engaging RV+CNT)
+    if (_defrostTransition) {
+        if (now - _defrostTransitionStart >= _rvShortCycleMs) {
+            _defrostTransition = false;
+            Log.info("HP", "Defrost transition complete, engaging RV and CNT");
+
+            OutPin* rv = getOutput("RV");
+            OutPin* cnt = getOutput("CNT");
+            if (rv != nullptr) rv->turnOn();
+            if (cnt != nullptr) {
+                cnt->turnOn();
+                _cntActivated = true;
+            }
+            _defrostStartTick = now;
+            _defrostLastCondCheckTick = now;
+        }
+        return;  // Don't check exit conditions during transition
+    }
+
     // If software defrost is active, check exit conditions
     if (_softwareDefrost) {
         uint32_t elapsed = now - _defrostStartTick;
@@ -742,28 +866,24 @@ void GoodmanHP::startSoftwareDefrost() {
 
     OutPin* cnt = getOutput("CNT");
     OutPin* rv = getOutput("RV");
+    OutPin* fan = getOutput("FAN");
 
     if (cnt == nullptr || rv == nullptr) {
         Log.error("HP", "Cannot start software defrost: CNT or RV output not found");
         return;
     }
 
-    Log.info("HP", "Starting software defrost cycle");
+    Log.info("HP", "Starting defrost transition (%lu s RV short cycle)", _rvShortCycleMs / 1000UL);
 
-    // Turn off CNT first (will track off-tick for short-cycle protection)
+    // Turn off CNT and FAN during pressure equalization
     cnt->turnOff();
     _cntActivated = false;
+    if (fan != nullptr) fan->turnOff();
 
-    // Turn on RV (reversing valve)
-    rv->turnOn();
-
-    // Turn on CNT (will honor existing activation delay)
-    cnt->turnOn();
-    _cntActivated = true;
-
+    // Enter transition phase — do NOT turn on RV or CNT yet
+    _defrostTransition = true;
+    _defrostTransitionStart = millis();
     _softwareDefrost = true;
-    _defrostStartTick = millis();
-    _defrostLastCondCheckTick = _defrostStartTick;
 }
 
 void GoodmanHP::stopSoftwareDefrost() {
@@ -781,6 +901,8 @@ void GoodmanHP::stopSoftwareDefrost() {
     }
 
     _softwareDefrost = false;
+    _defrostTransition = false;
+    _highSuctionTemp = false;
     resetHeatRuntime();
 }
 

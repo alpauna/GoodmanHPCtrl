@@ -20,7 +20,12 @@ struct ProjectInfo {
     uint32_t heatRuntimeAccumulatedMs;  // Accumulated HEAT mode CNT runtime in ms
     int32_t gmtOffsetSec;        // GMT offset in seconds (default -21600 = UTC-6)
     int32_t daylightOffsetSec;   // DST offset in seconds (default 3600 = 1hr)
-    float lowTempThreshold;      // Ambient temp threshold in F below which compressor is blocked (default 20.0)
+    // Heatpump protection settings (persisted in "heatpump" JSON section)
+    float lowTempThreshold;              // Ambient temp below which compressor blocked (default 20°F)
+    float highSuctionTempThreshold;      // Suction temp above which RV fail detected during defrost (default 140°F)
+    bool rvFail;                         // Latched RV fail flag (persisted)
+    uint32_t rvShortCycleMs;             // RV pressure equalization delay in defrost transition (default 30000)
+    uint32_t cntShortCycleMs;            // CNT short cycle delay on Y activation (default 30000)
     uint32_t apFallbackSeconds;  // WiFi disconnect time before AP fallback (default 600 = 10 min)
     String theme;                // UI theme: "light" or "dark" (default "light")
 };

@@ -24,6 +24,11 @@ class GoodmanHP {
     static const uint32_t DEFROST_COND_CHECK_MS = 60UL * 1000;            // 1 min condenser recheck
     static constexpr float DEFAULT_LOW_TEMP_F = 20.0f;
 
+    // High suction temp / RV fail detection during defrost
+    static constexpr float DEFAULT_HIGH_SUCTION_TEMP_F = 140.0f;
+    static const uint32_t DEFAULT_RV_SHORT_CYCLE_MS = 30UL * 1000;   // 30s pressure equalization
+    static const uint32_t DEFAULT_CNT_SHORT_CYCLE_MS = 30UL * 1000;  // 30s (configurable Y_DELAY_MS)
+
     // Startup lockout — keep all outputs OFF until sensors stabilize
     static const uint32_t STARTUP_LOCKOUT_MS = 3UL * 60 * 1000;  // 3 min
 
@@ -84,6 +89,20 @@ class GoodmanHP {
     uint32_t getStartupLockoutRemainingMs() const;
     bool isShortCycleProtectionActive() const;
 
+    // RV fail / high suction temp detection
+    bool isRvFailActive() const;
+    bool isHighSuctionTempActive() const;
+    bool isDefrostTransitionActive() const;
+    void clearRvFail();
+    void setRvFail();
+    void setHighSuctionTempThreshold(float f);
+    float getHighSuctionTempThreshold() const;
+    void setRvShortCycleMs(uint32_t ms);
+    uint32_t getRvShortCycleMs() const;
+    void setCntShortCycleMs(uint32_t ms);
+    uint32_t getCntShortCycleMs() const;
+    uint32_t getDefrostTransitionRemainingMs() const;
+
     void setStateChangeCallback(StateChangeCallback cb);
     void setLPSFaultCallback(LPSFaultCallback cb);
 
@@ -102,7 +121,7 @@ class GoodmanHP {
     bool _yWasActive;
     bool _cntActivated;
 
-    static const uint32_t Y_DELAY_MS = 30000;  // 30 seconds
+    uint32_t _cntShortCycleMs;  // Configurable CNT short cycle delay (default 30s)
 
     // Heat runtime accumulation & automatic defrost
     uint32_t _heatRuntimeMs;
@@ -120,6 +139,12 @@ class GoodmanHP {
     bool _suctionLowTemp;
     uint32_t _suctionLowTempStartTick;
     uint32_t _suctionLowTempLastCheckTick;
+    bool _rvFail;                     // Latched RV fail flag
+    bool _highSuctionTemp;            // Current high suction temp condition
+    float _highSuctionTempThreshold;  // Configurable threshold (default 140°F)
+    uint32_t _rvShortCycleMs;         // RV short cycle duration (configurable)
+    bool _defrostTransition;          // True during RV pressure equalization
+    uint32_t _defrostTransitionStart; // millis() when transition started
     bool _startupLockout;
     uint32_t _startupTick;
     StateChangeCallback _stateChangeCb;
@@ -129,6 +154,7 @@ class GoodmanHP {
     void checkAmbientTemp();
     void checkCompressorTemp();
     void checkSuctionTemp();
+    void checkHighSuctionTemp();
     void checkYAndActivateCNT();
     void updateState();
     void accumulateHeatRuntime();

@@ -252,10 +252,26 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     proj.daylightOffsetSec = timezone["daylightOffset"] | 3600;
     Serial.printf("Read timezone: gmtOffset=%d daylightOffset=%d\n", proj.gmtOffsetSec, proj.daylightOffsetSec);
 
-    // Load low temp threshold
-    JsonObject lowTemp = doc["lowTemp"];
-    proj.lowTempThreshold = lowTemp["threshold"] | 20.0f;
-    Serial.printf("Read lowTemp threshold: %.1fF\n", proj.lowTempThreshold);
+    // Load heatpump protection settings (with migration from old "lowTemp" root key)
+    JsonObject heatpump = doc["heatpump"];
+    if (heatpump.isNull() && doc["lowTemp"].is<JsonObject>()) {
+        // Old format: migrate lowTemp.threshold into heatpump section
+        proj.lowTempThreshold = doc["lowTemp"]["threshold"] | 20.0f;
+        proj.highSuctionTempThreshold = 140.0f;
+        proj.rvFail = false;
+        proj.rvShortCycleMs = 30000;
+        proj.cntShortCycleMs = 30000;
+        Serial.println("Config migration: old lowTemp format detected, will migrate on next save");
+    } else {
+        proj.lowTempThreshold = heatpump["lowTemp"]["threshold"] | 20.0f;
+        proj.highSuctionTempThreshold = heatpump["highSuctionTemp"]["threshold"] | 140.0f;
+        proj.rvFail = heatpump["highSuctionTemp"]["rvFail"] | false;
+        proj.rvShortCycleMs = heatpump["shortCycle"]["rv"] | 30000;
+        proj.cntShortCycleMs = heatpump["shortCycle"]["cnt"] | 30000;
+    }
+    Serial.printf("Read heatpump: lowTemp=%.1fF highSuct=%.1fF rvFail=%d rvSC=%lu cntSC=%lu\n",
+                  proj.lowTempThreshold, proj.highSuctionTempThreshold, proj.rvFail,
+                  proj.rvShortCycleMs, proj.cntShortCycleMs);
 
     // Load UI theme
     const char* uiTheme = doc["ui"]["theme"];
@@ -350,8 +366,15 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     timezone["gmtOffset"] = proj.gmtOffsetSec;
     timezone["daylightOffset"] = proj.daylightOffsetSec;
 
-    JsonObject lowTemp = doc["lowTemp"].to<JsonObject>();
-    lowTemp["threshold"] = proj.lowTempThreshold;
+    JsonObject heatpump = doc["heatpump"].to<JsonObject>();
+    JsonObject hpLowTemp = heatpump["lowTemp"].to<JsonObject>();
+    hpLowTemp["threshold"] = proj.lowTempThreshold;
+    JsonObject hpHighSuction = heatpump["highSuctionTemp"].to<JsonObject>();
+    hpHighSuction["threshold"] = proj.highSuctionTempThreshold;
+    hpHighSuction["rvFail"] = proj.rvFail;
+    JsonObject hpShortCycle = heatpump["shortCycle"].to<JsonObject>();
+    hpShortCycle["rv"] = proj.rvShortCycleMs;
+    hpShortCycle["cnt"] = proj.cntShortCycleMs;
 
     JsonObject ui = doc["ui"].to<JsonObject>();
     ui["theme"] = proj.theme.length() > 0 ? proj.theme : "dark";
@@ -427,8 +450,18 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     timezone["gmtOffset"] = proj.gmtOffsetSec;
     timezone["daylightOffset"] = proj.daylightOffsetSec;
 
-    JsonObject lowTemp = doc["lowTemp"].to<JsonObject>();
-    lowTemp["threshold"] = proj.lowTempThreshold;
+    // Remove old root-level lowTemp key (migration cleanup)
+    doc.remove("lowTemp");
+
+    JsonObject heatpump = doc["heatpump"].to<JsonObject>();
+    JsonObject hpLowTemp = heatpump["lowTemp"].to<JsonObject>();
+    hpLowTemp["threshold"] = proj.lowTempThreshold;
+    JsonObject hpHighSuction = heatpump["highSuctionTemp"].to<JsonObject>();
+    hpHighSuction["threshold"] = proj.highSuctionTempThreshold;
+    hpHighSuction["rvFail"] = proj.rvFail;
+    JsonObject hpShortCycle = heatpump["shortCycle"].to<JsonObject>();
+    hpShortCycle["rv"] = proj.rvShortCycleMs;
+    hpShortCycle["cnt"] = proj.cntShortCycleMs;
 
     JsonObject ui = doc["ui"].to<JsonObject>();
     ui["theme"] = proj.theme.length() > 0 ? proj.theme : "dark";

@@ -160,6 +160,10 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["gmtOffsetHrs"] = proj->gmtOffsetSec / 3600.0f;
         doc["daylightOffsetHrs"] = proj->daylightOffsetSec / 3600.0f;
         doc["lowTempThreshold"] = proj->lowTempThreshold;
+        doc["highSuctionTempThreshold"] = proj->highSuctionTempThreshold;
+        doc["rvFail"] = proj->rvFail;
+        doc["rvShortCycleSec"] = proj->rvShortCycleMs / 1000;
+        doc["cntShortCycleSec"] = proj->cntShortCycleMs / 1000;
         doc["apFallbackMinutes"] = proj->apFallbackSeconds / 60;
         doc["maxLogSize"] = proj->maxLogSize;
         doc["maxOldLogCount"] = proj->maxOldLogCount;
@@ -313,6 +317,33 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     if (threshold != proj->lowTempThreshold) {
         proj->lowTempThreshold = threshold;
         ctx->hpController->setLowTempThreshold(threshold);
+    }
+
+    // High suction temp threshold (live)
+    float hsThreshold = data["highSuctionTempThreshold"] | proj->highSuctionTempThreshold;
+    if (hsThreshold != proj->highSuctionTempThreshold) {
+        proj->highSuctionTempThreshold = hsThreshold;
+        ctx->hpController->setHighSuctionTempThreshold(hsThreshold);
+    }
+
+    // Short cycle times (live)
+    uint32_t rvSC = (data["rvShortCycleSec"] | (int)(proj->rvShortCycleMs / 1000)) * 1000UL;
+    if (rvSC != proj->rvShortCycleMs) {
+        proj->rvShortCycleMs = rvSC;
+        ctx->hpController->setRvShortCycleMs(rvSC);
+    }
+
+    uint32_t cntSC = (data["cntShortCycleSec"] | (int)(proj->cntShortCycleMs / 1000)) * 1000UL;
+    if (cntSC != proj->cntShortCycleMs) {
+        proj->cntShortCycleMs = cntSC;
+        ctx->hpController->setCntShortCycleMs(cntSC);
+    }
+
+    // Clear RV Fail
+    bool clearRvFail = data["clearRvFail"] | false;
+    if (clearRvFail) {
+        ctx->hpController->clearRvFail();
+        proj->rvFail = false;
     }
 
     // AP fallback timeout (live)
@@ -798,6 +829,10 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     doc["startupLockout"] = ctx->hpController->isStartupLockoutActive();
     doc["startupLockoutRemainSec"] = ctx->hpController->getStartupLockoutRemainingMs() / 1000;
     doc["shortCycleProtection"] = ctx->hpController->isShortCycleProtectionActive();
+    doc["rvFail"] = ctx->hpController->isRvFailActive();
+    doc["highSuctionTemp"] = ctx->hpController->isHighSuctionTempActive();
+    doc["defrostTransition"] = ctx->hpController->isDefrostTransitionActive();
+    doc["defrostTransitionRemainSec"] = ctx->hpController->getDefrostTransitionRemainingMs() / 1000;
     doc["cpuLoad0"] = getCpuLoadCore0();
     doc["cpuLoad1"] = getCpuLoadCore1();
     doc["freeHeap"] = ESP.getFreeHeap();

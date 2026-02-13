@@ -429,6 +429,10 @@ void WebHandler::setupRoutes() {
         doc["startupLockout"] = _hpController->isStartupLockoutActive();
         doc["startupLockoutRemainSec"] = _hpController->getStartupLockoutRemainingMs() / 1000;
         doc["shortCycleProtection"] = _hpController->isShortCycleProtectionActive();
+        doc["rvFail"] = _hpController->isRvFailActive();
+        doc["highSuctionTemp"] = _hpController->isHighSuctionTempActive();
+        doc["defrostTransition"] = _hpController->isDefrostTransitionActive();
+        doc["defrostTransitionRemainSec"] = _hpController->getDefrostTransitionRemainingMs() / 1000;
         doc["cpuLoad0"] = getCpuLoadCore0();
         doc["cpuLoad1"] = getCpuLoadCore1();
         doc["freeHeap"] = ESP.getFreeHeap();
@@ -629,6 +633,10 @@ void WebHandler::setupRoutes() {
                 doc["gmtOffsetHrs"] = proj->gmtOffsetSec / 3600.0f;
                 doc["daylightOffsetHrs"] = proj->daylightOffsetSec / 3600.0f;
                 doc["lowTempThreshold"] = proj->lowTempThreshold;
+                doc["highSuctionTempThreshold"] = proj->highSuctionTempThreshold;
+                doc["rvFail"] = proj->rvFail;
+                doc["rvShortCycleSec"] = proj->rvShortCycleMs / 1000;
+                doc["cntShortCycleSec"] = proj->cntShortCycleMs / 1000;
                 doc["apFallbackMinutes"] = proj->apFallbackSeconds / 60;
                 doc["maxLogSize"] = proj->maxLogSize;
                 doc["maxOldLogCount"] = proj->maxOldLogCount;
@@ -735,6 +743,31 @@ void WebHandler::setupRoutes() {
             if (threshold != proj->lowTempThreshold) {
                 proj->lowTempThreshold = threshold;
                 _hpController->setLowTempThreshold(threshold);
+            }
+
+            float hsThreshold = data["highSuctionTempThreshold"] | proj->highSuctionTempThreshold;
+            if (hsThreshold != proj->highSuctionTempThreshold) {
+                proj->highSuctionTempThreshold = hsThreshold;
+                _hpController->setHighSuctionTempThreshold(hsThreshold);
+            }
+
+            uint32_t rvSC = (data["rvShortCycleSec"] | (int)(proj->rvShortCycleMs / 1000)) * 1000UL;
+            if (rvSC != proj->rvShortCycleMs) {
+                proj->rvShortCycleMs = rvSC;
+                _hpController->setRvShortCycleMs(rvSC);
+            }
+
+            uint32_t cntSC = (data["cntShortCycleSec"] | (int)(proj->cntShortCycleMs / 1000)) * 1000UL;
+            if (cntSC != proj->cntShortCycleMs) {
+                proj->cntShortCycleMs = cntSC;
+                _hpController->setCntShortCycleMs(cntSC);
+            }
+
+            // Clear RV Fail
+            bool clearRvFail = data["clearRvFail"] | false;
+            if (clearRvFail) {
+                _hpController->clearRvFail();
+                proj->rvFail = false;
             }
 
             uint32_t apMinutes = data["apFallbackMinutes"] | (proj->apFallbackSeconds / 60);

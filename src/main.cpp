@@ -168,6 +168,10 @@ ProjectInfo proj = {
   -21600,             // gmtOffsetSec: UTC-6 (US Central)
   3600,               // daylightOffsetSec: 1hr DST
   20.0f,              // lowTempThreshold: 20°F default
+  140.0f,             // highSuctionTempThreshold: 140°F default
+  false,              // rvFail: not latched
+  30000,              // rvShortCycleMs: 30s default
+  30000,              // cntShortCycleMs: 30s default
   600,                // apFallbackSeconds: 10 minutes
   "dark"              // theme: dark default
 };
@@ -427,8 +431,12 @@ void setup() {
       _MQTT_PASSWORD = config.getMqttPassword();
       // Restore accumulated heat runtime from config
       hpController.setHeatRuntimeMs(proj.heatRuntimeAccumulatedMs);
-      // Set low temp threshold from config
+      // Set heatpump protection settings from config
       hpController.setLowTempThreshold(proj.lowTempThreshold);
+      hpController.setHighSuctionTempThreshold(proj.highSuctionTempThreshold);
+      hpController.setRvShortCycleMs(proj.rvShortCycleMs);
+      hpController.setCntShortCycleMs(proj.cntShortCycleMs);
+      if (proj.rvFail) hpController.setRvFail();  // Restore latched state
     }
     // Load TLS certificates for HTTPS server
     config.loadCertificates("/cert.pem", "/key.pem");
@@ -582,8 +590,20 @@ void OnRunTimeUpdate(){
 
 void onSaveRuntime(){
   uint32_t runtimeMs = hpController.getHeatRuntimeMs();
-  if (runtimeMs != proj.heatRuntimeAccumulatedMs) {
-    proj.heatRuntimeAccumulatedMs = runtimeMs;
+  bool rvFail = hpController.isRvFailActive();
+  bool runtimeChanged = (runtimeMs != proj.heatRuntimeAccumulatedMs);
+  bool rvFailChanged = (rvFail != proj.rvFail);
+
+  if (runtimeChanged) proj.heatRuntimeAccumulatedMs = runtimeMs;
+  if (rvFailChanged) proj.rvFail = rvFail;
+
+  if (rvFailChanged) {
+    // rvFail is in heatpump section — need full config update
+    TempSensorMap& tempSensors = hpController.getTempSensorMap();
+    if (config.updateConfig(_filename, tempSensors, proj)) {
+      Log.info("MAIN", "Config saved (rvFail=%d, runtime=%lu ms)", rvFail, runtimeMs);
+    }
+  } else if (runtimeChanged) {
     if (config.updateRuntime(_filename, runtimeMs)) {
       Log.debug("MAIN", "Heat runtime saved: %lu ms", runtimeMs);
     }
