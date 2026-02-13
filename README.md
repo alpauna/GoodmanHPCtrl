@@ -63,7 +63,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 
 - **Output Control by State:**
   - **RV** (reversing valve): ON in COOL, OFF in HEAT/OFF
-  - **W** (auxiliary heat): ON in DEFROST, ERROR (HEAT mode only), and LOW_TEMP (HEAT mode only); OFF otherwise. In COOL mode (Y+O), the system will not operate below 20°F
+  - **W** (auxiliary heat): ON in DEFROST, ERROR (HEAT mode only), LOW_TEMP (HEAT mode only), and RV_FAIL (HEAT mode only); OFF otherwise. In COOL mode (Y+O), the system will not operate below 20°F
   - **CNT** (contactor): auto-activates when Y input becomes active, with short cycle protection: if CNT was off for less than 5 minutes, a 30-second delay is enforced before reactivation; if off for 5+ minutes, CNT activates immediately
 
 - **Compressor Over-Temperature Protection** — When COMPRESSOR_TEMP reaches 240°F or above:
@@ -159,6 +159,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | `HEAT` Exit Complete | CNT+FAN resume | ON | ON | OFF | OFF | Normal HEAT mode resumes |
 | `ERROR` | LPS fault (low pressure) | OFF | OFF | OFF | ON* | *W on only in HEAT mode (Y active, O inactive) |
 | `LOW_TEMP` | Ambient < 20°F | OFF | OFF | OFF | ON* | *W on only in HEAT mode; W turns off if thermostat switches to COOL (Y+O) |
+| `HEAT` + RV Fail | RV fail latched | ON | OFF | OFF | ON* | *W on only in HEAT mode; CNT blocked until cleared |
 
 **Fault Conditions** (overlay on current state, block CNT activation):
 
@@ -168,6 +169,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | Suction low temp | SUCTION_TEMP < 32°F | COOL mode only | Temp > 40°F | ON | OFF | OFF | 2 |
 | LPS fault | LPS input LOW | Any mode | LPS goes HIGH | OFF | OFF | ON* | 3 |
 | Low ambient temp | AMBIENT_TEMP < 20°F | Any mode | Temp ≥ 20°F | OFF | OFF | ON* | 4 |
+| RV fail | SUCTION_TEMP ≥ 140°F during defrost | Defrost only | Manual clear via dashboard/config | ON | OFF | ON* | Latched |
 
 \* W on only in HEAT mode (Y active, O inactive); never activated in COOL mode (Y+O).
 

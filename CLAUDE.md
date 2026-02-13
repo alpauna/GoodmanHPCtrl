@@ -79,7 +79,7 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
   - State machine: OFF, COOL (Y+O active), HEAT (Y active only), DEFROST
   - All outputs are turned OFF on startup via `begin()`
   - RV (reversing valve) automatically controlled: ON in COOL mode, OFF in HEAT/OFF mode
-  - W (auxiliary heat) automatically controlled: ON in DEFROST, ERROR (HEAT only), and LOW_TEMP (HEAT only) modes; never turned on in COOL mode
+  - W (auxiliary heat) automatically controlled: ON in DEFROST, ERROR (HEAT only), LOW_TEMP (HEAT only), and RV_FAIL (HEAT only) modes; never turned on in COOL mode
   - Auto-activates CNT relay when Y input becomes active, with 5-minute short cycle protection: if CNT was off for less than 5 minutes, enforces a 30-second delay before reactivation; if off for 5+ minutes (or never activated), CNT activates immediately
   - **Automatic defrost (3-phase sequencing)**: After accumulated CNT runtime in HEAT mode exceeds `_heatRuntimeThresholdMs` (default 90 min, configurable 30–90 min), initiates software defrost via a 3-phase output sequence:
     - **Phase 1** (`_defrostTransition`): All outputs off (CNT, FAN, W, RV) for pressure equalization. Duration: `_rvShortCycleMs` (default 30s, configurable).
