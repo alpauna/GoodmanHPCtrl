@@ -23,7 +23,9 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **Dark/light theme** — Configurable dark/light theme with shared `theme.css` stylesheet. Persisted to SD card config, cached in localStorage for flash-free page loads. Instant preview on config page
 - **Admin password protection** — HTTP Basic Auth on sensitive endpoints (`/config`, `/update`, `/ftp`). No password = open access
 - **Password encryption** — All passwords (WiFi, MQTT, admin) encrypted at rest on SD card
-- **Live dashboard** — Real-time dashboard at `/dashboard` with state banner, protection status pills (startup lockout countdown, short cycle, RV fail, high suction temp), input/output grid, temperatures, and reboot button
+- **Live dashboard** — Real-time dashboard at `/dashboard` with state banner, protection status pills (startup lockout countdown, short cycle, RV fail, high suction temp), input/output grid, temperatures, and reboot button. Output indicators include inline status pills:
+  - **SC** (Short Cycle) — Shown on CNT output. Green when inactive, red when CNT short cycle protection delay is active (CNT was off < 5 min, waiting 30s before reactivation)
+  - **DFH** (Defrost Hold) — Shown on CNT, W, and RV outputs during the 3-phase defrost transition. On RV and W: red during Phase 1 (pressure equalization, all off). On CNT: red during Phase 2 (RV+W engaged, waiting for CNT short cycle before compressor starts)
 - **Pin table with manual override** — Auth-protected `/pins` page showing all GPIO inputs, outputs, and temperatures in a table. "Normal Mode Lockout" checkbox enables manual output control, bypassing the state machine for up to 30 minutes (auto-timeout). CNT enforces short cycle protection even in manual mode. Single auth prompt covers the entire lockout session. "Force Defrost" button triggers a software defrost cycle from HEAT mode (requires no active faults or manual override)
 - **Temperature history** — Configurable CSV logging interval (30s-5min, default 2min) per sensor to SD card (`/temps/<sensor>/YYYY-MM-DD.csv`), rolling Canvas line charts on dashboard with 1h/6h/24h/7d timeframe selector, auto-purge after 31 days
 - **Web-based configuration** — HTML pages served from `/www/` on SD card for configuration, OTA updates, and monitoring
@@ -98,16 +100,32 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - Auto-recovers when temperature rises above threshold
   - Threshold is configurable via `lowTemp.threshold` in SD card config
 
-- **Automatic Defrost** — After 90 minutes of accumulated CNT runtime in HEAT mode, initiates software defrost (turns off CNT, turns on RV, turns on CNT):
+- **Automatic Defrost (3-Phase Sequencing)** — After 90 minutes of accumulated CNT runtime in HEAT mode, initiates a 3-phase software defrost cycle for safe pressure equalization and output sequencing:
+
+  **Phase 1 — Pressure Equalization** (`defrostTransition`):
+  - All outputs OFF (CNT, FAN, W, RV)
+  - Duration: `heatpump.shortCycle.rv` (default 30s)
+  - Allows system pressures to equalize before reversing valve switches
+
+  **Phase 2 — RV + W Engaged, CNT Hold** (`defrostCntPending`):
+  - RV and W turned ON, CNT remains OFF
+  - Duration: `heatpump.shortCycle.cnt` (default 30s)
+  - Allows reversing valve to fully seat before compressor starts
+
+  **Phase 3 — Active Defrost**:
+  - CNT turned ON, defrost fully active
+  - Runs for at least `heatpump.defrost.minRuntimeMs` (default 3 min) before checking exit conditions
+  - Rechecks CONDENSER_TEMP every 1 minute during defrost with logging
+  - Exits when CONDENSER_TEMP >= `heatpump.defrost.exitTempF` (default 60°F) or 15-minute safety timeout
+
+  **Additional defrost behavior:**
   - Heat runtime only accumulates when DFT input is active (closed at 32°F, indicating icing conditions)
   - DFT turning off (temps > 32°F) clears accumulated runtime — no ice risk
-  - Runs for at least 3 minutes before checking exit conditions
-  - Rechecks CONDENSER_TEMP every 1 minute during defrost with logging
-  - Exits when CONDENSER_TEMP > 60°F or 15-minute safety timeout
   - Only COOL and DEFROST modes clear accumulated runtime; Y going off does not
   - Only HEAT mode adds time to accumulated runtime
   - Runtime persists to SD card every 5 minutes, restored on boot
-  - If Y drops during defrost, all outputs turn off but defrost resumes when Y reactivates in HEAT mode
+  - **Y drop during defrost**: All outputs turn off (including W), transition flags are cleared, but `_softwareDefrost` stays set. When Y reactivates in HEAT mode, defrost restarts from Phase 1
+  - **COOL cancellation**: If the thermostat switches to COOL mode (O becomes active) during any phase of a pending defrost, the defrost is cancelled entirely, heat runtime is cleared, and the system enters normal COOL mode
 
 ### State Table
 
@@ -116,7 +134,9 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | `OFF` | Y inactive | OFF | OFF | OFF | OFF | All outputs off |
 | `HEAT` | Y active, O inactive | ON | ON | OFF | OFF | CNT has 30s short-cycle protection |
 | `COOL` | Y active, O active | ON | ON | ON | OFF | Will not operate below 20°F |
-| `DEFROST` | Software defrost active, Y active | OFF | ON | ON | ON | 3-min minimum, exits at condenser > 60°F or 15-min timeout |
+| `DEFROST` Phase 1 | Pressure equalization (30s) | OFF | OFF | OFF | OFF | All outputs off for pressure equalization |
+| `DEFROST` Phase 2 | RV + W engaged, CNT hold (30s) | OFF | OFF | ON | ON | Reversing valve seats before compressor starts |
+| `DEFROST` Phase 3 | Active defrost | OFF | ON | ON | ON | 3-min minimum, exits at condenser ≥ 60°F or 15-min timeout |
 | `ERROR` | LPS fault (low pressure) | OFF | OFF | OFF | ON* | *W on only in HEAT mode (Y active, O inactive) |
 | `LOW_TEMP` | Ambient < 20°F | OFF | OFF | OFF | ON* | *W on only in HEAT mode; W turns off if thermostat switches to COOL (Y+O) |
 
@@ -267,7 +287,8 @@ This prompts for WiFi and MQTT credentials and writes `data/config.txt`. Copy it
   "heatpump": {
     "lowTemp": { "threshold": 20.0 },
     "highSuctionTemp": { "threshold": 140.0, "rvFail": false },
-    "shortCycle": { "rv": 30000, "cnt": 30000 }
+    "shortCycle": { "rv": 30000, "cnt": 30000 },
+    "defrost": { "minRuntimeMs": 180000, "exitTempF": 60.0 }
   },
   "tempHistory": {
     "intervalSec": 120
@@ -295,8 +316,10 @@ This prompts for WiFi and MQTT credentials and writes `data/config.txt`. Copy it
 - `tempHistory.intervalSec` — Temperature history capture interval in seconds, 30-300 (default: 120)
 - `heatpump.lowTemp.threshold` — Ambient temp (°F) below which compressor is blocked (default: 20.0)
 - `heatpump.highSuctionTemp.threshold` — Suction temp (°F) above which RV fail is detected during defrost (default: 140.0)
-- `heatpump.shortCycle.rv` — RV pressure equalization delay in ms during defrost transition (default: 30000)
-- `heatpump.shortCycle.cnt` — CNT short cycle delay in ms on Y activation (default: 30000)
+- `heatpump.shortCycle.rv` — Phase 1 pressure equalization delay in ms (default: 30000)
+- `heatpump.shortCycle.cnt` — Phase 2 CNT short cycle delay in ms (default: 30000)
+- `heatpump.defrost.minRuntimeMs` — Minimum Phase 3 runtime in ms before checking exit conditions (default: 180000 = 3 min)
+- `heatpump.defrost.exitTempF` — Condenser temp (°F) at which Phase 3 exits (default: 60.0)
 
 **Log file rotation:**
 - Active log: `/log.txt` (uncompressed)
@@ -545,6 +568,8 @@ Returns the full controller state as JSON. Used by the dashboard for real-time p
   "highSuctionTemp": false,
   "defrostTransition": false,
   "defrostTransitionRemainSec": 0,
+  "defrostCntPending": false,
+  "defrostCntPendingRemainSec": 0,
   "manualOverride": false,
   "manualOverrideRemainSec": 0,
   "temps": { "AMBIENT_TEMP": 48.1, "COMPRESSOR_TEMP": 72.5, "SUCTION_TEMP": 65.2, "CONDENSER_TEMP": 38.7, "LIQUID_TEMP": 185.3 },
@@ -566,8 +591,10 @@ Returns the full controller state as JSON. Used by the dashboard for real-time p
 | `shortCycleProtection` | bool | Whether short-cycle protection delay is active on CNT |
 | `rvFail` | bool | Whether RV fail (high suction temp during defrost) is latched |
 | `highSuctionTemp` | bool | Whether suction temp is above threshold during defrost |
-| `defrostTransition` | bool | Whether RV pressure equalization delay is active |
-| `defrostTransitionRemainSec` | number | Seconds remaining in defrost transition (0 when inactive) |
+| `defrostTransition` | bool | Whether Phase 1 (pressure equalization) is active — all outputs off |
+| `defrostTransitionRemainSec` | number | Seconds remaining in Phase 1 (0 when inactive) |
+| `defrostCntPending` | bool | Whether Phase 2 (RV+W on, CNT hold) is active |
+| `defrostCntPendingRemainSec` | number | Seconds remaining in Phase 2 (0 when inactive) |
 | `manualOverride` | bool | Whether manual override (pin control page) is active |
 | `manualOverrideRemainSec` | number | Seconds remaining in manual override (0 when inactive) |
 | `cpuLoad0` | number | CPU load percentage for Core 0 (WiFi/protocol stack) |
@@ -655,6 +682,8 @@ Full controller state, published on every state transition, fault event, and com
   },
   "heatRuntimeMin": 42,
   "defrost": false,
+  "defrostTransition": false,
+  "defrostCntPending": false,
   "lpsFault": false,
   "lowTemp": false,
   "compressorOverTemp": false,
@@ -675,6 +704,8 @@ Full controller state, published on every state transition, fault event, and com
 | `outputs` | object | Output pin states (true = on) |
 | `heatRuntimeMin` | number | Accumulated HEAT mode CNT runtime in minutes |
 | `defrost` | bool | Whether a software defrost cycle is active |
+| `defrostTransition` | bool | Whether Phase 1 (pressure equalization, all off) is active |
+| `defrostCntPending` | bool | Whether Phase 2 (RV+W on, CNT hold) is active |
 | `lpsFault` | bool | Whether an LPS low-pressure fault is active |
 | `lowTemp` | bool | Whether ambient temperature is below the low-temp threshold |
 | `compressorOverTemp` | bool | Whether compressor temperature exceeds 240°F threshold |
