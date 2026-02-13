@@ -6,10 +6,13 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 
 | Page | Screenshot |
 |------|-----------|
-| Home | ![Home](docs/screenshots/home.png?v=3) |
-| Dashboard | ![Dashboard](docs/screenshots/dashboard.png?v=4) |
-| Configuration | ![Configuration](docs/screenshots/config.png?v=3) |
-| OTA Update | ![OTA Update](docs/screenshots/update.png?v=3) |
+| Home | ![Home](docs/screenshots/home.png?v=4) |
+| Dashboard | ![Dashboard](docs/screenshots/dashboard.png?v=5) |
+| Pins | ![Pins](docs/screenshots/pins.png?v=1) |
+| Configuration | ![Configuration](docs/screenshots/config.png?v=4) |
+| OTA Update | ![OTA Update](docs/screenshots/update.png?v=4) |
+| Log | ![Log](docs/screenshots/log.png?v=1) |
+| Heap | ![Heap](docs/screenshots/heap.png?v=1) |
 
 ## Features
 
@@ -20,8 +23,9 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **Dark/light theme** — Configurable dark/light theme with shared `theme.css` stylesheet. Persisted to SD card config, cached in localStorage for flash-free page loads. Instant preview on config page
 - **Admin password protection** — HTTP Basic Auth on sensitive endpoints (`/config`, `/update`, `/ftp`). No password = open access
 - **Password encryption** — All passwords (WiFi, MQTT, admin) encrypted at rest on SD card
-- **Live dashboard** — Real-time dashboard at `/dashboard` with state banner, protection status pills (startup lockout countdown, short cycle), input/output grid, temperatures, and reboot button
-- **Temperature history** — CSV logging every 30s per sensor to SD card (`/temps/<sensor>/YYYY-MM-DD.csv`), rolling Canvas line charts on dashboard with 1h/6h/24h/7d timeframe selector, auto-purge after 31 days
+- **Live dashboard** — Real-time dashboard at `/dashboard` with state banner, protection status pills (startup lockout countdown, short cycle, RV fail, high suction temp), input/output grid, temperatures, and reboot button
+- **Pin table with manual override** — Auth-protected `/pins` page showing all GPIO inputs, outputs, and temperatures in a table. "Normal Mode Lockout" checkbox enables manual output control, bypassing the state machine for up to 30 minutes (auto-timeout). CNT enforces short cycle protection even in manual mode. Single auth prompt covers the entire lockout session
+- **Temperature history** — Configurable CSV logging interval (30s-5min, default 2min) per sensor to SD card (`/temps/<sensor>/YYYY-MM-DD.csv`), rolling Canvas line charts on dashboard with 1h/6h/24h/7d timeframe selector, auto-purge after 31 days
 - **Web-based configuration** — HTML pages served from `/www/` on SD card for configuration, OTA updates, and monitoring
 - **FTP server** — SimpleFTPServer with timed enable/disable (10/30/60 min) from config page. Defaults to OFF; auto-disables after timeout
 - **OTA updates** — Firmware upload saves to SD card (`/firmware.new`), then apply to flash. Supports revert to previous firmware from SD backup
@@ -212,8 +216,12 @@ The SD card should contain:
 /config.txt              — Device configuration (WiFi, MQTT, sensors, admin password)
 /www/index.html          — Home page
 /www/dashboard.html      — Live dashboard with charts
+/www/pins.html           — Pin table with manual override
 /www/config.html         — Configuration page
 /www/update.html         — OTA update page
+/www/log.html            — Log viewer
+/www/heap.html           — System/heap info
+/www/wifi.html           — WiFi scan and setup
 /www/theme.css           — Shared dark/light theme stylesheet
 /cert.pem                — HTTPS certificate (optional, see below)
 /key.pem                 — HTTPS private key (optional, see below)
@@ -256,8 +264,13 @@ This prompts for WiFi and MQTT credentials and writes `data/config.txt`. Copy it
     "gmtOffset": -21600,
     "daylightOffset": 3600
   },
-  "lowTemp": {
-    "threshold": 20.0
+  "heatpump": {
+    "lowTemp": { "threshold": 20.0 },
+    "highSuctionTemp": { "threshold": 140.0, "rvFail": false },
+    "shortCycle": { "rv": 30000, "cnt": 30000 }
+  },
+  "tempHistory": {
+    "intervalSec": 120
   },
   "ui": {
     "theme": "dark"
@@ -279,6 +292,11 @@ This prompts for WiFi and MQTT credentials and writes `data/config.txt`. Copy it
 **Configuration options:**
 - `logging.maxLogSize` — Maximum log file size in bytes before rotation (default: 52428800 = 50MB)
 - `logging.maxOldLogCount` — Number of rotated log files to keep (default: 10)
+- `tempHistory.intervalSec` — Temperature history capture interval in seconds, 30-300 (default: 120)
+- `heatpump.lowTemp.threshold` — Ambient temp (°F) below which compressor is blocked (default: 20.0)
+- `heatpump.highSuctionTemp.threshold` — Suction temp (°F) above which RV fail is detected during defrost (default: 140.0)
+- `heatpump.shortCycle.rv` — RV pressure equalization delay in ms during defrost transition (default: 30000)
+- `heatpump.shortCycle.cnt` — CNT short cycle delay in ms on Y activation (default: 30000)
 
 **Log file rotation:**
 - Active log: `/log.txt` (uncompressed)
@@ -302,7 +320,7 @@ This prompts for WiFi and MQTT credentials and writes `data/config.txt`. Copy it
 - Enabled by default; toggle via `POST /log/config?websocket=true|false`
 
 **Temperature history CSV logging:**
-- Logs all 5 temperature sensors (ambient, compressor, suction, condenser, liquid) every 30 seconds
+- Logs all 5 temperature sensors (ambient, compressor, suction, condenser, liquid) at a configurable interval (30s-5min, default 2min)
 - Per-sensor CSV files: `/temps/<sensor>/YYYY-MM-DD.csv` (e.g., `/temps/ambient/2026-02-11.csv`)
 - CSV format (no header): `epoch_seconds,temperature_fahrenheit`
 - ~56 KB/day per sensor, ~8.5 MB/month total across all sensors
@@ -475,6 +493,8 @@ Burn a hardware encryption key to ESP32-S3 eFuse for password encryption at rest
 |--------|------|------|-------------|
 | GET | `/` | | Home page (served from SD `/www/index.html`) |
 | GET | `/dashboard` | | Live dashboard with state, I/O, temps, and charts |
+| GET | `/pins` | Yes | Pin table page / JSON (`?format=json`) with manual override control |
+| POST | `/pins` | Yes | Toggle manual override or set output state (JSON body) |
 | GET | `/state` | | Full controller state as JSON (see below) |
 | GET | `/temps` | | Current temperature readings |
 | GET | `/temps/history` | | Temperature history CSV data (`?sensor=<name>`, optional `&date=YYYY-MM-DD`) |
@@ -521,6 +541,12 @@ Returns the full controller state as JSON. Used by the dashboard for real-time p
   "startupLockout": false,
   "startupLockoutRemainSec": 0,
   "shortCycleProtection": false,
+  "rvFail": false,
+  "highSuctionTemp": false,
+  "defrostTransition": false,
+  "defrostTransitionRemainSec": 0,
+  "manualOverride": false,
+  "manualOverrideRemainSec": 0,
   "temps": { "AMBIENT_TEMP": 48.1, "COMPRESSOR_TEMP": 72.5, "SUCTION_TEMP": 65.2, "CONDENSER_TEMP": 38.7, "LIQUID_TEMP": 185.3 },
   "cpuLoad0": 23,
   "cpuLoad1": 50,
@@ -538,6 +564,12 @@ Returns the full controller state as JSON. Used by the dashboard for real-time p
 | `startupLockout` | bool | Whether the 5-minute startup lockout is active |
 | `startupLockoutRemainSec` | number | Seconds remaining in startup lockout (0 when inactive) |
 | `shortCycleProtection` | bool | Whether short-cycle protection delay is active on CNT |
+| `rvFail` | bool | Whether RV fail (high suction temp during defrost) is latched |
+| `highSuctionTemp` | bool | Whether suction temp is above threshold during defrost |
+| `defrostTransition` | bool | Whether RV pressure equalization delay is active |
+| `defrostTransitionRemainSec` | number | Seconds remaining in defrost transition (0 when inactive) |
+| `manualOverride` | bool | Whether manual override (pin control page) is active |
+| `manualOverrideRemainSec` | number | Seconds remaining in manual override (0 when inactive) |
 | `cpuLoad0` | number | CPU load percentage for Core 0 (WiFi/protocol stack) |
 | `cpuLoad1` | number | CPU load percentage for Core 1 (Arduino loop/tasks) |
 | `freeHeap` | number | Free heap memory in bytes |
@@ -629,7 +661,10 @@ Full controller state, published on every state transition, fault event, and com
   "suctionLowTemp": false,
   "startupLockout": false,
   "startupLockoutRemainSec": 0,
-  "shortCycleProtection": false
+  "shortCycleProtection": false,
+  "rvFail": false,
+  "highSuctionTemp": false,
+  "manualOverride": false
 }
 ```
 
@@ -647,6 +682,9 @@ Full controller state, published on every state transition, fault event, and com
 | `startupLockout` | bool | Whether the 5-minute startup lockout is active |
 | `startupLockoutRemainSec` | number | Seconds remaining in startup lockout (0 when inactive) |
 | `shortCycleProtection` | bool | Whether short-cycle protection delay is active on CNT |
+| `rvFail` | bool | Whether RV fail (high suction temp during defrost) is latched |
+| `highSuctionTemp` | bool | Whether suction temp is above threshold during defrost |
+| `manualOverride` | bool | Whether manual override is active from pin control page |
 | `apMode` | bool | Whether the device is in AP fallback mode |
 
 ### `goodman/fault`
