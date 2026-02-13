@@ -71,9 +71,9 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <div class='fault-row'>
 <span class='pill ok' id='fStartup'>Startup Protect</span>
 <span class='pill ok' id='fDefrost'>Defrost</span>
-<span class='pill ok' id='fLPS'>LPS Fault</span>
-<span class='pill ok' id='fLowTemp'>Low Temp</span>
-<span class='pill ok' id='fCompOT'>Comp OT</span>
+<span class='pill ok' id='fLPS'>LPS No Fault</span>
+<span class='pill ok' id='fLowTemp'>Temp Ok</span>
+<span class='pill ok' id='fCompOT'>Comp Ok</span>
 <span class='pill ok' id='fSuctLT'>Suct LT</span>
 <span class='pill ok' id='fHighSuct'>High Suct: --&deg;F</span>
 <span class='pill ok' id='fRvFail'>RV Pass</span><button class='btn-clear' id='clearRvFailBtn' style='display:none' onclick='clearRvFail()'>Clear</button>
@@ -181,9 +181,9 @@ function update(d){
   if(su){var sec=d.startupLockoutRemainSec||0;var m=Math.ceil(sec/60);su.textContent=d.startupLockout?'Startup Protect: '+m+'m':'Startup Protect';}
   setPill('fShortCycle',d.shortCycleProtection);
   setPill('fDefrost',d.defrost);
-  setPill('fLPS',d.lpsFault);
-  setPill('fLowTemp',d.lowTemp);
-  setPill('fCompOT',d.compressorOverTemp);
+  var lpsEl=document.getElementById('fLPS');if(lpsEl){lpsEl.textContent=d.lpsFault?'LPS Fault':'LPS No Fault';setPill('fLPS',d.lpsFault);}
+  var ltEl=document.getElementById('fLowTemp');if(ltEl){ltEl.textContent=d.lowTemp?'Low Temp':'Temp Ok';setPill('fLowTemp',d.lowTemp);}
+  var cotEl=document.getElementById('fCompOT');if(cotEl){cotEl.textContent=d.compressorOverTemp?'Comp OT':'Comp Ok';setPill('fCompOT',d.compressorOverTemp);}
   setPill('fSuctLT',d.suctionLowTemp);
   var hsEl=document.getElementById('fHighSuct');
   if(hsEl){var suctVal=(d.temps&&d.temps.SUCTION_TEMP!==undefined)?d.temps.SUCTION_TEMP.toFixed(0):'--';hsEl.textContent='High Suct: '+suctVal+'\u00B0F';setPill('fHighSuct',d.highSuctionTemp);}
