@@ -81,11 +81,11 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
   - RV (reversing valve) automatically controlled: ON in COOL mode, OFF in HEAT/OFF mode
   - W (auxiliary heat) automatically controlled: ON in DEFROST, ERROR (HEAT only), and LOW_TEMP (HEAT only) modes; never turned on in COOL mode
   - Auto-activates CNT relay when Y input becomes active, with 5-minute short cycle protection: if CNT was off for less than 5 minutes, enforces a 30-second delay before reactivation; if off for 5+ minutes (or never activated), CNT activates immediately
-  - **Automatic defrost**: After 90 min accumulated CNT runtime in HEAT mode, initiates software defrost (turn off CNT, turn on RV, turn on CNT). Runs for at least 3 minutes, then exits when CONDENSER_TEMP > 41°F or 15-min safety timeout. Runtime resets on COOL mode or after defrost completes. Runtime persists to SD card every 5 min via `tSaveRuntime` task. If Y drops during defrost, all outputs turn off but `_softwareDefrost` stays set; defrost resumes when Y reactivates in HEAT mode.
-  - **DFT emergency defrost**: DFT input triggers the same unified defrost cycle from HEAT mode (same 3-min minimum, 41°F exit, 15-min timeout). Uses the same `_softwareDefrost` path as automatic defrost.
+  - **Automatic defrost**: After 90 min accumulated CNT runtime in HEAT mode, initiates software defrost (turn off CNT, turn on RV, turn on CNT). Runs for at least `defrostMinRuntimeMs` (default 3 min, configurable), then exits when CONDENSER_TEMP >= `defrostExitTempF` (default 60°F, configurable) or 15-min safety timeout. Runtime resets on COOL mode or after defrost completes. Runtime persists to SD card every 5 min via `tSaveRuntime` task. If Y drops during defrost, all outputs turn off but `_softwareDefrost` stays set; defrost resumes when Y reactivates in HEAT mode.
+  - **DFT emergency defrost**: DFT input triggers the same unified defrost cycle from HEAT mode (same configurable minimum, condenser temp exit, 15-min timeout). Uses the same `_softwareDefrost` path as automatic defrost.
   - **LPS fault protection**: When LPS input goes LOW (low refrigerant pressure), immediately shuts down CNT if running and blocks CNT activation. If in HEAT mode (Y active, O not active), turns on W for auxiliary heat. Auto-recovers when LPS goes HIGH (W turned off). Publishes fault events via `LPSFaultCallback`. `lpsFault` field included in `goodman/state` MQTT payload.
   - **Low ambient temperature protection**: When AMBIENT_TEMP drops below configurable threshold (default 20°F), enters `LOW_TEMP` state: shuts down CNT, turns off FAN and RV. Turns on W (auxiliary heat) only if not in COOL mode (O active). W is never turned on in COOL mode. Blocks CNT activation and state updates while active. Auto-recovers when temp rises above threshold. `lowTemp` field included in `goodman/state` MQTT payload.
-  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `setLowTempThreshold()`, `getLowTempThreshold()`
+  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `setLowTempThreshold()`, `getLowTempThreshold()`, `setDefrostMinRuntimeMs()`, `getDefrostMinRuntimeMs()`, `setDefrostExitTempF()`, `getDefrostExitTempF()`
 - **OutPin** (`OutPin.h/cpp`): Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
 - **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, debouncing via delayed verification (circular buffer queue checked by `_tGetInputs`), and callback on change.
 - **TempSensor** (`TempSensor.h/cpp`): Temperature sensor wrapper with encapsulated state and callbacks. Supports OneWire (via `update()`) and external sources like MCP9600 I2C thermocouple (via `updateValue()`):
@@ -134,6 +134,15 @@ struct ProjectInfo {
     int32_t gmtOffsetSec;        // GMT offset in seconds (default -21600 = UTC-6)
     int32_t daylightOffsetSec;   // DST offset in seconds (default 3600 = 1hr)
     float lowTempThreshold;      // Ambient temp threshold in F below which compressor is blocked (default 20.0)
+    float highSuctionTempThreshold; // Suction temp above which RV fail detected during defrost (default 140.0)
+    bool rvFail;                 // Latched RV fail flag (persisted)
+    uint32_t rvShortCycleMs;     // RV pressure equalization delay in defrost transition (default 30000)
+    uint32_t cntShortCycleMs;    // CNT short cycle delay on Y activation (default 30000)
+    uint32_t defrostMinRuntimeMs; // Defrost minimum runtime in ms (default 180000 = 3 min)
+    float defrostExitTempF;      // Condenser temp cutoff to end defrost in F (default 60.0)
+    uint32_t apFallbackSeconds;  // WiFi disconnect time before AP fallback (default 600 = 10 min)
+    uint32_t tempHistoryIntervalSec; // Temp history capture interval in seconds (30-300, default 120)
+    String theme;                // UI theme: "light" or "dark" (default "light")
 };
 ```
 
@@ -174,12 +183,20 @@ JSON config stored on SD card at `/config.txt` (Arduino SD library, SPI interfac
   "project": "...",
   "created": "...",
   "description": "...",
-  "wifi": { "ssid": "...", "password": "..." },
+  "wifi": { "ssid": "...", "password": "...", "apFallbackSeconds": 600 },
   "mqtt": { "user": "...", "password": "...", "host": "...", "port": 1883 },
   "logging": { "maxLogSize": 52428800, "maxOldLogCount": 10 },
   "runtime": { "heatAccumulatedMs": 0 },
   "timezone": { "gmtOffset": -21600, "daylightOffset": 3600 },
-  "lowTemp": { "threshold": 20.0 },
+  "heatpump": {
+    "lowTemp": { "threshold": 20.0 },
+    "highSuctionTemp": { "threshold": 140.0, "rvFail": false },
+    "shortCycle": { "rv": 30000, "cnt": 30000 },
+    "defrost": { "minRuntimeMs": 180000, "exitTempF": 60.0 }
+  },
+  "tempHistory": { "intervalSec": 120 },
+  "ui": { "theme": "dark" },
+  "admin": { "password": "" },
   "sensors": { "temp": { ... } }
 }
 ```
