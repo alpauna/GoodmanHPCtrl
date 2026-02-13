@@ -852,6 +852,11 @@ float GoodmanHP::getLowTempThreshold() const {
     return _lowTempThreshold;
 }
 
+void GoodmanHP::restoreSoftwareDefrost() {
+    _softwareDefrost = true;
+    Log.warn("HP", "Software defrost state restored from config");
+}
+
 void GoodmanHP::setStateChangeCallback(StateChangeCallback cb) {
     _stateChangeCb = cb;
 }

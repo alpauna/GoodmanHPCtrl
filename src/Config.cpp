@@ -264,6 +264,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.defrostMinRuntimeMs = 180000;
         proj.defrostExitTempF = 60.0f;
         proj.heatRuntimeThresholdMs = 5400000;
+        proj.softwareDefrost = false;
         Serial.println("Config migration: old lowTemp format detected, will migrate on next save");
     } else {
         proj.lowTempThreshold = heatpump["lowTemp"]["threshold"] | 20.0f;
@@ -274,6 +275,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.defrostMinRuntimeMs = heatpump["defrost"]["minRuntimeMs"] | 180000;
         proj.defrostExitTempF = heatpump["defrost"]["exitTempF"] | 60.0f;
         proj.heatRuntimeThresholdMs = heatpump["defrost"]["heatRuntimeThresholdMs"] | 5400000;
+        proj.softwareDefrost = heatpump["defrost"]["active"] | false;
     }
     Serial.printf("Read heatpump: lowTemp=%.1fF highSuct=%.1fF rvFail=%d rvSC=%lu cntSC=%lu defrostMin=%lu defrostExit=%.1fF\n",
                   proj.lowTempThreshold, proj.highSuctionTempThreshold, proj.rvFail,
@@ -392,6 +394,7 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     hpDefrost["minRuntimeMs"] = proj.defrostMinRuntimeMs;
     hpDefrost["exitTempF"] = proj.defrostExitTempF;
     hpDefrost["heatRuntimeThresholdMs"] = proj.heatRuntimeThresholdMs;
+    hpDefrost["active"] = proj.softwareDefrost;
 
     JsonObject tempHistObj = doc["tempHistory"].to<JsonObject>();
     tempHistObj["intervalSec"] = proj.tempHistoryIntervalSec;
@@ -486,6 +489,7 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     hpDefrost["minRuntimeMs"] = proj.defrostMinRuntimeMs;
     hpDefrost["exitTempF"] = proj.defrostExitTempF;
     hpDefrost["heatRuntimeThresholdMs"] = proj.heatRuntimeThresholdMs;
+    hpDefrost["active"] = proj.softwareDefrost;
 
     JsonObject tempHistObj = doc["tempHistory"].to<JsonObject>();
     tempHistObj["intervalSec"] = proj.tempHistoryIntervalSec;
@@ -536,7 +540,7 @@ bool Config::loadCertificates(const char* certFile, const char* keyFile) {
     return true;
 }
 
-bool Config::updateRuntime(const char* filename, uint32_t heatRuntimeMs) {
+bool Config::updateRuntime(const char* filename, uint32_t heatRuntimeMs, bool softwareDefrost) {
     if (!_sdInitialized) {
         return false;
     }
@@ -554,8 +558,9 @@ bool Config::updateRuntime(const char* filename, uint32_t heatRuntimeMs) {
         return false;
     }
 
-    // Update runtime field
+    // Update runtime and defrost active fields
     doc["runtime"]["heatAccumulatedMs"] = heatRuntimeMs;
+    doc["heatpump"]["defrost"]["active"] = softwareDefrost;
 
     // Write back
     file = SD.open(filename, FILE_WRITE);

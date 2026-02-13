@@ -124,6 +124,8 @@ class GoodmanHP {
     String setManualOutput(const String& name, bool on);
     String forceDefrost();
 
+    void restoreSoftwareDefrost();
+
     void setStateChangeCallback(StateChangeCallback cb);
     void setLPSFaultCallback(LPSFaultCallback cb);
 

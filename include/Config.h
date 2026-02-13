@@ -29,6 +29,7 @@ struct ProjectInfo {
     uint32_t defrostMinRuntimeMs;        // Defrost minimum runtime in ms (default 180000 = 3 min)
     float defrostExitTempF;              // Condenser temp cutoff to end defrost (default 60.0°F)
     uint32_t heatRuntimeThresholdMs;     // Heat runtime threshold to trigger defrost in ms (default 5400000 = 90 min)
+    bool softwareDefrost;                // Persisted software defrost state (survives reboot)
     uint32_t apFallbackSeconds;  // WiFi disconnect time before AP fallback (default 600 = 10 min)
     uint32_t tempHistoryIntervalSec; // Temp history capture interval in seconds (30-300, default 120)
     String theme;                // UI theme: "light" or "dark" (default "light")
@@ -43,7 +44,7 @@ class Config {
     bool openConfigFile(const char* filename, TempSensorMap& config, ProjectInfo& proj);
     bool loadTempConfig(const char* filename, TempSensorMap& config, ProjectInfo& proj);
     bool saveConfiguration(const char* filename, TempSensorMap& config, ProjectInfo& proj);
-    bool updateRuntime(const char* filename, uint32_t heatRuntimeMs);
+    bool updateRuntime(const char* filename, uint32_t heatRuntimeMs, bool softwareDefrost);
     bool updateConfig(const char* filename, TempSensorMap& config, ProjectInfo& proj);
     void clearConfig(TempSensorMap& config);
 

@@ -175,6 +175,7 @@ ProjectInfo proj = {
   180000,             // defrostMinRuntimeMs: 3 min default
   60.0f,              // defrostExitTempF: 60°F default
   5400000,            // heatRuntimeThresholdMs: 90 min default
+  false,              // softwareDefrost: not active
   600,                // apFallbackSeconds: 10 minutes
   120,                // tempHistoryIntervalSec: 2 minutes default
   "dark"              // theme: dark default
@@ -444,6 +445,7 @@ void setup() {
       hpController.setDefrostExitTempF(proj.defrostExitTempF);
       hpController.setHeatRuntimeThresholdMs(proj.heatRuntimeThresholdMs);
       if (proj.rvFail) hpController.setRvFail();  // Restore latched state
+      if (proj.softwareDefrost) hpController.restoreSoftwareDefrost();  // Resume defrost after reboot
       // Apply temp history capture interval from config
       if (proj.tempHistoryIntervalSec >= 30 && proj.tempHistoryIntervalSec <= 300) {
           tLogTempsCSV.setInterval(proj.tempHistoryIntervalSec * (unsigned long)TASK_SECOND);
@@ -606,20 +608,23 @@ void OnRunTimeUpdate(){
 void onSaveRuntime(){
   uint32_t runtimeMs = hpController.getHeatRuntimeMs();
   bool rvFail = hpController.isRvFailActive();
+  bool swDefrost = hpController.isSoftwareDefrostActive();
   bool runtimeChanged = (runtimeMs != proj.heatRuntimeAccumulatedMs);
   bool rvFailChanged = (rvFail != proj.rvFail);
+  bool defrostChanged = (swDefrost != proj.softwareDefrost);
 
   if (runtimeChanged) proj.heatRuntimeAccumulatedMs = runtimeMs;
   if (rvFailChanged) proj.rvFail = rvFail;
+  if (defrostChanged) proj.softwareDefrost = swDefrost;
 
-  if (rvFailChanged) {
-    // rvFail is in heatpump section — need full config update
+  if (rvFailChanged || defrostChanged) {
+    // rvFail and softwareDefrost are in heatpump section — need full config update
     TempSensorMap& tempSensors = hpController.getTempSensorMap();
     if (config.updateConfig(_filename, tempSensors, proj)) {
-      Log.info("MAIN", "Config saved (rvFail=%d, runtime=%lu ms)", rvFail, runtimeMs);
+      Log.info("MAIN", "Config saved (rvFail=%d, defrost=%d, runtime=%lu ms)", rvFail, swDefrost, runtimeMs);
     }
   } else if (runtimeChanged) {
-    if (config.updateRuntime(_filename, runtimeMs)) {
+    if (config.updateRuntime(_filename, runtimeMs, swDefrost)) {
       Log.debug("MAIN", "Heat runtime saved: %lu ms", runtimeMs);
     }
   }
