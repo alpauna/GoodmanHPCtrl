@@ -781,6 +781,12 @@ When the fault clears:
 
 - **HTTPS server separation** — `HttpsServer.cpp` is in a separate translation unit because `esp_https_server.h` (ESP-IDF) and `ESPAsyncWebServer.h` both define `HTTP_PUT`, `HTTP_OPTIONS`, and `HTTP_PATCH` enums and cannot coexist in the same TU. Logger.h forward-declares `AsyncWebSocket` to avoid pulling in the ESPAsyncWebServer header chain.
 
+## Known Bugs
+
+| # | Description | Severity | Fixed In |
+|---|-------------|----------|----------|
+| [1](bugs/1.md) | Defrost exit turns on CNT+FAN with Y inactive — compressor runs without indoor airflow. `_defrostStartTick=0` causes false 15-min timeout when Y drops during Phase 1/2, triggering exit sequence that turns on compressor without checking Y. Suction temp peaked at 148°F. | Critical | `028e568` |
+
 ## Dependencies
 
 Managed automatically by PlatformIO. Key libraries:

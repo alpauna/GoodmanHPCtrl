@@ -907,6 +907,28 @@ void GoodmanHP::accumulateHeatRuntime() {
 void GoodmanHP::checkDefrostNeeded() {
     uint32_t now = millis();
 
+    // Safety: abort any defrost/exit sequence if Y is not active
+    InputPin* yPin = getInput("Y");
+    bool yActive = (yPin != nullptr && yPin->isActive());
+    if (!yActive && (_defrostExiting || _defrostTransition || _defrostCntPending)) {
+        if (_defrostExiting || _defrostTransition || _defrostCntPending) {
+            OutPin* rv = getOutput("RV");
+            OutPin* w = getOutput("W");
+            OutPin* cnt = getOutput("CNT");
+            OutPin* fan = getOutput("FAN");
+            if (rv != nullptr) rv->turnOff();
+            if (w != nullptr) w->turnOff();
+            if (cnt != nullptr) { cnt->turnOff(); _cntActivated = false; }
+            if (fan != nullptr) fan->turnOff();
+            Log.warn("HP", "Y inactive during defrost/exit sequence, all outputs OFF");
+        }
+        _defrostExiting = false;
+        _defrostTransition = false;
+        _defrostCntPending = false;
+        // _softwareDefrost stays set for resume on next Y in HEAT mode
+        return;
+    }
+
     // Exit Phase 1: Pressure equalization after defrost (CNT off, RV+W still on)
     if (_defrostTransition && _defrostExiting) {
         if (now - _defrostTransitionStart >= _rvShortCycleMs) {
@@ -978,6 +1000,13 @@ void GoodmanHP::checkDefrostNeeded() {
 
     // If software defrost is active, check exit conditions
     if (_softwareDefrost) {
+        // Guard: _defrostStartTick is only set when Phase 3 begins.
+        // If still 0, defrost never reached active phase (Y dropped during Phase 1/2).
+        // Don't check timeout — defrost will resume from Phase 1 when Y reactivates.
+        if (_defrostStartTick == 0) {
+            return;
+        }
+
         uint32_t elapsed = now - _defrostStartTick;
 
         // Enforce minimum runtime
@@ -1048,6 +1077,26 @@ void GoodmanHP::stopSoftwareDefrost() {
     OutPin* cnt = getOutput("CNT");
     OutPin* fan = getOutput("FAN");
 
+    // Safety: if Y is not active, just clean up — no exit transition
+    InputPin* y = getInput("Y");
+    if (y == nullptr || !y->isActive()) {
+        Log.info("HP", "Defrost stopped (Y inactive), no exit transition");
+        if (cnt != nullptr) { cnt->turnOff(); _cntActivated = false; }
+        if (fan != nullptr) fan->turnOff();
+        OutPin* rv = getOutput("RV");
+        OutPin* w = getOutput("W");
+        if (rv != nullptr) rv->turnOff();
+        if (w != nullptr) w->turnOff();
+        _softwareDefrost = false;
+        _defrostExiting = false;
+        _defrostTransition = false;
+        _defrostCntPending = false;
+        _highSuctionTemp = false;
+        _defrostStartTick = 0;
+        resetHeatRuntime();
+        return;
+    }
+
     Log.info("HP", "Defrost complete, starting exit transition (%lu s pressure equalization)",
              _rvShortCycleMs / 1000UL);
 
@@ -1067,6 +1116,7 @@ void GoodmanHP::stopSoftwareDefrost() {
     // Clear defrost so state machine transitions DEFROST → HEAT
     _softwareDefrost = false;
     _highSuctionTemp = false;
+    _defrostStartTick = 0;
     resetHeatRuntime();
 }
 
