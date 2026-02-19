@@ -216,6 +216,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | Device | Address | Description |
 |--------|---------|-------------|
 | MCP9600 | 0x67 | Type-K thermocouple amplifier (LIQUID_TEMP) |
+| SSD1306 | 0x3C | 128x64 OLED display (5-page auto-cycling status) |
 
 ## Getting Started
 
@@ -780,6 +781,18 @@ When the fault clears:
 - **AsyncTCP watchdog** — The `CONFIG_ASYNC_TCP_USE_WDT=0` build flag is required in `platformio.ini`. Without it, AsyncTCP subscribes its task to the ESP-IDF task watchdog (5s timeout). When the MQTT broker is slow or unreachable, the async_tcp task cannot reset the watchdog in time, causing a panic and reboot. This flag prevents the async_tcp task from registering with the watchdog.
 
 - **HTTPS server separation** — `HttpsServer.cpp` is in a separate translation unit because `esp_https_server.h` (ESP-IDF) and `ESPAsyncWebServer.h` both define `HTTP_PUT`, `HTTP_OPTIONS`, and `HTTP_PATCH` enums and cannot coexist in the same TU. Logger.h forward-declares `AsyncWebSocket` to avoid pulling in the ESPAsyncWebServer header chain.
+
+## Known Issues
+
+### MCP9600 I2C Bus Crash
+
+Some MCP9600 thermocouple amplifier chips have a hardware bug where a bare I2C address probe (sending only the address byte with no register data via `beginTransmission`/`endTransmission`) crashes the chip and locks up the entire I2C bus. The chip remains unresponsive until power cycled — a software reboot is not sufficient to recover it.
+
+**Workaround implemented:** The firmware initializes the MCP9600 via its Adafruit driver (which performs a full Device ID register read at 0x20) *before* any I2C bus scan, and skips address 0x67 in all scan loops. The `/i2c/scan` web endpoint uses a full register read instead of a bare probe for 0x67. The Adafruit MCP9600 library itself already passes `begin(false)` internally to skip the bare probe — the issue was only with the generic I2C scan code.
+
+If the MCP9600 stops responding after flashing firmware that performed bare I2C scans, a full power cycle (unplug power, not just software reboot) will recover it.
+
+**Reference:** [Adafruit Forums — MCP9600 I2C issues](https://forums.adafruit.com/viewtopic.php?t=163742)
 
 ## Known Bugs
 
