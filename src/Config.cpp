@@ -280,19 +280,21 @@ bool Config::formatSD(TempSensorMap& config, ProjectInfo& proj) {
         SD.mkdir(dir);
     }
 
-    // Reset in-memory config to defaults
-    _wifiSSID = "";
-    _wifiPassword = "";
-    _mqttHost = IPAddress(192, 168, 0, 46);
-    _mqttPort = 1883;
-    _mqttUser = "debian";
-    _mqttPassword = "";
-    _adminPasswordHash = "";
+    // Reset runtime state but preserve network credentials
     proj.heatRuntimeAccumulatedMs = 0;
     proj.rvFail = false;
     proj.softwareDefrost = false;
 
-    Serial.println("FORMAT: Writing default config...");
+    // Restore certificates if they were loaded in memory
+    if (_certBuf && _certLen > 0 && _keyBuf && _keyLen > 0) {
+        fs::File cf = SD.open("/cert.pem", FILE_WRITE);
+        if (cf) { cf.write(_certBuf, _certLen); cf.close(); }
+        fs::File kf = SD.open("/key.pem", FILE_WRITE);
+        if (kf) { kf.write(_keyBuf, _keyLen); kf.close(); }
+        Serial.println("FORMAT: Restored certificates to SD card.");
+    }
+
+    Serial.println("FORMAT: Writing config (preserving WiFi/MQTT/admin credentials)...");
 
     // Write fresh config file
     bool ok = saveConfiguration("/config.txt", config, proj);
