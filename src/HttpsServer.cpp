@@ -9,6 +9,7 @@
 #include <ArduinoJson.h>
 #include <TaskSchedulerDeclarations.h>
 #include <SD.h>
+#include <LittleFS.h>
 #include "mbedtls/base64.h"
 #include "HttpsServer.h"
 #include "OtaUtils.h"
@@ -86,8 +87,8 @@ static bool checkHttpsAuth(httpd_req_t* req) {
 
 // --- SD card file serving helper ---
 
-static esp_err_t serveFileHttps(httpd_req_t* req, const char* sdPath) {
-    fs::File file = SD.open(sdPath, FILE_READ);
+static esp_err_t serveFileHttps(httpd_req_t* req, const char* fsPath) {
+    fs::File file = LittleFS.open(fsPath, FILE_READ);
     if (!file) {
         httpd_resp_send_404(req);
         return ESP_OK;
@@ -104,9 +105,9 @@ static esp_err_t serveFileHttps(httpd_req_t* req, const char* sdPath) {
     file.close();
 
     const char* contentType = "text/html";
-    if (strstr(sdPath, ".css")) contentType = "text/css";
-    else if (strstr(sdPath, ".js")) contentType = "application/javascript";
-    else if (strstr(sdPath, ".json")) contentType = "application/json";
+    if (strstr(fsPath, ".css")) contentType = "text/css";
+    else if (strstr(fsPath, ".js")) contentType = "application/javascript";
+    else if (strstr(fsPath, ".json")) contentType = "application/json";
 
     httpd_resp_set_type(req, contentType);
     httpd_resp_send(req, buf, fileSize);

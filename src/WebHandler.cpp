@@ -1,4 +1,5 @@
 #include "WebHandler.h"
+#include <LittleFS.h>
 #include "AsyncJson.h"
 #include "ArduinoJson.h"
 #include "TempSensor.h"
@@ -161,12 +162,8 @@ const char* WebHandler::getContentType(const String& path) {
 }
 
 void WebHandler::serveFile(AsyncWebServerRequest* request, const String& path) {
-    if (!_config || !_config->isSDCardInitialized()) {
-        request->send(503, "text/plain", "SD card not available");
-        return;
-    }
     String fullPath = "/www" + path;
-    fs::File file = SD.open(fullPath.c_str(), FILE_READ);
+    fs::File file = LittleFS.open(fullPath.c_str(), FILE_READ);
     if (!file) {
         request->send(404, "text/plain", "Not found: " + path);
         return;

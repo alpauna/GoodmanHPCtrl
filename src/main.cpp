@@ -7,6 +7,7 @@
 #include <SPI.h>
 #include <Wire.h>
 #include <SD.h>
+#include <LittleFS.h>
 #include <SimpleFTPServer.h>
 #include <StringStream.h>
 #include <TaskSchedulerDeclarations.h>
@@ -402,6 +403,13 @@ void setup() {
     Serial.println("MCP9600 thermocouple amplifier initialized at 0x67");
   } else {
     Serial.println("MCP9600 not found at 0x67, LIQUID_TEMP will be unavailable");
+  }
+
+  // Mount LittleFS for serving web pages from flash
+  if (LittleFS.begin(true)) {
+    Log.info("MAIN", "LittleFS mounted");
+  } else {
+    Log.error("MAIN", "LittleFS mount failed");
   }
 
   acc_data_all = (unsigned char *) ps_malloc (n_elements * sizeof (unsigned char));

@@ -267,7 +267,6 @@ bool Config::formatSD(TempSensorMap& config, ProjectInfo& proj) {
     Serial.println("FORMAT: Creating directory structure...");
 
     // Create required directories
-    SD.mkdir("/www");
     SD.mkdir("/temps");
     static const char* sensorDirs[] = {"ambient", "compressor", "suction", "condenser", "liquid"};
     for (int i = 0; i < 5; i++) {
