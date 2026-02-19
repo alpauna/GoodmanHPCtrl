@@ -119,6 +119,8 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <div class='indicator'><span class='label'>WiFi</span><div class='wifi-info'><div class='wifi-bars' id='wifiBars'><span></span><span></span><span></span><span></span></div><span class='val' id='vWifi'>--</span></div></div>
 <div class='indicator'><span class='label'>Build</span><span class='val' id='vBuild' style='font-size:11px'>--</span></div>
 <div class='indicator'><span class='label'>Date/Time</span><span class='val' id='vDatetime' style='font-size:11px'>--</span></div>
+<div class='indicator' style='grid-column:1/3'><span class='label'>SD Card</span><span class='val' id='vSd' style='font-size:11px'>--</span></div>
+<div class='indicator' style='grid-column:1/3'><span class='label'>SD Format</span><span class='val' id='vSdFmt'><button class='btn-clear' style='background:#ff9800' onclick='sdFormatAsk()'>Format SD</button></span></div>
 </div>
 </div>
 
@@ -495,5 +497,51 @@ loadHistory();
 document.getElementById('timeRange').addEventListener('change',function(){loadHistory();});
 window.addEventListener('resize',function(){if(chartInited) renderAllCharts();});
 fetch('/theme').then(function(r){return r.json()}).then(function(d){var t=d.theme||'light';document.documentElement.dataset.theme=t;localStorage.setItem('hp-theme',t);if(chartInited)renderAllCharts();}).catch(function(){});
+
+// ---- SD Card Info ----
+function fetchSdInfo(){
+  var xhr=new XMLHttpRequest();
+  xhr.open('GET','/sd/info',true);
+  xhr.timeout=5000;
+  xhr.onload=function(){
+    if(xhr.status===200){
+      try{
+        var d=JSON.parse(xhr.responseText);
+        var type=d.type||'SD';
+        var totalMB=d.totalMB||0;
+        var usedMB=d.usedMB||0;
+        var freeMB=d.freeMB||0;
+        setText('vSd',type+' \u2014 '+usedMB+' / '+totalMB+' MB ('+freeMB+' MB free)');
+      }catch(e){}
+    }
+  };
+  xhr.send();
+}
+fetchSdInfo();
+setInterval(fetchSdInfo,30000);
+
+function sdFormatAsk(){
+  var el=document.getElementById('vSdFmt');
+  if(!el)return;
+  el.innerHTML="<span style='font-size:12px;color:var(--text-secondary)'>Confirm?</span> <button class='btn-clear' onclick='sdFormatDo()'>Yes</button> <button class='btn-clear' style='background:#666' onclick='sdFormatReset()'>Cancel</button>";
+}
+function sdFormatReset(){
+  var el=document.getElementById('vSdFmt');
+  if(!el)return;
+  el.innerHTML="<button class='btn-clear' style='background:#ff9800' onclick='sdFormatAsk()'>Format SD</button>";
+}
+function sdFormatDo(){
+  var el=document.getElementById('vSdFmt');
+  if(!el)return;
+  el.innerHTML="<span style='font-size:12px;color:var(--text-secondary)'>Formatting...</span>";
+  fetch('/sd/format',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'FORMAT'})}).then(function(r){return r.json()}).then(function(d){
+    el.innerHTML="<span style='font-size:12px;color:"+(d.success?'#4CAF50':'#d32f2f')+"'>"+((d.message||d.error)||'Done')+"</span>";
+    if(d.success) fetchSdInfo();
+    setTimeout(sdFormatReset,4000);
+  }).catch(function(){
+    el.innerHTML="<span style='font-size:12px;color:#d32f2f'>Request failed</span>";
+    setTimeout(sdFormatReset,3000);
+  });
+}
 </script>
 </body></html>
