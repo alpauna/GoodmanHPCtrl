@@ -376,8 +376,17 @@ void WebHandler::setupRoutes() {
             if (m.first.length() > 0 && m.second != nullptr) {
                 if (!firstTime) json += ",";
                 json += "{";
-                json += "\"description\":\"" + m.second->getDescription() + "\"";
-                json += ",\"devid\":\"" + TempSensor::addressToString(m.second->getDeviceAddress()) + "\"";
+                json += "\"name\":\"" + m.first + "\"";
+                json += ",\"description\":\"" + m.second->getDescription() + "\"";
+                bool isI2C = m.second->hasMCP9600();
+                json += ",\"type\":\"" + String(isI2C ? "i2c" : "onewire") + "\"";
+                if (isI2C) {
+                    char hex[7];
+                    snprintf(hex, sizeof(hex), "0x%02X", m.second->getI2CAddress());
+                    json += ",\"devid\":\"" + String(hex) + "\"";
+                } else {
+                    json += ",\"devid\":\"" + TempSensor::addressToString(m.second->getDeviceAddress()) + "\"";
+                }
                 json += ",\"value\":" + String(m.second->getValue());
                 json += ",\"previous\":" + String(m.second->getPrevious());
                 json += ",\"valid\":\"" + String(m.second->isValid() ? "true" : "false") + "\"";
@@ -680,6 +689,88 @@ void WebHandler::setupRoutes() {
     });
     _server.addHandler(pinsPostHandler);
 
+    // Sensor assignment endpoint
+    auto* sensorAssignHandler = new AsyncCallbackJsonWebHandler("/sensors/assign", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+        if (!checkAuth(request)) return;
+        if (!_config) {
+            request->send(500, "application/json", "{\"error\":\"Config not available\"}");
+            return;
+        }
+        JsonObject data = json.as<JsonObject>();
+        TempSensorMap& tempMap = _hpController->getTempSensorMap();
+
+        // Process OneWire assignments: { "28AABB...": "SUCTION_TEMP", ... }
+        JsonObject onewire = data["onewire"];
+        if (!onewire.isNull()) {
+            // Build new map with swapped roles
+            std::map<String, String> addrToNewRole;  // devid -> new role name
+            for (JsonPair kv : onewire) {
+                addrToNewRole[kv.key().c_str()] = kv.value().as<String>();
+            }
+
+            // Collect existing OneWire sensors (non-MCP9600)
+            std::map<String, TempSensor*> addrToSensor;
+            for (auto& mp : tempMap) {
+                if (mp.second && !mp.second->hasMCP9600()) {
+                    String addr = TempSensor::addressToString(mp.second->getDeviceAddress());
+                    addrToSensor[addr] = mp.second;
+                }
+            }
+
+            // Remove all OneWire entries from tempMap (keep I2C entries)
+            std::vector<String> toRemove;
+            for (auto& mp : tempMap) {
+                if (mp.second && !mp.second->hasMCP9600()) {
+                    toRemove.push_back(mp.first);
+                }
+            }
+            for (auto& key : toRemove) {
+                tempMap.erase(key);
+            }
+
+            // Re-insert with new roles
+            for (auto& kv : addrToNewRole) {
+                auto it = addrToSensor.find(kv.first);
+                if (it != addrToSensor.end() && kv.second.length() > 0) {
+                    TempSensor* sensor = it->second;
+                    sensor->setDescription(kv.second);
+                    tempMap[kv.second] = sensor;
+                    addrToSensor.erase(it);
+                }
+            }
+
+            // Re-insert any unassigned sensors with their original description
+            for (auto& kv : addrToSensor) {
+                String desc = kv.second->getDescription();
+                if (desc.length() > 0 && tempMap.count(desc) == 0) {
+                    tempMap[desc] = kv.second;
+                }
+            }
+        }
+
+        // Process I2C assignments: { "0x67": {"driver":"MCP9600","role":"LIQUID_TEMP"}, ... }
+        JsonObject i2c = data["i2c"];
+        if (!i2c.isNull()) {
+            for (JsonPair kv : i2c) {
+                String addr = kv.key().c_str();
+                String driver = kv.value()["driver"] | String("");
+                String role = kv.value()["role"] | String("");
+                _config->setI2CDevice(addr, driver, role);
+            }
+        }
+
+        // Save to config
+        ProjectInfo* proj = _config->getProjectInfo();
+        bool saved = _config->updateConfig("/config.txt", tempMap, *proj);
+        if (saved) {
+            Log.info("SENSOR", "Sensor assignments saved");
+            request->send(200, "application/json", "{\"status\":\"ok\"}");
+        } else {
+            request->send(500, "application/json", "{\"error\":\"Failed to save config\"}");
+        }
+    });
+    _server.addHandler(sensorAssignHandler);
+
     // /config and /update are served via HTTPS when certificates are available.
     // If HTTPS is active, these redirect HTTP->HTTPS. If no certs, they serve directly on HTTP.
     // The actual handlers are registered in registerHttpsHandlers() or as fallbacks below.
@@ -759,6 +850,8 @@ void WebHandler::setupRoutes() {
                 doc["tempHistoryIntervalSec"] = proj->tempHistoryIntervalSec;
                 doc["adminPasswordSet"] = _config->hasAdminPassword();
                 doc["theme"] = proj->theme.length() > 0 ? proj->theme : "dark";
+                doc["displayPageIntervalSec"] = proj->displayPageIntervalSec;
+                doc["displayEnabled"] = proj->displayEnabled;
                 String json;
                 serializeJson(doc, json);
                 request->send(200, "application/json", json);
@@ -928,6 +1021,16 @@ void WebHandler::setupRoutes() {
             String theme = data["theme"] | proj->theme;
             if (theme == "dark" || theme == "light") {
                 proj->theme = theme;
+            }
+
+            uint32_t dispInterval = data["displayPageIntervalSec"] | proj->displayPageIntervalSec;
+            if (dispInterval < 3) dispInterval = 3;
+            if (dispInterval > 60) dispInterval = 60;
+            bool dispEnabled = data["displayEnabled"] | proj->displayEnabled;
+            if (dispInterval != proj->displayPageIntervalSec || dispEnabled != proj->displayEnabled) {
+                proj->displayPageIntervalSec = dispInterval;
+                proj->displayEnabled = dispEnabled;
+                if (_displayConfigCb) _displayConfigCb(dispInterval, dispEnabled);
             }
 
             TempSensorMap& tempSensors = _hpController->getTempSensorMap();
@@ -1386,6 +1489,9 @@ void WebHandler::setupRoutes() {
         _server.on("/www/delete", HTTP_POST, [this](AsyncWebServerRequest *request) {
             request->redirect("https://" + String(getWiFiIP()) + "/www/delete");
         });
+        _server.on("/sensors/assign", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/sensors/assign");
+        });
 
         // WiFi scan/test — serve on HTTP too (WiFi test disrupts connections)
         _server.on("/wifi/view", HTTP_GET, [this](AsyncWebServerRequest *request) {
@@ -1517,6 +1623,7 @@ bool WebHandler::beginSecure(const uint8_t* cert, size_t certLen, const uint8_t*
     _httpsCtx.wifiTestTask = &_tWifiTest;
     _httpsCtx.tempHistory = _tempHistory;
     _httpsCtx.tempHistIntervalCb = _tempHistIntervalCb;
+    _httpsCtx.displayConfigCb = _displayConfigCb;
 
     _httpsServer = httpsStart(cert, certLen, key, keyLen, &_httpsCtx);
     return _httpsServer != nullptr;

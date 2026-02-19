@@ -11,6 +11,7 @@
 #include <SD.h>
 #include <LittleFS.h>
 #include "mbedtls/base64.h"
+#include <Wire.h>
 #include "HttpsServer.h"
 #include "OtaUtils.h"
 #include "Config.h"
@@ -174,6 +175,8 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["tempHistoryIntervalSec"] = proj->tempHistoryIntervalSec;
         doc["adminPasswordSet"] = ctx->config->hasAdminPassword();
         doc["theme"] = proj->theme.length() > 0 ? proj->theme : "dark";
+        doc["displayPageIntervalSec"] = proj->displayPageIntervalSec;
+        doc["displayEnabled"] = proj->displayEnabled;
         String json;
         serializeJson(doc, json);
         httpd_resp_set_type(req, "application/json");
@@ -398,6 +401,17 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         proj->theme = theme;
     }
 
+    // Display settings (live)
+    uint32_t dispInterval = data["displayPageIntervalSec"] | proj->displayPageIntervalSec;
+    if (dispInterval < 3) dispInterval = 3;
+    if (dispInterval > 60) dispInterval = 60;
+    bool dispEnabled = data["displayEnabled"] | proj->displayEnabled;
+    if (dispInterval != proj->displayPageIntervalSec || dispEnabled != proj->displayEnabled) {
+        proj->displayPageIntervalSec = dispInterval;
+        proj->displayEnabled = dispEnabled;
+        if (ctx->displayConfigCb) ctx->displayConfigCb(dispInterval, dispEnabled);
+    }
+
     // Save to SD card
     TempSensorMap& tempSensors = ctx->hpController->getTempSensorMap();
     bool saved = ctx->config->updateConfig("/config.txt", tempSensors, *proj);
@@ -594,8 +608,17 @@ static esp_err_t tempsGetHandler(httpd_req_t* req) {
         if (m.first.length() > 0 && m.second != nullptr) {
             if (!firstTime) json += ",";
             json += "{";
-            json += "\"description\":\"" + m.second->getDescription() + "\"";
-            json += ",\"devid\":\"" + TempSensor::addressToString(m.second->getDeviceAddress()) + "\"";
+            json += "\"name\":\"" + m.first + "\"";
+            json += ",\"description\":\"" + m.second->getDescription() + "\"";
+            bool isI2C = m.second->hasMCP9600();
+            json += ",\"type\":\"" + String(isI2C ? "i2c" : "onewire") + "\"";
+            if (isI2C) {
+                char hex[7];
+                snprintf(hex, sizeof(hex), "0x%02X", m.second->getI2CAddress());
+                json += ",\"devid\":\"" + String(hex) + "\"";
+            } else {
+                json += ",\"devid\":\"" + TempSensor::addressToString(m.second->getDeviceAddress()) + "\"";
+            }
             json += ",\"value\":" + String(m.second->getValue());
             json += ",\"previous\":" + String(m.second->getPrevious());
             json += ",\"valid\":\"" + String(m.second->isValid() ? "true" : "false") + "\"";
@@ -1660,6 +1683,129 @@ static esp_err_t wwwDeleteHandler(httpd_req_t* req) {
     return ESP_OK;
 }
 
+static esp_err_t i2cScanHandler(httpd_req_t* req) {
+    String json = "[";
+    bool first = true;
+    for (uint8_t addr = 1; addr < 127; addr++) {
+        Wire.beginTransmission(addr);
+        if (Wire.endTransmission() == 0) {
+            if (!first) json += ",";
+            char hex[7];
+            snprintf(hex, sizeof(hex), "0x%02X", addr);
+            json += "{\"address\":\"" + String(hex) + "\",\"decimal\":" + String(addr) + "}";
+            first = false;
+        }
+    }
+    json += "]";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
+static esp_err_t sensorAssignHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+
+    int remaining = req->content_len;
+    if (remaining <= 0 || remaining > 4096) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Invalid body\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    char* body = (char*)malloc(remaining + 1);
+    if (!body) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Out of memory\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    int received = 0;
+    while (received < remaining) {
+        int ret = httpd_req_recv(req, body + received, remaining - received);
+        if (ret <= 0) { free(body); return ESP_OK; }
+        received += ret;
+    }
+    body[received] = '\0';
+
+    JsonDocument data;
+    if (deserializeJson(data, body)) {
+        free(body);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Invalid JSON\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+    free(body);
+
+    TempSensorMap& tempMap = ctx->hpController->getTempSensorMap();
+
+    // Process OneWire assignments
+    JsonObject onewire = data["onewire"];
+    if (!onewire.isNull()) {
+        std::map<String, String> addrToNewRole;
+        for (JsonPair kv : onewire) {
+            addrToNewRole[kv.key().c_str()] = kv.value().as<String>();
+        }
+
+        std::map<String, TempSensor*> addrToSensor;
+        for (auto& mp : tempMap) {
+            if (mp.second && !mp.second->hasMCP9600()) {
+                String addr = TempSensor::addressToString(mp.second->getDeviceAddress());
+                addrToSensor[addr] = mp.second;
+            }
+        }
+
+        std::vector<String> toRemove;
+        for (auto& mp : tempMap) {
+            if (mp.second && !mp.second->hasMCP9600()) {
+                toRemove.push_back(mp.first);
+            }
+        }
+        for (auto& key : toRemove) {
+            tempMap.erase(key);
+        }
+
+        for (auto& kv : addrToNewRole) {
+            auto it = addrToSensor.find(kv.first);
+            if (it != addrToSensor.end() && kv.second.length() > 0) {
+                TempSensor* sensor = it->second;
+                sensor->setDescription(kv.second);
+                tempMap[kv.second] = sensor;
+                addrToSensor.erase(it);
+            }
+        }
+
+        for (auto& kv : addrToSensor) {
+            String desc = kv.second->getDescription();
+            if (desc.length() > 0 && tempMap.count(desc) == 0) {
+                tempMap[desc] = kv.second;
+            }
+        }
+    }
+
+    // Process I2C assignments
+    JsonObject i2c = data["i2c"];
+    if (!i2c.isNull()) {
+        for (JsonPair kv : i2c) {
+            String addr = kv.key().c_str();
+            String driver = kv.value()["driver"] | String("");
+            String role = kv.value()["role"] | String("");
+            ctx->config->setI2CDevice(addr, driver, role);
+        }
+    }
+
+    ProjectInfo* proj = ctx->config->getProjectInfo();
+    bool saved = ctx->config->updateConfig("/config.txt", tempMap, *proj);
+    httpd_resp_set_type(req, "application/json");
+    if (saved) {
+        Log.info("SENSOR", "Sensor assignments saved");
+        httpd_resp_send(req, "{\"status\":\"ok\"}", HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_send(req, "{\"error\":\"Failed to save config\"}", HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+}
+
 // --- Public API ---
 
 HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
@@ -1968,6 +2114,22 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &wwwDeletePost);
+
+    httpd_uri_t i2cScanGet = {
+        .uri = "/i2c/scan",
+        .method = HTTP_GET,
+        .handler = i2cScanHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &i2cScanGet);
+
+    httpd_uri_t sensorAssignPost = {
+        .uri = "/sensors/assign",
+        .method = HTTP_POST,
+        .handler = sensorAssignHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &sensorAssignPost);
 
     Log.info("HTTPS", "HTTPS server started on port 443");
     return (HttpsServerHandle)server;

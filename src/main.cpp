@@ -20,6 +20,7 @@
 #include "WebHandler.h"
 #include "MQTTHandler.h"
 #include "TempHistory.h"
+#include "DisplayManager.h"
 
 #ifndef AP_PASSWORD
 #error "AP_PASSWORD not defined — create secrets.ini with: -D AP_PASSWORD=\\\"yourpassword\\\""
@@ -143,6 +144,7 @@ GoodmanHP hpController(&ts);
 WebHandler webHandler(80, &ts, &hpController);
 MQTTHandler mqttHandler(&ts);
 TempHistory tempHistory;
+DisplayManager displayMgr(&ts);
 
 OneWire oneWire(ONE_WIRE_BUS);
 
@@ -179,7 +181,9 @@ ProjectInfo proj = {
   false,              // softwareDefrost: not active
   600,                // apFallbackSeconds: 10 minutes
   120,                // tempHistoryIntervalSec: 2 minutes default
-  "dark"              // theme: dark default
+  "dark",             // theme: dark default
+  10,                 // displayPageIntervalSec: 10s default
+  true                // displayEnabled: on by default
 };
 
 
@@ -405,6 +409,10 @@ void setup() {
     Serial.println("MCP9600 not found at 0x67, LIQUID_TEMP will be unavailable");
   }
 
+  // Initialize OLED display (SSD1306 128x64 at 0x3C)
+  displayMgr.setController(&hpController);
+  displayMgr.begin(0x3C);
+
   // Mount LittleFS for serving web pages from flash
   if (LittleFS.begin(true)) {
     Log.info("MAIN", "LittleFS mounted");
@@ -458,6 +466,9 @@ void setup() {
       if (proj.tempHistoryIntervalSec >= 30 && proj.tempHistoryIntervalSec <= 300) {
           tLogTempsCSV.setInterval(proj.tempHistoryIntervalSec * (unsigned long)TASK_SECOND);
       }
+      // Apply display settings from config
+      displayMgr.setPageInterval(proj.displayPageIntervalSec);
+      displayMgr.setEnabled(proj.displayEnabled);
     }
     // Load TLS certificates for HTTPS server
     config.loadCertificates("/cert.pem", "/key.pem");
@@ -482,6 +493,11 @@ void setup() {
   webHandler.setTempHistoryIntervalCallback([](uint32_t intervalSec) {
       tLogTempsCSV.setInterval(intervalSec * (unsigned long)TASK_SECOND);
       Log.info("MAIN", "Temp history interval changed to %us", intervalSec);
+  });
+  webHandler.setDisplayConfigCallback([](uint32_t interval, bool enabled) {
+      displayMgr.setPageInterval(interval);
+      displayMgr.setEnabled(enabled);
+      Log.info("MAIN", "Display config: interval=%us enabled=%d", interval, enabled);
   });
 
   bool sdCardReady = config.isSDCardInitialized();
@@ -559,6 +575,7 @@ void setup() {
   if (mcp9600Ready) {
     TempSensor* liquidSensor = new TempSensor("LIQUID_TEMP");
     liquidSensor->setMCP9600(&mcp9600);
+    liquidSensor->setI2CAddress(0x67);
     liquidSensor->setUpdateCallback(tempSensorUpdateCallback);
     liquidSensor->setChangeCallback(tempSensorChangeCallback);
     hpController.addTempSensor("LIQUID_TEMP", liquidSensor);

@@ -164,6 +164,14 @@ String Config::decryptPassword(const String& encrypted) {
     return encrypted;
 }
 
+void Config::setI2CDevice(const String& addr, const String& driver, const String& role) {
+    if (driver.length() == 0) {
+        _i2cDevices.erase(addr);
+    } else {
+        _i2cDevices[addr] = {driver, role};
+    }
+}
+
 void Config::setAdminPassword(const String& plaintext) {
     _adminPasswordHash = plaintext;
 }
@@ -442,11 +450,31 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     proj.theme = (uiTheme != nullptr) ? String(uiTheme) : "dark";
     Serial.printf("Read UI theme: %s\n", proj.theme.c_str());
 
+    // Load display settings
+    proj.displayPageIntervalSec = doc["display"]["pageIntervalSec"] | 10;
+    if (proj.displayPageIntervalSec < 3) proj.displayPageIntervalSec = 3;
+    if (proj.displayPageIntervalSec > 60) proj.displayPageIntervalSec = 60;
+    proj.displayEnabled = doc["display"]["enabled"] | true;
+    Serial.printf("Read display: interval=%us enabled=%d\n", proj.displayPageIntervalSec, proj.displayEnabled);
+
     // Load admin password (encrypted same as WiFi/MQTT passwords)
     const char* adminPw = doc["admin"]["password"];
     String adminPwStr = (adminPw != nullptr && strlen(adminPw) > 0) ? String(adminPw) : "";
     _adminPasswordHash = decryptPassword(adminPwStr);
     Serial.printf("Admin password: %s\n", _adminPasswordHash.length() > 0 ? "set" : "not set");
+
+    // Load I2C device assignments
+    _i2cDevices.clear();
+    JsonObject i2cObj = doc["sensors"]["i2c"];
+    for (JsonPair kv : i2cObj) {
+        String addr = kv.key().c_str();
+        String driver = kv.value()["driver"] | String("");
+        String role = kv.value()["role"] | String("");
+        if (driver.length() > 0) {
+            _i2cDevices[addr] = {driver, role};
+            Serial.printf("I2C device %s: driver=%s role=%s\n", addr.c_str(), driver.c_str(), role.c_str());
+        }
+    }
 
     clearConfig(config);
     for (JsonPair sensors_temp_item : doc["sensors"]["temp"].as<JsonObject>()) {
@@ -551,6 +579,10 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     JsonObject ui = doc["ui"].to<JsonObject>();
     ui["theme"] = proj.theme.length() > 0 ? proj.theme : "dark";
 
+    JsonObject displayObj = doc["display"].to<JsonObject>();
+    displayObj["pageIntervalSec"] = proj.displayPageIntervalSec;
+    displayObj["enabled"] = proj.displayEnabled;
+
     JsonObject admin = doc["admin"].to<JsonObject>();
     admin["password"] = "";
 
@@ -569,6 +601,15 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
         temp["last-value"] = mp.second->getValue();
         temp["name"] = mp.first;
     }
+
+    // Write I2C device assignments
+    JsonObject i2cObj = sensors["i2c"].to<JsonObject>();
+    for (auto& kv : _i2cDevices) {
+        JsonObject dev = i2cObj[kv.first].to<JsonObject>();
+        dev["driver"] = kv.second.driver;
+        dev["role"] = kv.second.role;
+    }
+
     String output;
     serializeJson(doc, _configFile);
     serializeJsonPretty(doc, output);
@@ -646,8 +687,31 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     JsonObject ui = doc["ui"].to<JsonObject>();
     ui["theme"] = proj.theme.length() > 0 ? proj.theme : "dark";
 
+    JsonObject displayObj = doc["display"].to<JsonObject>();
+    displayObj["pageIntervalSec"] = proj.displayPageIntervalSec;
+    displayObj["enabled"] = proj.displayEnabled;
+
     JsonObject admin = doc["admin"].to<JsonObject>();
     admin["password"] = encryptPassword(_adminPasswordHash);
+
+    // Update temp sensor assignments (to<JsonObject>() clears existing content)
+    JsonObject sensors = doc["sensors"].to<JsonObject>();
+    JsonObject sensors_temp = sensors["temp"].to<JsonObject>();
+    for (auto& mp : config) {
+        String id = TempSensor::addressToString(mp.second->getDeviceAddress());
+        JsonObject temp = sensors_temp[id].to<JsonObject>();
+        temp["description"] = mp.second->getDescription();
+        temp["last-value"] = mp.second->getValue();
+        temp["name"] = mp.first;
+    }
+
+    // Write I2C device assignments
+    JsonObject i2cObj = sensors["i2c"].to<JsonObject>();
+    for (auto& kv : _i2cDevices) {
+        JsonObject dev = i2cObj[kv.first].to<JsonObject>();
+        dev["driver"] = kv.second.driver;
+        dev["role"] = kv.second.role;
+    }
 
     // Write back
     file = SD.open(filename, FILE_WRITE);

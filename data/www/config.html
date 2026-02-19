@@ -93,6 +93,10 @@ button:hover{background:#45a049;}
 <label>Minimum Defrost Time (seconds)</label><input type='number' step='1' id='defrostMinRuntimeSec'>
 <label>Condenser Temp Cutoff (&deg;F)</label><input type='number' step='0.1' id='defrostExitTempF'>
 </fieldset>
+<fieldset><legend>Display <span class='tag tag-live'>live</span></legend>
+<label>Page Flip Interval (seconds, 3-60)</label><input type='number' min='3' max='60' step='1' id='displayPageIntervalSec'>
+<label><input type='checkbox' id='displayEnabled' style='width:auto;margin-right:6px;'>Display Enabled</label>
+</fieldset>
 <fieldset><legend>Logging <span class='tag tag-live'>live</span></legend>
 <label>Max Log Size (MB)</label><input type='number' step='1' id='maxLogSizeMB'>
 <label>Max Old Log Count</label><input type='number' id='maxOldLogCount'>
@@ -118,11 +122,12 @@ button:hover{background:#45a049;}
 <div id='status'></div>
 </div>
 <script>
-var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','theme'];
+var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec'];
 var adminPwSet=false;
 fetch('/config?format=json').then(r=>r.json()).then(d=>{
 fields.forEach(f=>{var e=document.getElementById(f);if(e)e.value=d[f]!=null?d[f]:'';});
 document.getElementById('maxLogSizeMB').value=d.maxLogSize!=null?Math.round(d.maxLogSize/(1024*1024)):'';
+document.getElementById('displayEnabled').checked=d.displayEnabled!==false;
 adminPwSet=!!d.adminPasswordSet;
 var st=document.getElementById('adminPwStatus');
 if(adminPwSet){
@@ -145,10 +150,11 @@ alert('RV Fail cleared');
 }
 function save(e){
 e.preventDefault();
-var d={};var numFields=['mqttPort','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec'];
+var d={};var numFields=['mqttPort','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','displayPageIntervalSec'];
 fields.forEach(f=>{var e=document.getElementById(f);var v=e?e.value:'';d[f]=numFields.indexOf(f)>=0&&v!==''?Number(v):v;});
 var mbVal=document.getElementById('maxLogSizeMB').value;
 d.maxLogSize=mbVal?parseInt(mbVal)*1024*1024:'';
+d.displayEnabled=document.getElementById('displayEnabled').checked;
 d.curWifiPw=document.getElementById('curWifiPw').value;
 d.curMqttPw=document.getElementById('curMqttPw').value;
 var ap=document.getElementById('adminPassword').value;

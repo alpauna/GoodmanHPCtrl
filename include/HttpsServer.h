@@ -36,6 +36,7 @@ struct HttpsContext {
     Task** wifiTestTask;
     TempHistory* tempHistory;
     std::function<void(uint32_t)> tempHistIntervalCb;
+    std::function<void(uint32_t, bool)> displayConfigCb;
 };
 
 // Opaque handle

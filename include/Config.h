@@ -9,6 +9,12 @@
 #include "mbedtls/base64.h"
 #include "mbedtls/gcm.h"
 
+struct I2CDeviceInfo {
+    String driver;  // e.g. "MCP9600"
+    String role;    // e.g. "LIQUID_TEMP"
+};
+typedef std::map<String, I2CDeviceInfo> I2CDeviceMap;
+
 struct ProjectInfo {
     String name;
     String createdOnDate;
@@ -33,6 +39,9 @@ struct ProjectInfo {
     uint32_t apFallbackSeconds;  // WiFi disconnect time before AP fallback (default 600 = 10 min)
     uint32_t tempHistoryIntervalSec; // Temp history capture interval in seconds (30-300, default 120)
     String theme;                // UI theme: "light" or "dark" (default "light")
+    // Display settings
+    uint32_t displayPageIntervalSec; // OLED page flip interval (3-60, default 10)
+    bool displayEnabled;             // OLED display on/off (default true)
 };
 
 class Config {
@@ -96,6 +105,11 @@ class Config {
     static String encryptPassword(const String& plaintext);
     static String decryptPassword(const String& encrypted);
 
+    // I2C device assignments
+    I2CDeviceMap& getI2CDevices() { return _i2cDevices; }
+    const I2CDeviceMap& getI2CDevices() const { return _i2cDevices; }
+    void setI2CDevice(const String& addr, const String& driver, const String& role);
+
     // Callback setter for temp sensor discovery
     typedef void (*TempSensorDiscoveryCallback)(TempSensorMap& config);
     void setTempSensorDiscoveryCallback(TempSensorDiscoveryCallback cb) { _tempDiscoveryCb = cb; }
@@ -117,6 +131,9 @@ class Config {
 
     // Callback for discovering temp sensors when saving new config
     TempSensorDiscoveryCallback _tempDiscoveryCb;
+
+    // I2C device assignments (persisted in sensors.i2c JSON section)
+    I2CDeviceMap _i2cDevices;
 
     // ProjectInfo pointer for WebHandler access
     ProjectInfo* _proj;
