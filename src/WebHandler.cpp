@@ -1078,6 +1078,40 @@ void WebHandler::setupRoutes() {
             }
         });
         _server.addHandler(ftpPostHandler);
+
+        // SD card info/format endpoints (HTTP fallback)
+        _server.on("/sd/info", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            if (!_config) {
+                request->send(500, "application/json", "{\"error\":\"Config not available\"}");
+                return;
+            }
+            request->send(200, "application/json", _config->getSDInfo());
+        });
+
+        auto* sdFormatHandler = new AsyncCallbackJsonWebHandler("/sd/format", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+            if (!checkAuth(request)) return;
+            if (!_config) {
+                request->send(500, "application/json", "{\"error\":\"Config not available\"}");
+                return;
+            }
+            JsonObject data = json.as<JsonObject>();
+            String confirm = data["confirm"] | String("");
+            if (confirm != "FORMAT") {
+                request->send(400, "application/json", "{\"error\":\"Must send {\\\"confirm\\\":\\\"FORMAT\\\"}\"}");
+                return;
+            }
+            TempSensorMap& tempSensors = _hpController->getTempSensorMap();
+            ProjectInfo* proj = _config->getProjectInfo();
+            bool ok = _config->formatSD(tempSensors, *proj);
+            if (ok) {
+                request->send(200, "application/json", "{\"status\":\"ok\",\"message\":\"SD card formatted. Config, logs, certs, and web pages are gone. Enable FTP to upload HTML files, then reboot.\"}");
+            } else {
+                request->send(500, "application/json", "{\"error\":\"Format failed\"}");
+            }
+        });
+        _server.addHandler(sdFormatHandler);
+
         // WiFi scan/test endpoints (HTTP only — WiFi test disrupts HTTPS)
         _server.on("/wifi/view", HTTP_GET, [this](AsyncWebServerRequest *request) {
             if (!checkAuth(request)) return;
@@ -1250,6 +1284,12 @@ void WebHandler::setupRoutes() {
         });
         _server.on("/ftp", HTTP_POST, [this](AsyncWebServerRequest *request) {
             request->redirect("https://" + String(getWiFiIP()) + "/ftp");
+        });
+        _server.on("/sd/info", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/sd/info");
+        });
+        _server.on("/sd/format", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/sd/format");
         });
 
         // WiFi scan/test — serve on HTTP too (WiFi test disrupts connections)

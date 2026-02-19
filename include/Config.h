@@ -40,13 +40,15 @@ class Config {
     Config();
 
     // SD Card operations
-    bool initSDCard();
+    bool initSDCard(bool formatIfFail = false);
     bool openConfigFile(const char* filename, TempSensorMap& config, ProjectInfo& proj);
     bool loadTempConfig(const char* filename, TempSensorMap& config, ProjectInfo& proj);
     bool saveConfiguration(const char* filename, TempSensorMap& config, ProjectInfo& proj);
     bool updateRuntime(const char* filename, uint32_t heatRuntimeMs, bool softwareDefrost);
     bool updateConfig(const char* filename, TempSensorMap& config, ProjectInfo& proj);
     void clearConfig(TempSensorMap& config);
+    bool formatSD(TempSensorMap& config, ProjectInfo& proj);
+    String getSDInfo() const;
 
     // Getters for loaded config values
     String getWifiSSID() const { return _wifiSSID; }
@@ -97,6 +99,8 @@ class Config {
     void setTempSensorDiscoveryCallback(TempSensorDiscoveryCallback cb) { _tempDiscoveryCb = cb; }
 
   private:
+    bool removeRecursive(const char* path);
+
     fs::File _configFile;
     bool _sdInitialized;
 

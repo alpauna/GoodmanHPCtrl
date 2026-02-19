@@ -1429,6 +1429,85 @@ static esp_err_t adminSetupPostHandler(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// --- SD card info/format handlers ---
+
+static esp_err_t sdInfoGetHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+
+    if (!ctx->config) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Config not available\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    String json = ctx->config->getSDInfo();
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
+static esp_err_t sdFormatPostHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+
+    if (!ctx->config) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Config not available\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    int remaining = req->content_len;
+    if (remaining <= 0 || remaining > 256) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Invalid body\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    char* body = (char*)malloc(remaining + 1);
+    if (!body) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Out of memory\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    int received = 0;
+    while (received < remaining) {
+        int ret = httpd_req_recv(req, body + received, remaining - received);
+        if (ret <= 0) { free(body); return ESP_OK; }
+        received += ret;
+    }
+    body[received] = '\0';
+
+    JsonDocument data;
+    if (deserializeJson(data, body)) {
+        free(body);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Invalid JSON\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+    free(body);
+
+    String confirm = data["confirm"] | String("");
+    if (confirm != "FORMAT") {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Must send {\\\"confirm\\\":\\\"FORMAT\\\"}\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    TempSensorMap& tempSensors = ctx->hpController->getTempSensorMap();
+    ProjectInfo* proj = ctx->config->getProjectInfo();
+    bool ok = ctx->config->formatSD(tempSensors, *proj);
+
+    httpd_resp_set_type(req, "application/json");
+    if (ok) {
+        httpd_resp_send(req, "{\"status\":\"ok\",\"message\":\"SD card formatted. Config, logs, certs, and web pages are gone. Enable FTP to upload HTML files, then reboot.\"}", HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_send(req, "{\"error\":\"Format failed\"}", HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+}
+
 // --- Public API ---
 
 HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
@@ -1440,7 +1519,7 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
     cfg.prvtkey_pem = key;
     cfg.prvtkey_len = keyLen + 1;
     cfg.port_secure = 443;
-    cfg.httpd.max_uri_handlers = 30;
+    cfg.httpd.max_uri_handlers = 35;
 
     httpd_handle_t server = nullptr;
     esp_err_t err = httpd_ssl_start(&server, &cfg);
@@ -1649,6 +1728,22 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &ftpPost);
+
+    httpd_uri_t sdInfoGet = {
+        .uri = "/sd/info",
+        .method = HTTP_GET,
+        .handler = sdInfoGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &sdInfoGet);
+
+    httpd_uri_t sdFormatPost = {
+        .uri = "/sd/format",
+        .method = HTTP_POST,
+        .handler = sdFormatPostHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &sdFormatPost);
 
     httpd_uri_t logGet = {
         .uri = "/log",

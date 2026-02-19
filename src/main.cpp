@@ -423,7 +423,7 @@ void setup() {
     getTempSensors(tempMap);
   });
 
-  if(config.initSDCard()){
+  if(config.initSDCard(true)){
     TempSensorMap& tempSensors = hpController.getTempSensorMap();
     if(config.openConfigFile(_filename, tempSensors, proj)){
       config.loadTempConfig(_filename, tempSensors, proj);

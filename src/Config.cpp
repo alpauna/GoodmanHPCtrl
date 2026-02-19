@@ -167,8 +167,18 @@ bool Config::verifyAdminPassword(const String& plaintext) const {
     return plaintext == _adminPasswordHash;
 }
 
-bool Config::initSDCard() {
+bool Config::initSDCard(bool formatIfFail) {
     if (!SD.begin(SS, SPI, SD_SPI_SPEED * 1000000UL)) {
+        if (formatIfFail) {
+            Serial.println("\nSD mount failed, retrying with format_if_mount_failed...");
+            if (!SD.begin(SS, SPI, SD_SPI_SPEED * 1000000UL, "/sd", 5, true)) {
+                Serial.println("SD initialization failed even with format.");
+                return false;
+            }
+            Serial.println("SD formatted and mounted successfully.");
+            _sdInitialized = true;
+            return true;
+        }
         Serial.println("\nSD initialization failed.");
         Serial.println("Is the card correctly inserted?");
         Serial.println("Is chipSelect set to the correct value?");
@@ -177,6 +187,139 @@ bool Config::initSDCard() {
     Serial.println("\nCard successfully initialized.\n");
     _sdInitialized = true;
     return true;
+}
+
+bool Config::removeRecursive(const char* path) {
+    fs::File dir = SD.open(path);
+    if (!dir || !dir.isDirectory()) {
+        return SD.remove(path);
+    }
+
+    // Collect entries first (can't modify while iterating)
+    String entries[64];
+    bool isDir[64];
+    int count = 0;
+
+    fs::File entry = dir.openNextFile();
+    while (entry && count < 64) {
+        entries[count] = String(entry.name());
+        isDir[count] = entry.isDirectory();
+        entry.close();
+        count++;
+        entry = dir.openNextFile();
+    }
+    dir.close();
+
+    // Delete entries
+    for (int i = 0; i < count; i++) {
+        String fullPath = entries[i];
+        // SD library may return name with or without leading slash
+        if (!fullPath.startsWith("/")) {
+            fullPath = String(path) + "/" + fullPath;
+        }
+        if (isDir[i]) {
+            removeRecursive(fullPath.c_str());
+        } else {
+            SD.remove(fullPath.c_str());
+        }
+    }
+
+    // Remove the directory itself (skip root)
+    if (strcmp(path, "/") != 0) {
+        SD.rmdir(path);
+    }
+    return true;
+}
+
+bool Config::formatSD(TempSensorMap& config, ProjectInfo& proj) {
+    if (!_sdInitialized) return false;
+
+    Serial.println("FORMAT: Removing all files from SD card...");
+
+    // Remove all entries in root
+    fs::File root = SD.open("/");
+    if (!root) return false;
+
+    String entries[64];
+    bool isDirFlags[64];
+    int count = 0;
+
+    fs::File entry = root.openNextFile();
+    while (entry && count < 64) {
+        entries[count] = String(entry.name());
+        isDirFlags[count] = entry.isDirectory();
+        entry.close();
+        count++;
+        entry = root.openNextFile();
+    }
+    root.close();
+
+    for (int i = 0; i < count; i++) {
+        String path = entries[i];
+        if (!path.startsWith("/")) path = "/" + path;
+        if (isDirFlags[i]) {
+            removeRecursive(path.c_str());
+        } else {
+            SD.remove(path.c_str());
+        }
+    }
+
+    Serial.println("FORMAT: Creating directory structure...");
+
+    // Create required directories
+    SD.mkdir("/www");
+    SD.mkdir("/temps");
+    static const char* sensorDirs[] = {"ambient", "compressor", "suction", "condenser", "liquid"};
+    for (int i = 0; i < 5; i++) {
+        char dir[32];
+        snprintf(dir, sizeof(dir), "/temps/%s", sensorDirs[i]);
+        SD.mkdir(dir);
+    }
+
+    // Reset in-memory config to defaults
+    _wifiSSID = "";
+    _wifiPassword = "";
+    _mqttHost = IPAddress(192, 168, 0, 46);
+    _mqttPort = 1883;
+    _mqttUser = "debian";
+    _mqttPassword = "";
+    _adminPasswordHash = "";
+    proj.heatRuntimeAccumulatedMs = 0;
+    proj.rvFail = false;
+    proj.softwareDefrost = false;
+
+    Serial.println("FORMAT: Writing default config...");
+
+    // Write fresh config file
+    bool ok = saveConfiguration("/config.txt", config, proj);
+
+    Serial.println(ok ? "FORMAT: Complete." : "FORMAT: Failed to write config.");
+    return ok;
+}
+
+String Config::getSDInfo() const {
+    if (!_sdInitialized) {
+        return "{\"error\":\"SD card not initialized\"}";
+    }
+
+    const char* cardType = "Unknown";
+    switch (SD.cardType()) {
+        case CARD_MMC:  cardType = "MMC"; break;
+        case CARD_SD:   cardType = "SD"; break;
+        case CARD_SDHC: cardType = "SDHC"; break;
+        case CARD_NONE: cardType = "None"; break;
+        default: break;
+    }
+
+    uint64_t totalBytes = SD.totalBytes();
+    uint64_t usedBytes = SD.usedBytes();
+    uint64_t freeBytes = totalBytes - usedBytes;
+
+    char buf[192];
+    snprintf(buf, sizeof(buf),
+        "{\"type\":\"%s\",\"totalMB\":%llu,\"usedMB\":%llu,\"freeMB\":%llu}",
+        cardType, totalBytes / (1024 * 1024), usedBytes / (1024 * 1024), freeBytes / (1024 * 1024));
+    return String(buf);
 }
 
 bool Config::openConfigFile(const char* filename, TempSensorMap& config, ProjectInfo& proj) {

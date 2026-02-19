@@ -107,6 +107,14 @@ button:hover{background:#45a049;}
 <button class='btn-sm' onclick='ftpControl(60)'>1 hour</button>
 <button class='btn-sm btn-red' onclick='ftpControl(0)'>Off</button>
 </fieldset>
+<fieldset><legend>SD Card</legend>
+<div id='sdInfo' style='font-size:13px;padding:6px 10px;border-radius:4px;background:var(--code-bg);color:var(--text);margin-bottom:8px;'>Loading...</div>
+<p style='color:#e74c3c;font-size:13px;margin:8px 0;'><strong>Warning:</strong> Formatting will erase ALL data on the SD card including config, logs, certificates, and web pages. A fresh default config will be created. You will need to use FTP to re-upload HTML files.</p>
+<label>Type FORMAT to confirm</label>
+<input type='text' id='sdFormatConfirm' oninput="document.getElementById('sdFormatBtn').disabled=this.value!=='FORMAT'">
+<button type='button' class='btn-sm btn-red' id='sdFormatBtn' disabled onclick='formatSD()' style='margin-top:8px'>Format SD Card</button>
+<div id='sdFormatStatus' style='margin-top:8px;font-size:13px;padding:6px 10px;border-radius:4px;display:none'></div>
+</fieldset>
 <div id='status'></div>
 </div>
 <script>
@@ -188,4 +196,25 @@ el.style.background='';el.style.color='';
 }
 loadFtpStatus();
 setInterval(loadFtpStatus,30000);
+function loadSDInfo(){
+fetch('/sd/info').then(r=>r.json()).then(d=>{
+var el=document.getElementById('sdInfo');
+if(d.error){el.textContent='SD: '+d.error;return;}
+el.textContent='Type: '+d.type+' | Total: '+d.totalMB+' MB | Used: '+d.usedMB+' MB | Free: '+d.freeMB+' MB';
+}).catch(()=>{document.getElementById('sdInfo').textContent='Error loading SD info';});
+}
+loadSDInfo();
+function formatSD(){
+if(!window.confirm('This will ERASE ALL DATA on the SD card. Are you sure?'))return;
+var st=document.getElementById('sdFormatStatus');
+st.textContent='Formatting...';st.className='info';st.style.display='block';
+document.getElementById('sdFormatBtn').disabled=true;
+fetch('/sd/format',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'FORMAT'})}).then(r=>r.json()).then(r=>{
+if(r.error){st.className='err';st.textContent=r.error;}
+else{st.className='ok';st.textContent=r.message;}
+st.style.display='block';
+document.getElementById('sdFormatConfirm').value='';
+loadSDInfo();
+}).catch(err=>{st.className='err';st.textContent='Error: '+err;st.style.display='block';});
+}
 </script></body></html>
