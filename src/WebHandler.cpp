@@ -1117,6 +1117,87 @@ void WebHandler::setupRoutes() {
         });
         _server.addHandler(sdFormatHandler);
 
+        // LittleFS www file management (HTTP fallback)
+        _server.on("/www/list", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            File dir = LittleFS.open("/www");
+            if (!dir || !dir.isDirectory()) {
+                request->send(200, "application/json", "{\"files\":[]}");
+                return;
+            }
+            String json = "{\"files\":[";
+            bool first = true;
+            File entry = dir.openNextFile();
+            while (entry) {
+                if (!entry.isDirectory()) {
+                    String name = entry.name();
+                    int idx = name.lastIndexOf('/');
+                    if (idx >= 0) name = name.substring(idx + 1);
+                    if (!first) json += ",";
+                    json += "{\"name\":\"" + name + "\",\"size\":" + String(entry.size()) + "}";
+                    first = false;
+                }
+                entry.close();
+                entry = dir.openNextFile();
+            }
+            dir.close();
+            json += "]}";
+            request->send(200, "application/json", json);
+        });
+
+        _server.on("/www/upload", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            request->send(200, "application/json", _wwwUploadOk
+                ? ("{\"status\":\"ok\",\"filename\":\"" + _wwwUploadName + "\",\"size\":" + String(_wwwUploadSize) + "}")
+                : String("{\"error\":\"Upload failed\"}"));
+            _wwwUploadOk = false;
+        }, nullptr, [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+            if (index == 0) {
+                _wwwUploadOk = false;
+                _wwwUploadName = request->header("X-Filename");
+                if (_wwwUploadName.length() == 0 || _wwwUploadName.indexOf("..") >= 0 ||
+                    _wwwUploadName.indexOf('/') >= 0 || total > 51200) {
+                    _wwwUploadName = "";
+                    return;
+                }
+                String path = "/www/" + _wwwUploadName;
+                _wwwUploadFile = LittleFS.open(path.c_str(), FILE_WRITE);
+                if (!_wwwUploadFile) { _wwwUploadName = ""; return; }
+                _wwwUploadSize = 0;
+            }
+            if (_wwwUploadName.length() > 0 && _wwwUploadFile) {
+                if (_wwwUploadFile.write(data, len) != len) {
+                    _wwwUploadFile.close();
+                    LittleFS.remove(("/www/" + _wwwUploadName).c_str());
+                    _wwwUploadName = "";
+                    _wwwUploadFile = File();
+                }
+                _wwwUploadSize += len;
+            }
+            if (index + len == total && _wwwUploadName.length() > 0 && _wwwUploadFile) {
+                _wwwUploadFile.close();
+                _wwwUploadOk = true;
+                Log.info("WWW", "Uploaded %s (%u bytes)", _wwwUploadName.c_str(), _wwwUploadSize);
+            }
+        });
+
+        _server.on("/www/delete", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            String name = request->header("X-Filename");
+            if (name.length() == 0 || name.indexOf("..") >= 0 || name.indexOf('/') >= 0) {
+                request->send(400, "application/json", "{\"error\":\"Invalid filename\"}");
+                return;
+            }
+            String path = "/www/" + name;
+            if (!LittleFS.exists(path.c_str())) {
+                request->send(404, "application/json", "{\"error\":\"File not found\"}");
+                return;
+            }
+            LittleFS.remove(path.c_str());
+            Log.info("WWW", "Deleted %s", name.c_str());
+            request->send(200, "application/json", "{\"status\":\"ok\",\"deleted\":\"" + name + "\"}");
+        });
+
         // WiFi scan/test endpoints (HTTP only — WiFi test disrupts HTTPS)
         _server.on("/wifi/view", HTTP_GET, [this](AsyncWebServerRequest *request) {
             if (!checkAuth(request)) return;
@@ -1295,6 +1376,15 @@ void WebHandler::setupRoutes() {
         });
         _server.on("/sd/format", HTTP_POST, [this](AsyncWebServerRequest *request) {
             request->redirect("https://" + String(getWiFiIP()) + "/sd/format");
+        });
+        _server.on("/www/upload", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/www/upload");
+        });
+        _server.on("/www/list", HTTP_GET, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/www/list");
+        });
+        _server.on("/www/delete", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/www/delete");
         });
 
         // WiFi scan/test — serve on HTTP too (WiFi test disrupts connections)

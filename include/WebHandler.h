@@ -75,6 +75,12 @@ class WebHandler {
     File _otaFile;
     bool _otaUploadOk = false;
 
+    // WWW file upload state (for chunked body handler)
+    File _wwwUploadFile;
+    String _wwwUploadName;
+    size_t _wwwUploadSize = 0;
+    bool _wwwUploadOk = false;
+
     // WiFi test state
     String _wifiTestState = "idle";
     String _wifiTestMessage;

@@ -1509,6 +1509,157 @@ static esp_err_t sdFormatPostHandler(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// --- LittleFS www file upload/list/delete handlers ---
+
+static bool isValidWwwFilename(const char* name) {
+    if (!name || name[0] == '\0') return false;
+    // Reject path traversal
+    if (strstr(name, "..") || strchr(name, '/') || strchr(name, '\\')) return false;
+    size_t len = strlen(name);
+    if (len > 64) return false;
+    // Only allow alphanumeric, dots, hyphens, underscores
+    for (size_t i = 0; i < len; i++) {
+        char c = name[i];
+        if (!isalnum(c) && c != '.' && c != '-' && c != '_') return false;
+    }
+    // Must end with allowed extension
+    static const char* exts[] = {".html",".css",".js",".json",".ico",".png",".svg"};
+    for (int i = 0; i < 7; i++) {
+        size_t elen = strlen(exts[i]);
+        if (len > elen && strcmp(name + len - elen, exts[i]) == 0) return true;
+    }
+    return false;
+}
+
+static esp_err_t wwwUploadPostHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+
+    int remaining = req->content_len;
+    if (remaining <= 0 || remaining > 51200) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"File too large (max 50KB)\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    char filename[80] = {};
+    if (httpd_req_get_hdr_value_str(req, "X-Filename", filename, sizeof(filename)) != ESP_OK) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Missing X-Filename header\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    if (!isValidWwwFilename(filename)) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Invalid filename\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    String path = "/www/" + String(filename);
+    fs::File file = LittleFS.open(path.c_str(), FILE_WRITE);
+    if (!file) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Failed to open file for writing\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    char buf[1024];
+    int totalWritten = 0;
+    while (remaining > 0) {
+        int toRead = remaining > (int)sizeof(buf) ? (int)sizeof(buf) : remaining;
+        int ret = httpd_req_recv(req, buf, toRead);
+        if (ret <= 0) {
+            file.close();
+            LittleFS.remove(path.c_str());
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_send(req, "{\"error\":\"Receive failed\"}", HTTPD_RESP_USE_STRLEN);
+            return ESP_OK;
+        }
+        if (file.write((uint8_t*)buf, ret) != (size_t)ret) {
+            file.close();
+            LittleFS.remove(path.c_str());
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_send(req, "{\"error\":\"Write failed\"}", HTTPD_RESP_USE_STRLEN);
+            return ESP_OK;
+        }
+        remaining -= ret;
+        totalWritten += ret;
+    }
+
+    file.close();
+    Log.info("WWW", "Uploaded %s (%d bytes)", filename, totalWritten);
+
+    String json = "{\"status\":\"ok\",\"filename\":\"" + String(filename) +
+                  "\",\"size\":" + String(totalWritten) + "}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
+static esp_err_t wwwListGetHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+
+    File dir = LittleFS.open("/www");
+    if (!dir || !dir.isDirectory()) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"files\":[]}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    String json = "{\"files\":[";
+    bool first = true;
+    File entry = dir.openNextFile();
+    while (entry) {
+        if (!entry.isDirectory()) {
+            String name = entry.name();
+            int slashIdx = name.lastIndexOf('/');
+            if (slashIdx >= 0) name = name.substring(slashIdx + 1);
+            size_t size = entry.size();
+            if (!first) json += ",";
+            json += "{\"name\":\"" + name + "\",\"size\":" + String(size) + "}";
+            first = false;
+        }
+        entry.close();
+        entry = dir.openNextFile();
+    }
+    dir.close();
+    json += "]}";
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
+static esp_err_t wwwDeleteHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+
+    char filename[80] = {};
+    if (httpd_req_get_hdr_value_str(req, "X-Filename", filename, sizeof(filename)) != ESP_OK) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Missing X-Filename header\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    if (!isValidWwwFilename(filename)) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"Invalid filename\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    String path = "/www/" + String(filename);
+    if (!LittleFS.exists(path.c_str())) {
+        httpd_resp_send_404(req);
+        return ESP_OK;
+    }
+
+    LittleFS.remove(path.c_str());
+    Log.info("WWW", "Deleted %s", filename);
+
+    String json = "{\"status\":\"ok\",\"deleted\":\"" + String(filename) + "\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
 // --- Public API ---
 
 HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
@@ -1520,7 +1671,7 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
     cfg.prvtkey_pem = key;
     cfg.prvtkey_len = keyLen + 1;
     cfg.port_secure = 443;
-    cfg.httpd.max_uri_handlers = 35;
+    cfg.httpd.max_uri_handlers = 40;
 
     httpd_handle_t server = nullptr;
     esp_err_t err = httpd_ssl_start(&server, &cfg);
@@ -1785,6 +1936,38 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &heapGet);
+
+    httpd_uri_t wwwUploadPost = {
+        .uri = "/www/upload",
+        .method = HTTP_POST,
+        .handler = wwwUploadPostHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &wwwUploadPost);
+
+    httpd_uri_t wwwListGet = {
+        .uri = "/www/list",
+        .method = HTTP_GET,
+        .handler = wwwListGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &wwwListGet);
+
+    httpd_uri_t wwwDelete = {
+        .uri = "/www/upload",
+        .method = HTTP_DELETE,
+        .handler = wwwDeleteHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &wwwDelete);
+
+    httpd_uri_t wwwDeletePost = {
+        .uri = "/www/delete",
+        .method = HTTP_POST,
+        .handler = wwwDeleteHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &wwwDeletePost);
 
     Log.info("HTTPS", "HTTPS server started on port 443");
     return (HttpsServerHandle)server;

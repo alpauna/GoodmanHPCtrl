@@ -63,6 +63,24 @@ input[type=file]{color:var(--text);}
 <div id='revertInfo' class='info-text'>Checking for backup...</div>
 <button id='revertBtn' class='btn' disabled style='display:none'>Revert to Previous</button>
 <div id='revertStatus'></div>
+
+<hr>
+<h2>4. Web Pages</h2>
+<p class='info-text'>Upload or replace HTML/CSS/JS files in LittleFS flash storage.</p>
+<input type='file' id='wwwFileInput' accept='.html,.css,.js,.json,.ico,.png,.svg'>
+<div class='file-info' id='wwwFileInfo'></div>
+<button id='wwwUploadBtn' class='btn' disabled>Upload File</button>
+<progress id='wwwProgress' max='100' value='0'></progress>
+<div id='wwwStatus'></div>
+<div id='wwwListInfo' class='info-text'>Loading file list...</div>
+<table id='wwwTable' style='width:100%;border-collapse:collapse;display:none;margin-top:10px'>
+<thead><tr style='text-align:left;border-bottom:2px solid var(--border)'>
+<th style='padding:6px;color:var(--text)'>File</th>
+<th style='padding:6px;color:var(--text)'>Size</th>
+<th style='padding:6px;color:var(--text)'></th>
+</tr></thead>
+<tbody id='wwwFiles'></tbody>
+</table>
 </div>
 <script>
 var fileInput=document.getElementById('fileInput');
@@ -266,6 +284,129 @@ revertBtn.addEventListener('click',function(){
   };
   xhr.send();
 });
+var wwwFileInput=document.getElementById('wwwFileInput');
+var wwwUploadBtn=document.getElementById('wwwUploadBtn');
+var wwwProgress=document.getElementById('wwwProgress');
+var wwwStatus=document.getElementById('wwwStatus');
+var wwwFileInfo=document.getElementById('wwwFileInfo');
+var wwwListInfo=document.getElementById('wwwListInfo');
+var wwwTable=document.getElementById('wwwTable');
+var wwwFiles=document.getElementById('wwwFiles');
+
+function loadWwwList(){
+  var xhr=new XMLHttpRequest();
+  xhr.open('GET','/www/list',true);
+  xhr.onload=function(){
+    if(xhr.status===200){
+      var data=JSON.parse(xhr.responseText);
+      wwwFiles.innerHTML='';
+      if(data.files.length===0){
+        wwwListInfo.textContent='No files in LittleFS /www/';
+        wwwTable.style.display='none';
+        return;
+      }
+      wwwListInfo.textContent=data.files.length+' file(s) in LittleFS /www/';
+      wwwTable.style.display='';
+      data.files.sort(function(a,b){return a.name.localeCompare(b.name)});
+      data.files.forEach(function(f){
+        var tr=document.createElement('tr');
+        tr.style.borderBottom='1px solid var(--border)';
+        var sizeStr=f.size<1024?f.size+' B':Math.round(f.size/1024)+' KB';
+        tr.innerHTML="<td style='padding:6px;color:var(--text)'>"+f.name+"</td><td style='padding:6px;color:var(--text-secondary)'>"+sizeStr+"</td><td style='padding:6px'><button class='btn' style='background:#d32f2f;padding:4px 10px;font-size:12px' onclick=\"deleteWwwFile('"+f.name+"')\">Delete</button></td>";
+        wwwFiles.appendChild(tr);
+      });
+    }
+  };
+  xhr.onerror=function(){wwwListInfo.textContent='Could not load file list.';};
+  xhr.send();
+}
+loadWwwList();
+
+wwwFileInput.addEventListener('change',function(){
+  var f=wwwFileInput.files[0];
+  if(f){
+    wwwFileInfo.textContent=f.name+' ('+Math.round(f.size/1024)+' KB)';
+    wwwUploadBtn.disabled=false;
+    wwwStatus.textContent='';
+    wwwStatus.className='';
+  }else{
+    wwwFileInfo.textContent='';
+    wwwUploadBtn.disabled=true;
+  }
+});
+
+wwwUploadBtn.addEventListener('click',function(){
+  var f=wwwFileInput.files[0];
+  if(!f)return;
+  wwwUploadBtn.disabled=true;
+  wwwFileInput.disabled=true;
+  wwwProgress.style.display='block';
+  wwwProgress.value=0;
+  wwwStatus.textContent='Uploading...';
+  wwwStatus.className='';
+
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST','/www/upload',true);
+  xhr.setRequestHeader('X-Filename',f.name);
+  xhr.setRequestHeader('Content-Type','application/octet-stream');
+
+  xhr.upload.onprogress=function(e){
+    if(e.lengthComputable){
+      var pct=Math.round(e.loaded/e.total*100);
+      wwwProgress.value=pct;
+      wwwStatus.textContent='Uploading... '+pct+'%';
+    }
+  };
+
+  xhr.onload=function(){
+    wwwFileInput.disabled=false;
+    if(xhr.status===200){
+      var r=JSON.parse(xhr.responseText);
+      if(r.status==='ok'){
+        wwwProgress.value=100;
+        wwwStatus.className='success';
+        wwwStatus.textContent='Uploaded '+r.filename+' ('+r.size+' bytes)';
+        loadWwwList();
+      }else{
+        wwwStatus.className='error';
+        wwwStatus.textContent='Error: '+(r.error||'Unknown');
+        wwwUploadBtn.disabled=false;
+      }
+    }else{
+      wwwStatus.className='error';
+      wwwStatus.textContent='Upload failed (HTTP '+xhr.status+')';
+      wwwUploadBtn.disabled=false;
+    }
+  };
+
+  xhr.onerror=function(){
+    wwwStatus.className='error';
+    wwwStatus.textContent='Upload failed: connection error';
+    wwwUploadBtn.disabled=false;
+    wwwFileInput.disabled=false;
+  };
+
+  xhr.send(f);
+});
+
+function deleteWwwFile(name){
+  if(!confirm('Delete '+name+'?'))return;
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST','/www/delete',true);
+  xhr.setRequestHeader('X-Filename',name);
+  xhr.onload=function(){
+    if(xhr.status===200){
+      wwwStatus.className='success';
+      wwwStatus.textContent='Deleted '+name;
+      loadWwwList();
+    }else{
+      wwwStatus.className='error';
+      wwwStatus.textContent='Delete failed';
+    }
+  };
+  xhr.onerror=function(){wwwStatus.className='error';wwwStatus.textContent='Delete failed: connection error';};
+  xhr.send();
+}
 fetch('/theme').then(function(r){return r.json()}).then(function(d){var t=d.theme||'light';document.documentElement.dataset.theme=t;localStorage.setItem('hp-theme',t);}).catch(function(){});
 </script>
 </body></html>
