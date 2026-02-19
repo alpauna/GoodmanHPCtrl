@@ -73,6 +73,8 @@ class Config {
 
     // Certificate loading for HTTPS
     bool loadCertificates(const char* certFile, const char* keyFile);
+    bool generateSelfSignedCert();
+    bool isCertExpired() const;
     bool hasCertificates() const { return _certBuf != nullptr && _keyBuf != nullptr; }
     const uint8_t* getCert() const { return _certBuf; }
     size_t getCertLen() const { return _certLen; }

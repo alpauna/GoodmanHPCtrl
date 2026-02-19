@@ -461,6 +461,14 @@ void setup() {
     }
     // Load TLS certificates for HTTPS server
     config.loadCertificates("/cert.pem", "/key.pem");
+    if (!config.hasCertificates()) {
+      Log.warn("HTTPS", "No certificates found, generating self-signed cert...");
+      if (config.generateSelfSignedCert()) {
+        Log.info("HTTPS", "Self-signed certificate generated and saved to SD");
+      } else {
+        Log.error("HTTPS", "Certificate generation failed");
+      }
+    }
   }
   Serial.println("SD Card is read.");
   WiFi.onEvent(onWiFiEvent);

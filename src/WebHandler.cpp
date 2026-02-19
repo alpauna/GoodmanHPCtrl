@@ -126,6 +126,14 @@ void WebHandler::syncNtpTime() {
         char timeStr[64];
         strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
         Log.info("NTP", "Time synced: %s", timeStr);
+
+        // Check certificate expiration after first NTP sync
+        if (_config && _config->hasCertificates() && _config->isCertExpired()) {
+            Log.warn("HTTPS", "Certificate expired, regenerating...");
+            if (_config->generateSelfSignedCert()) {
+                Log.info("HTTPS", "New certificate generated — reboot required to activate");
+            }
+        }
     } else {
         Log.error("NTP", "Failed to sync time from NTP");
     }

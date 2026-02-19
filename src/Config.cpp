@@ -1,6 +1,11 @@
 #include "Config.h"
 #include "esp_hmac.h"
 #include "esp_random.h"
+#include "mbedtls/x509_crt.h"
+#include "mbedtls/pk.h"
+#include "mbedtls/entropy.h"
+#include "mbedtls/ctr_drbg.h"
+#include "mbedtls/bignum.h"
 
 // External callbacks for temp sensors
 extern void tempSensorUpdateCallback(TempSensor* sensor);
@@ -680,6 +685,157 @@ bool Config::loadCertificates(const char* certFile, const char* keyFile) {
         return false;
     }
     return true;
+}
+
+bool Config::generateSelfSignedCert() {
+    if (!_sdInitialized) return false;
+
+    // Free any existing cert/key buffers
+    if (_certBuf) { free(_certBuf); _certBuf = nullptr; _certLen = 0; }
+    if (_keyBuf) { free(_keyBuf); _keyBuf = nullptr; _keyLen = 0; }
+
+    mbedtls_pk_context key;
+    mbedtls_x509write_cert crt;
+    mbedtls_entropy_context entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+    mbedtls_mpi serial;
+    bool success = false;
+
+    mbedtls_pk_init(&key);
+    mbedtls_x509write_crt_init(&crt);
+    mbedtls_entropy_init(&entropy);
+    mbedtls_ctr_drbg_init(&ctr_drbg);
+    mbedtls_mpi_init(&serial);
+
+    // Seed RNG
+    const char* pers = "esp32_cert_gen";
+    int ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
+                                     (const uint8_t*)pers, strlen(pers));
+    if (ret != 0) goto cleanup;
+
+    // Generate ECC P-256 key pair
+    ret = mbedtls_pk_setup(&key, mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY));
+    if (ret != 0) goto cleanup;
+
+    ret = mbedtls_ecp_gen_key(MBEDTLS_ECP_DP_SECP256R1, mbedtls_pk_ec(key),
+                               mbedtls_ctr_drbg_random, &ctr_drbg);
+    if (ret != 0) goto cleanup;
+
+    // Set up certificate
+    mbedtls_x509write_crt_set_version(&crt, MBEDTLS_X509_CRT_VERSION_3);
+    mbedtls_x509write_crt_set_md_alg(&crt, MBEDTLS_MD_SHA256);
+    mbedtls_x509write_crt_set_subject_key(&crt, &key);
+    mbedtls_x509write_crt_set_issuer_key(&crt, &key);
+
+    ret = mbedtls_x509write_crt_set_subject_name(&crt, "CN=ESP32");
+    if (ret != 0) goto cleanup;
+    ret = mbedtls_x509write_crt_set_issuer_name(&crt, "CN=ESP32");
+    if (ret != 0) goto cleanup;
+
+    // Random serial number
+    ret = mbedtls_mpi_lset(&serial, (int)esp_random());
+    if (ret != 0) goto cleanup;
+    ret = mbedtls_x509write_crt_set_serial(&crt, &serial);
+    if (ret != 0) goto cleanup;
+
+    // Validity: now to 10 years from now
+    {
+        struct tm timeinfo;
+        char notBefore[16], notAfter[16];
+        if (getLocalTime(&timeinfo, 0)) {
+            // NTP available — use real time
+            strftime(notBefore, sizeof(notBefore), "%Y%m%d%H%M%S", &timeinfo);
+            timeinfo.tm_year += 10;
+            strftime(notAfter, sizeof(notAfter), "%Y%m%d%H%M%S", &timeinfo);
+        } else {
+            // No NTP — use a fixed range
+            strcpy(notBefore, "20260101000000");
+            strcpy(notAfter,  "20360101000000");
+        }
+        ret = mbedtls_x509write_crt_set_validity(&crt, notBefore, notAfter);
+        if (ret != 0) goto cleanup;
+    }
+
+    ret = mbedtls_x509write_crt_set_basic_constraints(&crt, 1, -1);
+    if (ret != 0) goto cleanup;
+    ret = mbedtls_x509write_crt_set_subject_key_identifier(&crt);
+    if (ret != 0) goto cleanup;
+    ret = mbedtls_x509write_crt_set_authority_key_identifier(&crt);
+    if (ret != 0) goto cleanup;
+
+    // Write cert and key as PEM to PSRAM buffers
+    {
+        const size_t bufSize = 4096;
+        uint8_t* certPem = (uint8_t*)ps_malloc(bufSize);
+        uint8_t* keyPem = (uint8_t*)ps_malloc(bufSize);
+        if (!certPem || !keyPem) {
+            if (certPem) free(certPem);
+            if (keyPem) free(keyPem);
+            goto cleanup;
+        }
+
+        ret = mbedtls_x509write_crt_pem(&crt, certPem, bufSize,
+                                          mbedtls_ctr_drbg_random, &ctr_drbg);
+        if (ret != 0) { free(certPem); free(keyPem); goto cleanup; }
+
+        ret = mbedtls_pk_write_key_pem(&key, keyPem, bufSize);
+        if (ret != 0) { free(certPem); free(keyPem); goto cleanup; }
+
+        _certLen = strlen((char*)certPem);
+        _keyLen = strlen((char*)keyPem);
+
+        // Save to SD card
+        fs::File cf = SD.open("/cert.pem", FILE_WRITE);
+        if (cf) { cf.write(certPem, _certLen); cf.close(); }
+        else { free(certPem); free(keyPem); goto cleanup; }
+
+        fs::File kf = SD.open("/key.pem", FILE_WRITE);
+        if (kf) { kf.write(keyPem, _keyLen); kf.close(); }
+        else { free(certPem); free(keyPem); goto cleanup; }
+
+        // Keep buffers for in-memory use
+        _certBuf = certPem;
+        _keyBuf = keyPem;
+        success = true;
+    }
+
+cleanup:
+    mbedtls_mpi_free(&serial);
+    mbedtls_x509write_crt_free(&crt);
+    mbedtls_pk_free(&key);
+    mbedtls_ctr_drbg_free(&ctr_drbg);
+    mbedtls_entropy_free(&entropy);
+    return success;
+}
+
+bool Config::isCertExpired() const {
+    if (!_certBuf || _certLen == 0) return false;
+
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo, 0)) return false;  // No NTP — can't check, assume valid
+
+    mbedtls_x509_crt crt;
+    mbedtls_x509_crt_init(&crt);
+
+    int ret = mbedtls_x509_crt_parse(&crt, _certBuf, _certLen + 1);
+    if (ret != 0) {
+        mbedtls_x509_crt_free(&crt);
+        return false;  // Parse error — don't regenerate
+    }
+
+    // Compare not_after with current time
+    const mbedtls_x509_time& na = crt.valid_to;
+    bool expired = false;
+    int year = timeinfo.tm_year + 1900;
+    int mon = timeinfo.tm_mon + 1;
+    int day = timeinfo.tm_mday;
+
+    if (year > na.year) expired = true;
+    else if (year == na.year && mon > na.mon) expired = true;
+    else if (year == na.year && mon == na.mon && day > na.day) expired = true;
+
+    mbedtls_x509_crt_free(&crt);
+    return expired;
 }
 
 bool Config::updateRuntime(const char* filename, uint32_t heatRuntimeMs, bool softwareDefrost) {
