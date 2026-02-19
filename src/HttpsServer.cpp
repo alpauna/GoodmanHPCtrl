@@ -1502,7 +1502,7 @@ static esp_err_t sdFormatPostHandler(httpd_req_t* req) {
 
     httpd_resp_set_type(req, "application/json");
     if (ok) {
-        httpd_resp_send(req, "{\"status\":\"ok\",\"message\":\"SD card formatted. Config, logs, certs, and web pages are gone. Enable FTP to upload HTML files, then reboot.\"}", HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send(req, "{\"status\":\"ok\",\"message\":\"SD card formatted. Credentials preserved. Certs will auto-generate on reboot.\"}", HTTPD_RESP_USE_STRLEN);
     } else {
         httpd_resp_send(req, "{\"error\":\"Format failed\"}", HTTPD_RESP_USE_STRLEN);
     }

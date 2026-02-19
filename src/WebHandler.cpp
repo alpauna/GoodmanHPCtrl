@@ -1110,7 +1110,7 @@ void WebHandler::setupRoutes() {
             ProjectInfo* proj = _config->getProjectInfo();
             bool ok = _config->formatSD(tempSensors, *proj);
             if (ok) {
-                request->send(200, "application/json", "{\"status\":\"ok\",\"message\":\"SD card formatted. Config, logs, certs, and web pages are gone. Enable FTP to upload HTML files, then reboot.\"}");
+                request->send(200, "application/json", "{\"status\":\"ok\",\"message\":\"SD card formatted. Credentials preserved. Certs will auto-generate on reboot.\"}");
             } else {
                 request->send(500, "application/json", "{\"error\":\"Format failed\"}");
             }

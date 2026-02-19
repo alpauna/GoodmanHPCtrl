@@ -109,7 +109,7 @@ button:hover{background:#45a049;}
 </fieldset>
 <fieldset><legend>SD Card</legend>
 <div id='sdInfo' style='font-size:13px;padding:6px 10px;border-radius:4px;background:var(--code-bg);color:var(--text);margin-bottom:8px;'>Loading...</div>
-<p style='color:#e74c3c;font-size:13px;margin:8px 0;'><strong>Warning:</strong> Formatting will erase ALL data on the SD card including config, logs, certificates, and web pages. A fresh default config will be created. You will need to use FTP to re-upload HTML files.</p>
+<p style='color:#e74c3c;font-size:13px;margin:8px 0;'><strong>Warning:</strong> Formatting will erase logs and temperature history from the SD card. WiFi, MQTT, and admin credentials will be preserved. Certificates will be auto-generated if missing. Web pages are stored in flash and are not affected.</p>
 <label>Type FORMAT to confirm</label>
 <input type='text' id='sdFormatConfirm' oninput="document.getElementById('sdFormatBtn').disabled=this.value!=='FORMAT'">
 <button type='button' class='btn-sm btn-red' id='sdFormatBtn' disabled onclick='formatSD()' style='margin-top:8px'>Format SD Card</button>
@@ -205,7 +205,7 @@ el.textContent='Type: '+d.type+' | Total: '+d.totalMB+' MB | Used: '+d.usedMB+' 
 }
 loadSDInfo();
 function formatSD(){
-if(!window.confirm('This will ERASE ALL DATA on the SD card. Are you sure?'))return;
+if(!window.confirm('This will erase logs and temp history from the SD card. Credentials and certs are preserved. Continue?'))return;
 var st=document.getElementById('sdFormatStatus');
 st.textContent='Formatting...';st.className='info';st.style.display='block';
 document.getElementById('sdFormatBtn').disabled=true;
