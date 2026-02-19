@@ -25,6 +25,7 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 .pill{padding:4px 10px;border-radius:12px;font-size:12px;font-weight:bold;}
 .pill.ok{background:#e8f5e9;color:#2e7d32;}
 .pill.active{background:#ffebee;color:#c62828;}
+.pill.invalid{background:#fff3e0;color:#e65100;}
 .temp-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-light);}
 .temp-row:last-child{border-bottom:none;}
 .temp-name{color:var(--text-secondary);font-size:14px;}
@@ -187,11 +188,15 @@ function update(d){
   setPill('fShortCycle',d.shortCycleProtection);
   setPill('fDefrost',d.defrost);
   var lpsEl=document.getElementById('fLPS');if(lpsEl){lpsEl.textContent=d.lpsFault?'LPS Fault':'LPS No Fault';setPill('fLPS',d.lpsFault);}
-  var ltEl=document.getElementById('fLowTemp');if(ltEl){ltEl.textContent=d.lowTemp?'Low Temp':'Temp Ok';setPill('fLowTemp',d.lowTemp);}
-  var cotEl=document.getElementById('fCompOT');if(cotEl){cotEl.textContent=d.compressorOverTemp?'Comp OT':'Comp Ok';setPill('fCompOT',d.compressorOverTemp);}
-  var slEl=document.getElementById('fSuctLT');if(slEl){slEl.textContent=d.suctionLowTemp?'Suct LT':'Suct LT Ok';setPill('fSuctLT',d.suctionLowTemp);}
+  var ts=d.temps||{};
+  var ambValid=ts.AMBIENT_TEMP!==undefined;
+  var compValid=ts.COMPRESSOR_TEMP!==undefined;
+  var suctValid=ts.SUCTION_TEMP!==undefined;
+  var ltEl=document.getElementById('fLowTemp');if(ltEl){ltEl.textContent=!ambValid?'Ambient N/A':d.lowTemp?'Low Temp':'Temp Ok';ltEl.className='pill '+(!ambValid?'invalid':d.lowTemp?'active':'ok');}
+  var cotEl=document.getElementById('fCompOT');if(cotEl){cotEl.textContent=!compValid?'Comp N/A':d.compressorOverTemp?'Comp OT':'Comp Ok';cotEl.className='pill '+(!compValid?'invalid':d.compressorOverTemp?'active':'ok');}
+  var slEl=document.getElementById('fSuctLT');if(slEl){slEl.textContent=!suctValid?'Suct N/A':d.suctionLowTemp?'Suct LT':'Suct LT Ok';slEl.className='pill '+(!suctValid?'invalid':d.suctionLowTemp?'active':'ok');}
   var hsEl=document.getElementById('fHighSuct');
-  if(hsEl){var suctVal=(d.temps&&d.temps.SUCTION_TEMP!==undefined)?d.temps.SUCTION_TEMP.toFixed(0):'--';hsEl.textContent=(d.highSuctionTemp?'High Suct: ':'Suct Temp: ')+suctVal+'\u00B0F';setPill('fHighSuct',d.highSuctionTemp);}
+  if(hsEl){var suctVal=suctValid?ts.SUCTION_TEMP.toFixed(0):'--';hsEl.textContent=(d.highSuctionTemp?'High Suct: ':'Suct Temp: ')+suctVal+'\u00B0F';hsEl.className='pill '+(!suctValid?'invalid':d.highSuctionTemp?'active':'ok');}
   var rvEl=document.getElementById('fRvFail');if(rvEl){rvEl.textContent=d.rvFail?'RV Fail':'RV Pass';setPill('fRvFail',d.rvFail);}
   var rvBtn=document.getElementById('clearRvFailBtn');if(rvBtn)rvBtn.style.display=d.rvFail?'inline-block':'none';
   setPill('fRvDFH',d.defrostTransition);
