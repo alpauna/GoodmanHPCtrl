@@ -1687,8 +1687,25 @@ static esp_err_t i2cScanHandler(httpd_req_t* req) {
     String json = "[";
     bool first = true;
     for (uint8_t addr = 1; addr < 127; addr++) {
-        Wire.beginTransmission(addr);
-        if (Wire.endTransmission() == 0) {
+        // MCP9600 at 0x67: bare I2C probe crashes some chips — do a full
+        // register read (Device ID at 0x20) instead of address-only probe.
+        // See: https://forums.adafruit.com/viewtopic.php?t=163742
+        bool found = false;
+        if (addr == 0x67) {
+            Wire.beginTransmission(addr);
+            Wire.write(0x20);  // Device ID register
+            if (Wire.endTransmission() == 0) {
+                uint8_t n = Wire.requestFrom(addr, (uint8_t)2);
+                if (n == 2) {
+                    Wire.read(); Wire.read();
+                    found = true;
+                }
+            }
+        } else {
+            Wire.beginTransmission(addr);
+            found = (Wire.endTransmission() == 0);
+        }
+        if (found) {
             if (!first) json += ",";
             char hex[7];
             snprintf(hex, sizeof(hex), "0x%02X", addr);

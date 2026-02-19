@@ -380,23 +380,10 @@ void setup() {
 
   Wire.begin(_sdaPin, _sclPin);
 
-  // Scan I2C bus for devices
-  uint8_t i2cCount = 0;
-  Serial.println("I2C scan starting...");
-  for (uint8_t addr = 1; addr < 127; addr++) {
-    Wire.beginTransmission(addr);
-    if (Wire.endTransmission() == 0) {
-      Serial.printf("I2C device found at 0x%02X\r\n", addr);
-      i2cCount++;
-    }
-  }
-  if (i2cCount == 0) {
-    Serial.println("I2C scan: no devices found");
-  } else {
-    Serial.printf("I2C scan: %d device(s) found\r\n", i2cCount);
-  }
-
-  // Initialize MCP9600 thermocouple amplifier at 0x67
+  // Initialize MCP9600 FIRST — bare I2C probe (beginTransmission/endTransmission
+  // with no data) crashes some MCP9600 chips, corrupting the I2C bus.
+  // See: https://forums.adafruit.com/viewtopic.php?t=163742
+  // Workaround: skip probe, call begin() directly which does a full register read.
   bool mcp9600Ready = false;
   if (mcp9600.begin(0x67)) {
     mcp9600.setADCresolution(MCP9600_ADCRESOLUTION_18);
@@ -407,6 +394,24 @@ void setup() {
     Serial.println("MCP9600 thermocouple amplifier initialized at 0x67");
   } else {
     Serial.println("MCP9600 not found at 0x67, LIQUID_TEMP will be unavailable");
+  }
+
+  // Scan I2C bus for devices — skip 0x67 (MCP9600) to avoid crashing it
+  uint8_t i2cCount = mcp9600Ready ? 1 : 0;
+  Serial.println("I2C scan starting...");
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    if (addr == 0x67) continue;  // MCP9600: bare probe crashes some chips
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("I2C device found at 0x%02X\r\n", addr);
+      i2cCount++;
+    }
+  }
+  if (mcp9600Ready) Serial.println("I2C device found at 0x67 (MCP9600, probed via driver)");
+  if (i2cCount == 0) {
+    Serial.println("I2C scan: no devices found");
+  } else {
+    Serial.printf("I2C scan: %d device(s) found\r\n", i2cCount);
   }
 
   // Initialize OLED display (SSD1306 128x64 at 0x3C)
