@@ -38,6 +38,18 @@ tr:hover td{background:var(--hover-bg);}
 .sc-badge{background:#ff9800;color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;margin-left:6px;}
 .state-badge{display:inline-block;padding:4px 14px;border-radius:12px;font-weight:bold;font-size:13px;color:#fff;margin-bottom:8px;}
 .footer{text-align:center;color:var(--text-muted);font-size:11px;margin-top:8px;}
+select{background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:12px;}
+select.dup{border-color:#e74c3c;background:#ffebee;}
+.btn-save{background:#4CAF50;color:#fff;padding:8px 20px;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:bold;margin:8px 0;}
+.btn-save:hover{background:#45a049;}
+.btn-save:disabled{opacity:0.4;cursor:not-allowed;}
+.btn-refresh{background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 12px;cursor:pointer;font-size:12px;margin-left:8px;}
+.btn-refresh:hover{background:var(--hover-bg);}
+.msg{font-size:12px;padding:6px 10px;border-radius:4px;margin:6px 0;display:none;}
+.msg.ok{display:block;background:#c8e6c9;color:#2e7d32;}
+.msg.err{display:block;background:#ffcdd2;color:#c62828;}
+.info-text{font-size:11px;color:var(--text-muted);margin:4px 0;}
+.addr{font-family:monospace;font-size:12px;color:#4CAF50;}
 </style></head><body>
 <nav><span class='brand'>Goodman HP</span>
 <button class='hamburger' onclick='this.nextElementSibling.classList.toggle("open")'><span></span><span></span><span></span></button>
@@ -49,7 +61,7 @@ tr:hover td{background:var(--hover-bg);}
 <a href='/update'>Update</a>
 <a href='/log/view'>Log</a>
 <a href='/heap/view'>Heap</a>
-<a href='#' class='reboot' onclick="if(confirm('Reboot device?')){fetch('/reboot',{method:'POST',headers:{'Authorization':'Basic '+btoa(prompt('user:pass','admin:'))}}).then(r=>r.ok?alert('Rebooting...'):alert('Failed'))};return false">Reboot</a>
+<a href='#' class='reboot' onclick="if(confirm('Reboot device?')){var x=new XMLHttpRequest();x.open('POST','/reboot');x.onload=function(){alert(x.status===200?'Rebooting...':'Failed')};x.send()};return false">Reboot</a>
 </div></nav>
 <div class='content'>
 
@@ -80,19 +92,36 @@ This will auto shut off after <span class='countdown' id='countdown'>30:00</span
 <tbody id='outputBody'></tbody>
 </table>
 
-<h2>Temperatures</h2>
+<h2>OneWire Temperatures</h2>
 <table>
-<thead><tr><th>Sensor</th><th>Value</th></tr></thead>
-<tbody id='tempBody'></tbody>
+<thead><tr><th>Address</th><th>Value</th><th>Assignment</th></tr></thead>
+<tbody id='owBody'></tbody>
 </table>
+
+<h2>I2C Devices <button class='btn-refresh' onclick='scanI2C()'>Scan</button></h2>
+<table>
+<thead><tr><th>Address</th><th>Driver</th><th>Role</th></tr></thead>
+<tbody id='i2cBody'></tbody>
+</table>
+<div class='info-text'>I2C driver changes require a reboot to take effect.</div>
+
+<div style='margin:12px 0'>
+<button class='btn-save' id='saveBtn' onclick='saveAssignments()'>Save Assignments</button>
+<div class='msg' id='saveMsg'></div>
+</div>
 
 <div class='footer' id='footer'>Connecting...</div>
 </div>
 <script>
 var stateColors={'COOL':'#2196F3','HEAT':'#f44336','DEFROST':'#ff9800','OFF':'#9e9e9e','ERROR':'#d32f2f','LOW_TEMP':'#7b1fa2'};
-var tempNames={'COMPRESSOR_TEMP':'Compressor','SUCTION_TEMP':'Suction','AMBIENT_TEMP':'Ambient','CONDENSER_TEMP':'Condenser','LIQUID_TEMP':'Liquid Line'};
+var roles=['COMPRESSOR_TEMP','SUCTION_TEMP','AMBIENT_TEMP','CONDENSER_TEMP','LIQUID_TEMP'];
+var roleLabels={'COMPRESSOR_TEMP':'Compressor','SUCTION_TEMP':'Suction','AMBIENT_TEMP':'Ambient','CONDENSER_TEMP':'Condenser','LIQUID_TEMP':'Liquid Line'};
+var drivers=['','MCP9600','Other'];
+var driverLabels={'':'Unassigned','MCP9600':'MCP9600 (Thermocouple)','Other':'Other'};
 var manualActive=false;
 var authHeader='';
+var tempSensors=[];
+var i2cDevices=[];
 
 function getAuth(){
   var creds=prompt('Enter credentials (user:pass)','admin:');
@@ -147,6 +176,192 @@ function updateCountdown(sec){
   el.textContent=m+':'+(s<10?'0':'')+s;
 }
 
+function shortAddr(a){
+  if(!a||a.length<8) return a||'';
+  return a.substring(0,4)+'..'+a.substring(a.length-4);
+}
+
+function roleSelect(id,current,isI2C){
+  var h='<select id="'+id+'" onchange="checkDups()">';
+  h+='<option value="">Unassigned</option>';
+  for(var i=0;i<roles.length;i++){
+    var sel=(current===roles[i])?' selected':'';
+    h+='<option value="'+roles[i]+'"'+sel+'>'+(roleLabels[roles[i]]||roles[i])+'</option>';
+  }
+  h+='</select>';
+  return h;
+}
+
+function driverSelect(id,current){
+  var h='<select id="'+id+'" onchange="onDriverChange(\''+id+'\')">';
+  for(var i=0;i<drivers.length;i++){
+    var sel=(current===drivers[i])?' selected':'';
+    h+='<option value="'+drivers[i]+'"'+sel+'>'+(driverLabels[drivers[i]]||drivers[i])+'</option>';
+  }
+  h+='</select>';
+  return h;
+}
+
+function onDriverChange(selId){
+  var sel=document.getElementById(selId);
+  var idx=selId.replace('i2c_drv_','');
+  var cell=document.getElementById('i2c_rolecell_'+idx);
+  if(cell){
+    var roleEl=document.getElementById('i2c_role_'+idx);
+    var curRole=roleEl?roleEl.value:'';
+    cell.innerHTML=(sel.value==='MCP9600')?roleSelect('i2c_role_'+idx,curRole,true):'<span class="v-off">--</span>';
+  }
+  checkDups();
+}
+
+function checkDups(){
+  var used={};
+  var sels=document.querySelectorAll('select[id^="ow_role_"],select[id^="i2c_role_"]');
+  // Count roles
+  for(var i=0;i<sels.length;i++){
+    var v=sels[i].value;
+    if(v){used[v]=(used[v]||0)+1;}
+  }
+  // Highlight duplicates
+  for(var i=0;i<sels.length;i++){
+    var v=sels[i].value;
+    sels[i].className=(v&&used[v]>1)?'dup':'';
+  }
+}
+
+function loadTemps(){
+  fetch('/temps').then(function(r){return r.json();}).then(function(data){
+    tempSensors=data;
+    renderOneWire();
+    renderI2CRoles();
+    checkDups();
+  });
+}
+
+function renderOneWire(){
+  var tb=document.getElementById('owBody'),h='';
+  var idx=0;
+  for(var i=0;i<tempSensors.length;i++){
+    var s=tempSensors[i];
+    if(s.type!=='onewire') continue;
+    var valStr=s.valid==='true'?parseFloat(s.value).toFixed(1)+'\u00B0F':'<span class="v-off">--</span>';
+    h+='<tr>';
+    h+='<td class="addr" title="'+s.devid+'">'+shortAddr(s.devid)+'</td>';
+    h+='<td>'+valStr+'</td>';
+    h+='<td>'+roleSelect('ow_role_'+idx,s.name,false)+'</td>';
+    h+='</tr>';
+    idx++;
+  }
+  if(idx===0) h='<tr><td colspan="3" class="v-off">No OneWire sensors found</td></tr>';
+  tb.innerHTML=h;
+}
+
+function scanI2C(){
+  fetch('/i2c/scan').then(function(r){return r.json();}).then(function(data){
+    i2cDevices=data;
+    renderI2C();
+    checkDups();
+  }).catch(function(){
+    document.getElementById('i2cBody').innerHTML='<tr><td colspan="3" class="v-off">Scan failed</td></tr>';
+  });
+}
+
+function renderI2C(){
+  var tb=document.getElementById('i2cBody'),h='';
+  // Build lookup of current I2C temp sensors from /temps data
+  var i2cTemps={};
+  for(var i=0;i<tempSensors.length;i++){
+    if(tempSensors[i].type==='i2c'){
+      i2cTemps[tempSensors[i].devid]={name:tempSensors[i].name,driver:'MCP9600'};
+    }
+  }
+  for(var i=0;i<i2cDevices.length;i++){
+    var d=i2cDevices[i];
+    var addr=d.address;
+    var cur=i2cTemps[addr]||{driver:'',name:''};
+    var roleCell='';
+    if(cur.driver==='MCP9600'){
+      roleCell=roleSelect('i2c_role_'+i,cur.name,true);
+    } else {
+      roleCell='<span class="v-off">--</span>';
+    }
+    h+='<tr>';
+    h+='<td class="addr">'+addr+'</td>';
+    h+='<td>'+driverSelect('i2c_drv_'+i,cur.driver)+'</td>';
+    h+='<td id="i2c_rolecell_'+i+'">'+roleCell+'</td>';
+    h+='</tr>';
+  }
+  if(i2cDevices.length===0) h='<tr><td colspan="3" class="v-off">No I2C devices found</td></tr>';
+  tb.innerHTML=h;
+}
+
+function renderI2CRoles(){
+  // Re-render I2C roles if devices already scanned
+  if(i2cDevices.length>0) renderI2C();
+}
+
+function saveAssignments(){
+  var hdr=authHeader||getAuth();
+  if(!hdr) return;
+  authHeader=hdr;
+
+  // Check for duplicates
+  var used={};
+  var sels=document.querySelectorAll('select[id^="ow_role_"],select[id^="i2c_role_"]');
+  for(var i=0;i<sels.length;i++){
+    var v=sels[i].value;
+    if(v){
+      if(used[v]){
+        showMsg('err','Duplicate role: '+(roleLabels[v]||v)+'. Each role can only be assigned once.');
+        return;
+      }
+      used[v]=true;
+    }
+  }
+
+  var body={onewire:{},i2c:{}};
+
+  // Collect OneWire assignments
+  var owIdx=0;
+  for(var i=0;i<tempSensors.length;i++){
+    if(tempSensors[i].type!=='onewire') continue;
+    var sel=document.getElementById('ow_role_'+owIdx);
+    if(sel&&sel.value){
+      body.onewire[tempSensors[i].devid]=sel.value;
+    }
+    owIdx++;
+  }
+
+  // Collect I2C assignments
+  for(var i=0;i<i2cDevices.length;i++){
+    var drvSel=document.getElementById('i2c_drv_'+i);
+    var roleSel=document.getElementById('i2c_role_'+i);
+    var drv=drvSel?drvSel.value:'';
+    var role=roleSel?roleSel.value:'';
+    if(drv){
+      body.i2c[i2cDevices[i].address]={driver:drv,role:role};
+    }
+  }
+
+  document.getElementById('saveBtn').disabled=true;
+  fetch('/sensors/assign',{method:'POST',headers:{'Content-Type':'application/json','Authorization':hdr},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(d){
+    document.getElementById('saveBtn').disabled=false;
+    if(d.error){showMsg('err',d.error);}
+    else{showMsg('ok','Assignments saved successfully.');}
+    loadTemps();
+  }).catch(function(e){
+    document.getElementById('saveBtn').disabled=false;
+    showMsg('err','Error: '+e);
+  });
+}
+
+function showMsg(type,text){
+  var el=document.getElementById('saveMsg');
+  el.className='msg '+type;
+  el.textContent=text;
+  setTimeout(function(){el.className='msg';},5000);
+}
+
 function refresh(){
   var hdrs={};
   if(authHeader) hdrs['Authorization']=authHeader;
@@ -164,7 +379,7 @@ function refresh(){
     updateWarnBox();
     updateCountdown(d.manualOverrideRemainSec||0);
 
-    // Defrost button: enabled only in HEAT mode, not already in defrost, not in manual override
+    // Defrost button
     var dfBtn=document.getElementById('defrostBtn');
     var dfSt=document.getElementById('defrostStatus');
     var canDefrost=(d.state==='HEAT'&&!d.defrost&&!d.defrostTransition&&!manualActive);
@@ -204,22 +419,9 @@ function refresh(){
     }
     ob.innerHTML=oh;
 
-    // Temps
-    var tb=document.getElementById('tempBody'),th='';
-    var ts=d.temps||{};
-    var order=['AMBIENT_TEMP','COMPRESSOR_TEMP','SUCTION_TEMP','CONDENSER_TEMP','LIQUID_TEMP'];
-    for(var i=0;i<order.length;i++){
-      var k=order[i];
-      var name=tempNames[k]||k;
-      var val=ts[k];
-      th+='<tr><td>'+name+'</td><td>'+(val!==undefined?val.toFixed(1)+'\u00B0F':'<span class="v-off">--</span>')+'</td></tr>';
-    }
-    tb.innerHTML=th;
-
     var now=new Date();
     var tstr=now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0')+':'+now.getSeconds().toString().padStart(2,'0');
-    var ft=document.getElementById('footer');
-    ft.textContent='Last updated: '+tstr;
+    document.getElementById('footer').textContent='Last updated: '+tstr;
   }).catch(function(e){
     document.getElementById('footer').textContent='Connection error';
   });
@@ -228,5 +430,7 @@ function refresh(){
 fetch('/theme').then(function(r){return r.json();}).then(function(d){
   if(d.theme){document.documentElement.dataset.theme=d.theme;localStorage.setItem('hp-theme',d.theme);}
 });
+loadTemps();
+scanI2C();
 refresh();setInterval(refresh,2000);
 </script></body></html>

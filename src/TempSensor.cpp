@@ -9,6 +9,7 @@ TempSensor::TempSensor()
     , _onUpdate(nullptr)
     , _onChange(nullptr)
     , _mcp9600(nullptr)
+    , _i2cAddress(0)
 {
     _deviceAddress = new uint8_t[sizeof(DeviceAddress)];
     memset(_deviceAddress, 0, sizeof(DeviceAddress));
@@ -23,6 +24,7 @@ TempSensor::TempSensor(const String& description)
     , _onUpdate(nullptr)
     , _onChange(nullptr)
     , _mcp9600(nullptr)
+    , _i2cAddress(0)
 {
     _deviceAddress = new uint8_t[sizeof(DeviceAddress)];
     memset(_deviceAddress, 0, sizeof(DeviceAddress));

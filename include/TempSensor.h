@@ -30,6 +30,9 @@ class TempSensor {
     void setPrevious(float previous) { _previous = previous; }
     void setValid(bool valid) { _valid = valid; }
     void setMCP9600(Adafruit_MCP9600* mcp) { _mcp9600 = mcp; }
+    bool hasMCP9600() const { return _mcp9600 != nullptr; }
+    void setI2CAddress(uint8_t addr) { _i2cAddress = addr; }
+    uint8_t getI2CAddress() const { return _i2cAddress; }
 
     // Callbacks
     void setUpdateCallback(TempSensorCallback callback) { _onUpdate = callback; }
@@ -63,6 +66,7 @@ class TempSensor {
     TempSensorCallback _onUpdate;
     TempSensorCallback _onChange;
     Adafruit_MCP9600* _mcp9600;
+    uint8_t _i2cAddress;
 };
 
 #endif
