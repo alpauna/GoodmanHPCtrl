@@ -21,6 +21,7 @@
 #include "MQTTHandler.h"
 #include "TempHistory.h"
 #include "DisplayManager.h"
+#include <max6675.h>
 
 #ifndef AP_PASSWORD
 #error "AP_PASSWORD not defined — create secrets.ini with: -D AP_PASSWORD=\\\"yourpassword\\\""
@@ -116,6 +117,7 @@ const u_int8_t _fanPin = GPIO_NUM_4;
 const u_int8_t _CNTPin = GPIO_NUM_5;
 const u_int8_t _WPin = GPIO_NUM_6;
 const u_int8_t _RVPin = GPIO_NUM_7;
+const u_int8_t _auxPin = GPIO_NUM_3;
 const u_int8_t _sdaPin = GPIO_NUM_8;
 const u_int8_t _sclPin = GPIO_NUM_9;
 #elif  defined (BOARD_ESP32_ROVER)
@@ -154,6 +156,9 @@ DallasTemperature sensors(&oneWire);
 // MCP9600 I2C thermocouple amplifier for LIQUID_TEMP
 Adafruit_MCP9600 mcp9600;
 
+// MAX6675 SPI thermocouple (software bit-bang SPI, no bus conflict)
+MAX6675* max6675Ptr = nullptr;
+
 
 typedef enum AC_STATE { OFF, COOL, HEAT, DEFROST, ERROR, LOW_TEMP } ACState;
 static String AC_STATE_STR[] = {"OFF", "COOL", "HEAT", "DEFROST", "ERROR", "LOW_TEMP"};
@@ -171,6 +176,8 @@ ProjectInfo proj = {
   -21600,             // gmtOffsetSec: UTC-6 (US Central)
   3600,               // daylightOffsetSec: 1hr DST
   20.0f,              // lowTempThreshold: 20°F default
+  true,               // lowTempEnableW: W relay on in LOW_TEMP
+  true,               // lowTempEnableAux: AUX signal on in LOW_TEMP
   140.0f,             // highSuctionTempThreshold: 140°F default
   false,              // rvFail: not latched
   30000,              // rvShortCycleMs: 30s default
@@ -183,7 +190,11 @@ ProjectInfo proj = {
   120,                // tempHistoryIntervalSec: 2 minutes default
   "dark",             // theme: dark default
   10,                 // displayPageIntervalSec: 10s default
-  true                // displayEnabled: on by default
+  true,               // displayEnabled: on by default
+  39,                 // max6675Clk: GPIO 39
+  40,                 // max6675Cs: GPIO 40
+  41,                 // max6675Do: GPIO 41
+  true                // max6675Enabled: on by default
 };
 
 
@@ -379,11 +390,13 @@ void setup() {
   Serial.begin(115200);
 
   Wire.begin(_sdaPin, _sclPin);
+  Wire.setTimeOut(1000);  // 1s I2C bus timeout — prevents MCP9600 from hanging boot
 
   // Initialize MCP9600 FIRST — bare I2C probe (beginTransmission/endTransmission
   // with no data) crashes some MCP9600 chips, corrupting the I2C bus.
   // See: https://forums.adafruit.com/viewtopic.php?t=163742
   // Workaround: skip probe, call begin() directly which does a full register read.
+  // Wire timeout above prevents hang if chip locks the bus.
   bool mcp9600Ready = false;
   if (mcp9600.begin(0x67)) {
     mcp9600.setADCresolution(MCP9600_ADCRESOLUTION_18);
@@ -393,7 +406,20 @@ void setup() {
     mcp9600Ready = true;
     Serial.println("MCP9600 thermocouple amplifier initialized at 0x67");
   } else {
-    Serial.println("MCP9600 not found at 0x67, LIQUID_TEMP will be unavailable");
+    Serial.println("MCP9600 not found or hung at 0x67, LIQUID_TEMP unavailable");
+    // Attempt I2C bus recovery — toggle SCL to release stuck SDA
+    Wire.end();
+    pinMode(_sclPin, OUTPUT);
+    for (int i = 0; i < 16; i++) {
+      digitalWrite(_sclPin, LOW);
+      delayMicroseconds(5);
+      digitalWrite(_sclPin, HIGH);
+      delayMicroseconds(5);
+    }
+    pinMode(_sclPin, INPUT);
+    Wire.begin(_sdaPin, _sclPin);
+    Wire.setTimeOut(1000);
+    Serial.println("I2C bus recovery attempted (16 clock pulses)");
   }
 
   // Scan I2C bus for devices — skip 0x67 (MCP9600) to avoid crashing it
@@ -459,6 +485,8 @@ void setup() {
       hpController.setHeatRuntimeMs(proj.heatRuntimeAccumulatedMs);
       // Set heatpump protection settings from config
       hpController.setLowTempThreshold(proj.lowTempThreshold);
+      hpController.setLowTempEnableW(proj.lowTempEnableW);
+      hpController.setLowTempEnableAux(proj.lowTempEnableAux);
       hpController.setHighSuctionTempThreshold(proj.highSuctionTempThreshold);
       hpController.setRvShortCycleMs(proj.rvShortCycleMs);
       hpController.setCntShortCycleMs(proj.cntShortCycleMs);
@@ -474,6 +502,20 @@ void setup() {
       // Apply display settings from config
       displayMgr.setPageInterval(proj.displayPageIntervalSec);
       displayMgr.setEnabled(proj.displayEnabled);
+      // Initialize MAX6675 SPI thermocouple if enabled
+      if (proj.max6675Enabled) {
+        max6675Ptr = new MAX6675(proj.max6675Clk, proj.max6675Cs, proj.max6675Do);
+        delay(500);  // MAX6675 needs time to stabilize after power-on
+        float testC = max6675Ptr->readCelsius();
+        if (isnan(testC)) {
+          Serial.println("MAX6675 not responding, disabling");
+          delete max6675Ptr;
+          max6675Ptr = nullptr;
+        } else {
+          Serial.printf("MAX6675 initialized (CLK=%d CS=%d DO=%d) test=%.1fC\n",
+                        proj.max6675Clk, proj.max6675Cs, proj.max6675Do, testC);
+        }
+      }
     }
     // Load TLS certificates for HTTPS server
     config.loadCertificates("/cert.pem", "/key.pem");
@@ -571,20 +613,33 @@ void setup() {
   hpController.addOutput("CNT", new OutPin(&ts, 3000, _CNTPin, "CNT", "CNT", onOutpin));
   hpController.addOutput("W", new OutPin(&ts, 0, _WPin, "W", "W", onOutpin));
   hpController.addOutput("RV", new OutPin(&ts, 0, _RVPin, "RV", "RV", onOutpin));
+  hpController.addOutput("AUX", new OutPin(&ts, 0, _auxPin, "AUX", "AUX", onOutpin));
 
 
   // Start GoodmanHP controller
   hpController.setDallasTemperature(&sensors);
 
-  // Add MCP9600 LIQUID_TEMP sensor if hardware is present
-  if (mcp9600Ready) {
+  // Add LIQUID_TEMP sensor: MAX31850K OneWire > MCP9600 I2C > MAX6675 SPI
+  TempSensorMap& postDiscoveryMap = hpController.getTempSensorMap();
+  if (postDiscoveryMap.count("LIQUID_TEMP") > 0) {
+    Log.info("MAIN", "LIQUID_TEMP found on OneWire bus (MAX31850K)");
+  } else if (mcp9600Ready) {
     TempSensor* liquidSensor = new TempSensor("LIQUID_TEMP");
     liquidSensor->setMCP9600(&mcp9600);
     liquidSensor->setI2CAddress(0x67);
     liquidSensor->setUpdateCallback(tempSensorUpdateCallback);
     liquidSensor->setChangeCallback(tempSensorChangeCallback);
     hpController.addTempSensor("LIQUID_TEMP", liquidSensor);
-    Log.info("MAIN", "LIQUID_TEMP sensor added (MCP9600 thermocouple)");
+    Log.info("MAIN", "LIQUID_TEMP sensor added (MCP9600 I2C fallback)");
+  } else if (max6675Ptr != nullptr) {
+    TempSensor* liquidSensor = new TempSensor("LIQUID_TEMP");
+    liquidSensor->setMAX6675(max6675Ptr);
+    liquidSensor->setUpdateCallback(tempSensorUpdateCallback);
+    liquidSensor->setChangeCallback(tempSensorChangeCallback);
+    hpController.addTempSensor("LIQUID_TEMP", liquidSensor);
+    Log.info("MAIN", "LIQUID_TEMP sensor added (MAX6675 SPI fallback)");
+  } else {
+    Log.warn("MAIN", "No LIQUID_TEMP sensor found (no MAX31850K, MCP9600, or MAX6675)");
   }
 
   hpController.setStateChangeCallback([](GoodmanHP::State, GoodmanHP::State) {

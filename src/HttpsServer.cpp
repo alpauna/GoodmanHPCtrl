@@ -162,6 +162,8 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["gmtOffsetHrs"] = proj->gmtOffsetSec / 3600.0f;
         doc["daylightOffsetHrs"] = proj->daylightOffsetSec / 3600.0f;
         doc["lowTempThreshold"] = proj->lowTempThreshold;
+        doc["lowTempEnableW"] = proj->lowTempEnableW;
+        doc["lowTempEnableAux"] = proj->lowTempEnableAux;
         doc["highSuctionTempThreshold"] = proj->highSuctionTempThreshold;
         doc["rvFail"] = proj->rvFail;
         doc["rvShortCycleSec"] = proj->rvShortCycleMs / 1000;
@@ -177,6 +179,10 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["theme"] = proj->theme.length() > 0 ? proj->theme : "dark";
         doc["displayPageIntervalSec"] = proj->displayPageIntervalSec;
         doc["displayEnabled"] = proj->displayEnabled;
+        doc["max6675Clk"] = proj->max6675Clk;
+        doc["max6675Cs"] = proj->max6675Cs;
+        doc["max6675Do"] = proj->max6675Do;
+        doc["max6675Enabled"] = proj->max6675Enabled;
         String json;
         serializeJson(doc, json);
         httpd_resp_set_type(req, "application/json");
@@ -327,6 +333,18 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         ctx->hpController->setLowTempThreshold(threshold);
     }
 
+    // Low temp W/AUX enable (live)
+    if (data["lowTempEnableW"].is<bool>()) {
+        bool enableW = data["lowTempEnableW"];
+        proj->lowTempEnableW = enableW;
+        ctx->hpController->setLowTempEnableW(enableW);
+    }
+    if (data["lowTempEnableAux"].is<bool>()) {
+        bool enableAux = data["lowTempEnableAux"];
+        proj->lowTempEnableAux = enableAux;
+        ctx->hpController->setLowTempEnableAux(enableAux);
+    }
+
     // High suction temp threshold (live)
     float hsThreshold = data["highSuctionTempThreshold"] | proj->highSuctionTempThreshold;
     if (hsThreshold != proj->highSuctionTempThreshold) {
@@ -410,6 +428,20 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         proj->displayPageIntervalSec = dispInterval;
         proj->displayEnabled = dispEnabled;
         if (ctx->displayConfigCb) ctx->displayConfigCb(dispInterval, dispEnabled);
+    }
+
+    // MAX6675 SPI thermocouple pin config (requires reboot)
+    uint8_t m6Clk = data["max6675Clk"] | proj->max6675Clk;
+    uint8_t m6Cs = data["max6675Cs"] | proj->max6675Cs;
+    uint8_t m6Do = data["max6675Do"] | proj->max6675Do;
+    bool m6En = data["max6675Enabled"] | proj->max6675Enabled;
+    if (m6Clk != proj->max6675Clk || m6Cs != proj->max6675Cs ||
+        m6Do != proj->max6675Do || m6En != proj->max6675Enabled) {
+        proj->max6675Clk = m6Clk;
+        proj->max6675Cs = m6Cs;
+        proj->max6675Do = m6Do;
+        proj->max6675Enabled = m6En;
+        needsReboot = true;
     }
 
     // Save to SD card
@@ -610,12 +642,15 @@ static esp_err_t tempsGetHandler(httpd_req_t* req) {
             json += "{";
             json += "\"name\":\"" + m.first + "\"";
             json += ",\"description\":\"" + m.second->getDescription() + "\"";
-            bool isI2C = m.second->hasMCP9600();
-            json += ",\"type\":\"" + String(isI2C ? "i2c" : "onewire") + "\"";
-            if (isI2C) {
+            String sensorType = m.second->hasMCP9600() ? "i2c" :
+                                m.second->hasMAX6675() ? "spi" : "onewire";
+            json += ",\"type\":\"" + sensorType + "\"";
+            if (m.second->hasMCP9600()) {
                 char hex[7];
                 snprintf(hex, sizeof(hex), "0x%02X", m.second->getI2CAddress());
                 json += ",\"devid\":\"" + String(hex) + "\"";
+            } else if (m.second->hasMAX6675()) {
+                json += ",\"devid\":\"MAX6675\"";
             } else {
                 json += ",\"devid\":\"" + TempSensor::addressToString(m.second->getDeviceAddress()) + "\"";
             }

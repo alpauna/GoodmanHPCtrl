@@ -28,6 +28,8 @@ struct ProjectInfo {
     int32_t daylightOffsetSec;   // DST offset in seconds (default 3600 = 1hr)
     // Heatpump protection settings (persisted in "heatpump" JSON section)
     float lowTempThreshold;              // Ambient temp below which compressor blocked (default 20°F)
+    bool lowTempEnableW;                 // Enable W relay in LOW_TEMP state (default true)
+    bool lowTempEnableAux;               // Enable AUX signal in LOW_TEMP state (default true)
     float highSuctionTempThreshold;      // Suction temp above which RV fail detected during defrost (default 140°F)
     bool rvFail;                         // Latched RV fail flag (persisted)
     uint32_t rvShortCycleMs;             // RV pressure equalization delay in defrost transition (default 30000)
@@ -42,6 +44,11 @@ struct ProjectInfo {
     // Display settings
     uint32_t displayPageIntervalSec; // OLED page flip interval (3-60, default 10)
     bool displayEnabled;             // OLED display on/off (default true)
+    // MAX6675 SPI thermocouple settings
+    uint8_t max6675Clk;              // SPI CLK pin (default GPIO 39)
+    uint8_t max6675Cs;               // SPI CS pin (default GPIO 40)
+    uint8_t max6675Do;               // SPI DO/MISO pin (default GPIO 41)
+    bool max6675Enabled;             // Enable MAX6675 sensor (default true)
 };
 
 class Config {

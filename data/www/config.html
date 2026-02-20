@@ -82,6 +82,8 @@ button:hover{background:#45a049;}
 </fieldset>
 <fieldset><legend>Heatpump Protection <span class='tag tag-live'>live</span></legend>
 <label>Low Temp Threshold (&deg;F)</label><input type='number' step='0.1' id='lowTempThreshold'>
+<label><input type='checkbox' id='lowTempEnableW' checked style='width:auto;margin-right:6px;'>Enable W (aux heat) in LOW_TEMP</label>
+<label><input type='checkbox' id='lowTempEnableAux' checked style='width:auto;margin-right:6px;'>Enable AUX signal in LOW_TEMP</label>
 <label>High Suction Temp Threshold (&deg;F)</label><input type='number' step='0.1' id='highSuctionTempThreshold'>
 <label>RV Short Cycle (seconds)</label><input type='number' step='1' id='rvShortCycleSec'>
 <label>CNT Short Cycle (seconds)</label><input type='number' step='1' id='cntShortCycleSec'>
@@ -96,6 +98,12 @@ button:hover{background:#45a049;}
 <fieldset><legend>Display <span class='tag tag-live'>live</span></legend>
 <label>Page Flip Interval (seconds, 3-60)</label><input type='number' min='3' max='60' step='1' id='displayPageIntervalSec'>
 <label><input type='checkbox' id='displayEnabled' style='width:auto;margin-right:6px;'>Display Enabled</label>
+</fieldset>
+<fieldset><legend>MAX6675 Thermocouple <span class='tag tag-reboot'>reboot</span></legend>
+<label><input type='checkbox' id='max6675Enabled' style='width:auto;margin-right:6px;'>Enabled</label>
+<label>CLK Pin</label><input type='number' id='max6675Clk' min='0' max='48'>
+<label>CS Pin</label><input type='number' id='max6675Cs' min='0' max='48'>
+<label>DO Pin</label><input type='number' id='max6675Do' min='0' max='48'>
 </fieldset>
 <fieldset><legend>Logging <span class='tag tag-live'>live</span></legend>
 <label>Max Log Size (MB)</label><input type='number' step='1' id='maxLogSizeMB'>
@@ -122,12 +130,15 @@ button:hover{background:#45a049;}
 <div id='status'></div>
 </div>
 <script>
-var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec'];
+var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do'];
 var adminPwSet=false;
 fetch('/config?format=json').then(r=>r.json()).then(d=>{
 fields.forEach(f=>{var e=document.getElementById(f);if(e)e.value=d[f]!=null?d[f]:'';});
 document.getElementById('maxLogSizeMB').value=d.maxLogSize!=null?Math.round(d.maxLogSize/(1024*1024)):'';
 document.getElementById('displayEnabled').checked=d.displayEnabled!==false;
+document.getElementById('max6675Enabled').checked=d.max6675Enabled!==false;
+document.getElementById('lowTempEnableW').checked=d.lowTempEnableW!==false;
+document.getElementById('lowTempEnableAux').checked=d.lowTempEnableAux!==false;
 adminPwSet=!!d.adminPasswordSet;
 var st=document.getElementById('adminPwStatus');
 if(adminPwSet){
@@ -150,11 +161,14 @@ alert('RV Fail cleared');
 }
 function save(e){
 e.preventDefault();
-var d={};var numFields=['mqttPort','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','displayPageIntervalSec'];
+var d={};var numFields=['mqttPort','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do'];
 fields.forEach(f=>{var e=document.getElementById(f);var v=e?e.value:'';d[f]=numFields.indexOf(f)>=0&&v!==''?Number(v):v;});
 var mbVal=document.getElementById('maxLogSizeMB').value;
 d.maxLogSize=mbVal?parseInt(mbVal)*1024*1024:'';
 d.displayEnabled=document.getElementById('displayEnabled').checked;
+d.max6675Enabled=document.getElementById('max6675Enabled').checked;
+d.lowTempEnableW=document.getElementById('lowTempEnableW').checked;
+d.lowTempEnableAux=document.getElementById('lowTempEnableAux').checked;
 d.curWifiPw=document.getElementById('curWifiPw').value;
 d.curMqttPw=document.getElementById('curMqttPw').value;
 var ap=document.getElementById('adminPassword').value;

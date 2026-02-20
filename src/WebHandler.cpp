@@ -191,7 +191,9 @@ void WebHandler::serveFile(AsyncWebServerRequest* request, const String& path) {
     file.read((uint8_t*)buf, fileSize);
     buf[fileSize] = '\0';
     file.close();
-    request->send(200, getContentType(path), buf);
+    AsyncWebServerResponse* response = request->beginResponse(200, getContentType(path), buf);
+    response->addHeader("Cache-Control", "no-cache, must-revalidate");
+    request->send(response);
     free(buf);
 }
 
@@ -378,12 +380,15 @@ void WebHandler::setupRoutes() {
                 json += "{";
                 json += "\"name\":\"" + m.first + "\"";
                 json += ",\"description\":\"" + m.second->getDescription() + "\"";
-                bool isI2C = m.second->hasMCP9600();
-                json += ",\"type\":\"" + String(isI2C ? "i2c" : "onewire") + "\"";
-                if (isI2C) {
+                String sensorType = m.second->hasMCP9600() ? "i2c" :
+                                    m.second->hasMAX6675() ? "spi" : "onewire";
+                json += ",\"type\":\"" + sensorType + "\"";
+                if (m.second->hasMCP9600()) {
                     char hex[7];
                     snprintf(hex, sizeof(hex), "0x%02X", m.second->getI2CAddress());
                     json += ",\"devid\":\"" + String(hex) + "\"";
+                } else if (m.second->hasMAX6675()) {
+                    json += ",\"devid\":\"MAX6675\"";
                 } else {
                     json += ",\"devid\":\"" + TempSensor::addressToString(m.second->getDeviceAddress()) + "\"";
                 }
@@ -450,6 +455,10 @@ void WebHandler::setupRoutes() {
         doc["defrostCntPending"] = _hpController->isDefrostCntPendingActive();
         doc["defrostCntPendingRemainSec"] = _hpController->getDefrostCntPendingRemainingMs() / 1000;
         doc["defrostExiting"] = _hpController->isDefrostExitingActive();
+        doc["coolTransition"] = _hpController->isCoolTransitionActive();
+        doc["coolTransitionRemainSec"] = _hpController->getCoolTransitionRemainingMs() / 1000;
+        doc["coolCntPending"] = _hpController->isCoolCntPendingActive();
+        doc["coolCntPendingRemainSec"] = _hpController->getCoolCntPendingRemainingMs() / 1000;
         doc["manualOverride"] = _hpController->isManualOverrideActive();
         doc["manualOverrideRemainSec"] = _hpController->getManualOverrideRemainingMs() / 1000;
         doc["cpuLoad0"] = getCpuLoadCore0();
@@ -611,11 +620,39 @@ void WebHandler::setupRoutes() {
             doc["manualOverride"] = _hpController->isManualOverrideActive();
             doc["manualOverrideRemainSec"] = _hpController->getManualOverrideRemainingMs() / 1000;
             doc["shortCycleActive"] = _hpController->isShortCycleProtectionActive();
+            {
+                uint32_t scRemain = 0;
+                OutPin* scCnt = _hpController->getOutput("CNT");
+                if (scCnt && !scCnt->isPinOn() && scCnt->getOffTick() > 0) {
+                    uint32_t offEl = millis() - scCnt->getOffTick();
+                    if (offEl < 5UL*60*1000) scRemain = (5UL*60*1000 - offEl) / 1000;
+                }
+                doc["shortCycleRemainSec"] = scRemain;
+            }
             doc["state"] = _hpController->getStateString();
             doc["defrost"] = _hpController->isSoftwareDefrostActive();
             doc["defrostTransition"] = _hpController->isDefrostTransitionActive();
             doc["defrostCntPending"] = _hpController->isDefrostCntPendingActive();
             doc["defrostExiting"] = _hpController->isDefrostExitingActive();
+            doc["coolTransition"] = _hpController->isCoolTransitionActive();
+            doc["coolCntPending"] = _hpController->isCoolCntPendingActive();
+
+            // Countdown timers (seconds)
+            doc["startupLockout"] = _hpController->isStartupLockoutActive();
+            doc["startupLockoutRemainSec"] = _hpController->getStartupLockoutRemainingMs() / 1000;
+            doc["defrostTransitionRemainSec"] = _hpController->getDefrostTransitionRemainingMs() / 1000;
+            doc["defrostCntPendingRemainSec"] = _hpController->getDefrostCntPendingRemainingMs() / 1000;
+            doc["coolTransitionRemainSec"] = _hpController->getCoolTransitionRemainingMs() / 1000;
+            doc["coolCntPendingRemainSec"] = _hpController->getCoolCntPendingRemainingMs() / 1000;
+
+            // Protection flags
+            doc["lpsFault"] = _hpController->isLPSFaultActive();
+            doc["lowTemp"] = _hpController->isLowTempActive();
+            doc["compressorOverTemp"] = _hpController->isCompressorOverTempActive();
+            doc["suctionLowTemp"] = _hpController->isSuctionLowTempActive();
+            doc["rvFail"] = _hpController->isRvFailActive();
+            doc["highSuctionTemp"] = _hpController->isHighSuctionTempActive();
+            doc["heatRuntimeMin"] = _hpController->getHeatRuntimeMs() / 60000;
 
             JsonArray inputs = doc["inputs"].to<JsonArray>();
             for (auto& pair : _hpController->getInputMap()) {
@@ -854,6 +891,8 @@ void WebHandler::setupRoutes() {
                 doc["gmtOffsetHrs"] = proj->gmtOffsetSec / 3600.0f;
                 doc["daylightOffsetHrs"] = proj->daylightOffsetSec / 3600.0f;
                 doc["lowTempThreshold"] = proj->lowTempThreshold;
+                doc["lowTempEnableW"] = proj->lowTempEnableW;
+                doc["lowTempEnableAux"] = proj->lowTempEnableAux;
                 doc["highSuctionTempThreshold"] = proj->highSuctionTempThreshold;
                 doc["rvFail"] = proj->rvFail;
                 doc["rvShortCycleSec"] = proj->rvShortCycleMs / 1000;
@@ -869,6 +908,10 @@ void WebHandler::setupRoutes() {
                 doc["theme"] = proj->theme.length() > 0 ? proj->theme : "dark";
                 doc["displayPageIntervalSec"] = proj->displayPageIntervalSec;
                 doc["displayEnabled"] = proj->displayEnabled;
+                doc["max6675Clk"] = proj->max6675Clk;
+                doc["max6675Cs"] = proj->max6675Cs;
+                doc["max6675Do"] = proj->max6675Do;
+                doc["max6675Enabled"] = proj->max6675Enabled;
                 String json;
                 serializeJson(doc, json);
                 request->send(200, "application/json", json);
@@ -876,210 +919,6 @@ void WebHandler::setupRoutes() {
             }
             serveFile(request, "/config.html");
         });
-
-        auto* configPostHandler = new AsyncCallbackJsonWebHandler("/config", [this](AsyncWebServerRequest *request, JsonVariant &json) {
-            if (!checkAuth(request)) return;
-            if (!_config || !_config->getProjectInfo()) {
-                request->send(500, "application/json", "{\"error\":\"Config not available\"}");
-                return;
-            }
-            ProjectInfo* proj = _config->getProjectInfo();
-            JsonObject data = json.as<JsonObject>();
-            bool needsReboot = false;
-            String errors = "";
-
-            String newSSID = data["wifiSSID"] | _config->getWifiSSID();
-            if (newSSID != _config->getWifiSSID()) {
-                _config->setWifiSSID(newSSID);
-                needsReboot = true;
-            }
-
-            String wifiPw = data["wifiPassword"] | String("******");
-            if (wifiPw != "******" && wifiPw.length() > 0) {
-                String curPw = data["curWifiPw"] | String("");
-                if (curPw == _config->getWifiPassword() || _config->verifyAdminPassword(curPw)) {
-                    _config->setWifiPassword(wifiPw);
-                    needsReboot = true;
-                } else {
-                    errors += "WiFi password: current password incorrect. ";
-                }
-            }
-
-            String mqttHost = data["mqttHost"] | _config->getMqttHost().toString();
-            IPAddress newMqttHost;
-            newMqttHost.fromString(mqttHost);
-            if (newMqttHost != _config->getMqttHost()) {
-                _config->setMqttHost(newMqttHost);
-                needsReboot = true;
-            }
-
-            uint16_t mqttPort = data["mqttPort"] | _config->getMqttPort();
-            if (mqttPort != _config->getMqttPort()) {
-                _config->setMqttPort(mqttPort);
-                needsReboot = true;
-            }
-
-            String mqttUser = data["mqttUser"] | _config->getMqttUser();
-            if (mqttUser != _config->getMqttUser()) {
-                _config->setMqttUser(mqttUser);
-                needsReboot = true;
-            }
-
-            String mqttPw = data["mqttPassword"] | String("******");
-            if (mqttPw != "******" && mqttPw.length() > 0) {
-                String curPw = data["curMqttPw"] | String("");
-                if (curPw == _config->getMqttPassword() || _config->verifyAdminPassword(curPw)) {
-                    _config->setMqttPassword(mqttPw);
-                    needsReboot = true;
-                } else {
-                    errors += "MQTT password: current password incorrect. ";
-                }
-            }
-
-            // Admin password
-            String adminPw = data["adminPassword"] | String("");
-            if (adminPw.length() > 0) {
-                if (!_config->hasAdminPassword()) {
-                    // First-time setup — no current password required
-                    _config->setAdminPassword(adminPw);
-                    if (_ftpDisableCb) _ftpDisableCb();
-                    Log.info("AUTH", "Admin password set for first time");
-                } else {
-                    String curAdminPw = data["curAdminPw"] | String("");
-                    if (_config->verifyAdminPassword(curAdminPw)) {
-                        _config->setAdminPassword(adminPw);
-                        Log.info("AUTH", "Admin password changed");
-                    } else {
-                        errors += "Admin password: current password incorrect. ";
-                    }
-                }
-            }
-
-            float gmtHrs = data["gmtOffsetHrs"] | (proj->gmtOffsetSec / 3600.0f);
-            float dstHrs = data["daylightOffsetHrs"] | (proj->daylightOffsetSec / 3600.0f);
-            int32_t gmtOffset = (int32_t)(gmtHrs * 3600);
-            int32_t dstOffset = (int32_t)(dstHrs * 3600);
-            if (gmtOffset != proj->gmtOffsetSec || dstOffset != proj->daylightOffsetSec) {
-                proj->gmtOffsetSec = gmtOffset;
-                proj->daylightOffsetSec = dstOffset;
-                setTimezone(gmtOffset, dstOffset);
-                configTime(gmtOffset, dstOffset, "192.168.0.1", "time.nist.gov");
-            }
-
-            float threshold = data["lowTempThreshold"] | proj->lowTempThreshold;
-            if (threshold != proj->lowTempThreshold) {
-                proj->lowTempThreshold = threshold;
-                _hpController->setLowTempThreshold(threshold);
-            }
-
-            float hsThreshold = data["highSuctionTempThreshold"] | proj->highSuctionTempThreshold;
-            if (hsThreshold != proj->highSuctionTempThreshold) {
-                proj->highSuctionTempThreshold = hsThreshold;
-                _hpController->setHighSuctionTempThreshold(hsThreshold);
-            }
-
-            uint32_t rvSC = (data["rvShortCycleSec"] | (int)(proj->rvShortCycleMs / 1000)) * 1000UL;
-            if (rvSC != proj->rvShortCycleMs) {
-                proj->rvShortCycleMs = rvSC;
-                _hpController->setRvShortCycleMs(rvSC);
-            }
-
-            uint32_t cntSC = (data["cntShortCycleSec"] | (int)(proj->cntShortCycleMs / 1000)) * 1000UL;
-            if (cntSC != proj->cntShortCycleMs) {
-                proj->cntShortCycleMs = cntSC;
-                _hpController->setCntShortCycleMs(cntSC);
-            }
-
-            uint32_t dfMinSec = data["defrostMinRuntimeSec"] | (int)(proj->defrostMinRuntimeMs / 1000);
-            uint32_t dfMinMs = dfMinSec * 1000UL;
-            if (dfMinMs != proj->defrostMinRuntimeMs) {
-                proj->defrostMinRuntimeMs = dfMinMs;
-                _hpController->setDefrostMinRuntimeMs(dfMinMs);
-            }
-
-            float dfExitTemp = data["defrostExitTempF"] | proj->defrostExitTempF;
-            if (dfExitTemp != proj->defrostExitTempF) {
-                proj->defrostExitTempF = dfExitTemp;
-                _hpController->setDefrostExitTempF(dfExitTemp);
-            }
-
-            uint32_t hrtMin = data["heatRuntimeThresholdMin"] | (int)(proj->heatRuntimeThresholdMs / 60000);
-            if (hrtMin < 30) hrtMin = 30;
-            if (hrtMin > 90) hrtMin = 90;
-            uint32_t hrtMs = hrtMin * 60000UL;
-            if (hrtMs != proj->heatRuntimeThresholdMs) {
-                proj->heatRuntimeThresholdMs = hrtMs;
-                _hpController->setHeatRuntimeThresholdMs(hrtMs);
-            }
-
-            // Clear RV Fail
-            bool clearRvFail = data["clearRvFail"] | false;
-            if (clearRvFail) {
-                _hpController->clearRvFail();
-                proj->rvFail = false;
-            }
-
-            uint32_t apMinutes = data["apFallbackMinutes"] | (proj->apFallbackSeconds / 60);
-            proj->apFallbackSeconds = apMinutes * 60;
-
-            uint32_t maxLogSize = data["maxLogSize"] | proj->maxLogSize;
-            uint8_t maxOldLogCount = data["maxOldLogCount"] | proj->maxOldLogCount;
-            proj->maxLogSize = maxLogSize;
-            proj->maxOldLogCount = maxOldLogCount;
-
-            uint32_t thInterval = data["tempHistoryIntervalSec"] | proj->tempHistoryIntervalSec;
-            if (thInterval < 30) thInterval = 30;
-            if (thInterval > 300) thInterval = 300;
-            if (thInterval != proj->tempHistoryIntervalSec) {
-                proj->tempHistoryIntervalSec = thInterval;
-                if (_tempHistIntervalCb) _tempHistIntervalCb(thInterval);
-            }
-
-            String theme = data["theme"] | proj->theme;
-            if (theme == "dark" || theme == "light") {
-                proj->theme = theme;
-            }
-
-            uint32_t dispInterval = data["displayPageIntervalSec"] | proj->displayPageIntervalSec;
-            if (dispInterval < 3) dispInterval = 3;
-            if (dispInterval > 60) dispInterval = 60;
-            bool dispEnabled = data["displayEnabled"] | proj->displayEnabled;
-            if (dispInterval != proj->displayPageIntervalSec || dispEnabled != proj->displayEnabled) {
-                proj->displayPageIntervalSec = dispInterval;
-                proj->displayEnabled = dispEnabled;
-                if (_displayConfigCb) _displayConfigCb(dispInterval, dispEnabled);
-            }
-
-            TempSensorMap& tempSensors = _hpController->getTempSensorMap();
-            bool saved = _config->updateConfig("/config.txt", tempSensors, *proj);
-
-            String response;
-            JsonDocument respDoc;
-            if (!saved) {
-                respDoc["error"] = "Failed to save config to SD card";
-                if (errors.length() > 0) respDoc["error"] = errors + "Also failed to save.";
-            } else if (errors.length() > 0) {
-                respDoc["error"] = errors + "Other settings saved.";
-            } else if (needsReboot) {
-                respDoc["message"] = "Settings saved. Rebooting in 2 seconds...";
-                respDoc["reboot"] = true;
-            } else {
-                respDoc["message"] = "Settings saved and applied.";
-            }
-            serializeJson(respDoc, response);
-            request->send(200, "application/json", response);
-
-            if (needsReboot && saved && errors.length() == 0) {
-                Log.info("CONFIG", "Config changed, rebooting in 2s...");
-                if (!_tDelayedReboot) {
-                    _tDelayedReboot = new Task(2 * TASK_SECOND, TASK_ONCE, [this]() {
-                        _shouldReboot = true;
-                    }, _ts, false);
-                }
-                _tDelayedReboot->restartDelayed(2 * TASK_SECOND);
-            }
-        });
-        _server.addHandler(configPostHandler);
 
         // Upload saves firmware to SD card (no reboot)
         _server.on("/update", HTTP_POST, [this](AsyncWebServerRequest *request) {
@@ -1461,9 +1300,7 @@ void WebHandler::setupRoutes() {
             }
             request->redirect(url);
         });
-        _server.on("/config", HTTP_POST, [this](AsyncWebServerRequest *request) {
-            request->redirect("https://" + String(getWiFiIP()) + "/config");
-        });
+        // Config POST handled by configPostHandler registered below (outside if/else)
         _server.on("/update", HTTP_GET, [this](AsyncWebServerRequest *request) {
             request->redirect("https://" + String(getWiFiIP()) + "/update");
         });
@@ -1614,6 +1451,238 @@ void WebHandler::setupRoutes() {
         });
         _server.addHandler(wifiTestHandlerHttps);
     }
+
+    // Config POST handler — registered on HTTP regardless of HTTPS mode.
+    // When HTTPS is active, the config page loads from HTTPS (via GET redirect),
+    // but the JS fetch POST may go to HTTP depending on browser behavior with
+    // self-signed certs. This ensures config saves work on both protocols.
+    auto* configPostHandler = new AsyncCallbackJsonWebHandler("/config", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+        if (!checkAuth(request)) return;
+        if (!_config || !_config->getProjectInfo()) {
+            request->send(500, "application/json", "{\"error\":\"Config not available\"}");
+            return;
+        }
+        ProjectInfo* proj = _config->getProjectInfo();
+        JsonObject data = json.as<JsonObject>();
+        bool needsReboot = false;
+        String errors = "";
+
+        String newSSID = data["wifiSSID"] | _config->getWifiSSID();
+        if (newSSID != _config->getWifiSSID()) {
+            _config->setWifiSSID(newSSID);
+            needsReboot = true;
+        }
+
+        String wifiPw = data["wifiPassword"] | String("******");
+        if (wifiPw != "******" && wifiPw.length() > 0) {
+            String curPw = data["curWifiPw"] | String("");
+            if (curPw == _config->getWifiPassword() || _config->verifyAdminPassword(curPw)) {
+                _config->setWifiPassword(wifiPw);
+                needsReboot = true;
+            } else {
+                errors += "WiFi password: current password incorrect. ";
+            }
+        }
+
+        String mqttHost = data["mqttHost"] | _config->getMqttHost().toString();
+        IPAddress newMqttHost;
+        newMqttHost.fromString(mqttHost);
+        if (newMqttHost != _config->getMqttHost()) {
+            _config->setMqttHost(newMqttHost);
+            needsReboot = true;
+        }
+
+        uint16_t mqttPort = data["mqttPort"] | _config->getMqttPort();
+        if (mqttPort != _config->getMqttPort()) {
+            _config->setMqttPort(mqttPort);
+            needsReboot = true;
+        }
+
+        String mqttUser = data["mqttUser"] | _config->getMqttUser();
+        if (mqttUser != _config->getMqttUser()) {
+            _config->setMqttUser(mqttUser);
+            needsReboot = true;
+        }
+
+        String mqttPw = data["mqttPassword"] | String("******");
+        if (mqttPw != "******" && mqttPw.length() > 0) {
+            String curPw = data["curMqttPw"] | String("");
+            if (curPw == _config->getMqttPassword() || _config->verifyAdminPassword(curPw)) {
+                _config->setMqttPassword(mqttPw);
+                needsReboot = true;
+            } else {
+                errors += "MQTT password: current password incorrect. ";
+            }
+        }
+
+        // Admin password
+        String adminPw = data["adminPassword"] | String("");
+        if (adminPw.length() > 0) {
+            if (!_config->hasAdminPassword()) {
+                _config->setAdminPassword(adminPw);
+                if (_ftpDisableCb) _ftpDisableCb();
+                Log.info("AUTH", "Admin password set for first time");
+            } else {
+                String curAdminPw = data["curAdminPw"] | String("");
+                if (_config->verifyAdminPassword(curAdminPw)) {
+                    _config->setAdminPassword(adminPw);
+                    Log.info("AUTH", "Admin password changed");
+                } else {
+                    errors += "Admin password: current password incorrect. ";
+                }
+            }
+        }
+
+        float gmtHrs = data["gmtOffsetHrs"] | (proj->gmtOffsetSec / 3600.0f);
+        float dstHrs = data["daylightOffsetHrs"] | (proj->daylightOffsetSec / 3600.0f);
+        int32_t gmtOffset = (int32_t)(gmtHrs * 3600);
+        int32_t dstOffset = (int32_t)(dstHrs * 3600);
+        if (gmtOffset != proj->gmtOffsetSec || dstOffset != proj->daylightOffsetSec) {
+            proj->gmtOffsetSec = gmtOffset;
+            proj->daylightOffsetSec = dstOffset;
+            setTimezone(gmtOffset, dstOffset);
+            configTime(gmtOffset, dstOffset, "192.168.0.1", "time.nist.gov");
+        }
+
+        float threshold = data["lowTempThreshold"] | proj->lowTempThreshold;
+        if (threshold != proj->lowTempThreshold) {
+            proj->lowTempThreshold = threshold;
+            _hpController->setLowTempThreshold(threshold);
+        }
+
+        if (data["lowTempEnableW"].is<bool>()) {
+            bool enableW = data["lowTempEnableW"];
+            proj->lowTempEnableW = enableW;
+            _hpController->setLowTempEnableW(enableW);
+        }
+        if (data["lowTempEnableAux"].is<bool>()) {
+            bool enableAux = data["lowTempEnableAux"];
+            proj->lowTempEnableAux = enableAux;
+            _hpController->setLowTempEnableAux(enableAux);
+        }
+
+        float hsThreshold = data["highSuctionTempThreshold"] | proj->highSuctionTempThreshold;
+        if (hsThreshold != proj->highSuctionTempThreshold) {
+            proj->highSuctionTempThreshold = hsThreshold;
+            _hpController->setHighSuctionTempThreshold(hsThreshold);
+        }
+
+        uint32_t rvSC = (data["rvShortCycleSec"] | (int)(proj->rvShortCycleMs / 1000)) * 1000UL;
+        if (rvSC != proj->rvShortCycleMs) {
+            proj->rvShortCycleMs = rvSC;
+            _hpController->setRvShortCycleMs(rvSC);
+        }
+
+        uint32_t cntSC = (data["cntShortCycleSec"] | (int)(proj->cntShortCycleMs / 1000)) * 1000UL;
+        if (cntSC != proj->cntShortCycleMs) {
+            proj->cntShortCycleMs = cntSC;
+            _hpController->setCntShortCycleMs(cntSC);
+        }
+
+        uint32_t dfMinSec = data["defrostMinRuntimeSec"] | (int)(proj->defrostMinRuntimeMs / 1000);
+        uint32_t dfMinMs = dfMinSec * 1000UL;
+        if (dfMinMs != proj->defrostMinRuntimeMs) {
+            proj->defrostMinRuntimeMs = dfMinMs;
+            _hpController->setDefrostMinRuntimeMs(dfMinMs);
+        }
+
+        float dfExitTemp = data["defrostExitTempF"] | proj->defrostExitTempF;
+        if (dfExitTemp != proj->defrostExitTempF) {
+            proj->defrostExitTempF = dfExitTemp;
+            _hpController->setDefrostExitTempF(dfExitTemp);
+        }
+
+        uint32_t hrtMin = data["heatRuntimeThresholdMin"] | (int)(proj->heatRuntimeThresholdMs / 60000);
+        if (hrtMin < 30) hrtMin = 30;
+        if (hrtMin > 90) hrtMin = 90;
+        uint32_t hrtMs = hrtMin * 60000UL;
+        if (hrtMs != proj->heatRuntimeThresholdMs) {
+            proj->heatRuntimeThresholdMs = hrtMs;
+            _hpController->setHeatRuntimeThresholdMs(hrtMs);
+        }
+
+        // Clear RV Fail
+        bool clearRvFail = data["clearRvFail"] | false;
+        if (clearRvFail) {
+            _hpController->clearRvFail();
+            proj->rvFail = false;
+        }
+
+        uint32_t apMinutes = data["apFallbackMinutes"] | (proj->apFallbackSeconds / 60);
+        proj->apFallbackSeconds = apMinutes * 60;
+
+        uint32_t maxLogSize = data["maxLogSize"] | proj->maxLogSize;
+        uint8_t maxOldLogCount = data["maxOldLogCount"] | proj->maxOldLogCount;
+        proj->maxLogSize = maxLogSize;
+        proj->maxOldLogCount = maxOldLogCount;
+
+        uint32_t thInterval = data["tempHistoryIntervalSec"] | proj->tempHistoryIntervalSec;
+        if (thInterval < 30) thInterval = 30;
+        if (thInterval > 300) thInterval = 300;
+        if (thInterval != proj->tempHistoryIntervalSec) {
+            proj->tempHistoryIntervalSec = thInterval;
+            if (_tempHistIntervalCb) _tempHistIntervalCb(thInterval);
+        }
+
+        String theme = data["theme"] | proj->theme;
+        if (theme == "dark" || theme == "light") {
+            proj->theme = theme;
+        }
+
+        uint32_t dispInterval = data["displayPageIntervalSec"] | proj->displayPageIntervalSec;
+        if (dispInterval < 3) dispInterval = 3;
+        if (dispInterval > 60) dispInterval = 60;
+        bool dispEnabled = data["displayEnabled"] | proj->displayEnabled;
+        if (dispInterval != proj->displayPageIntervalSec || dispEnabled != proj->displayEnabled) {
+            proj->displayPageIntervalSec = dispInterval;
+            proj->displayEnabled = dispEnabled;
+            if (_displayConfigCb) _displayConfigCb(dispInterval, dispEnabled);
+        }
+
+        // MAX6675 SPI thermocouple pin config (requires reboot)
+        uint8_t m6Clk = data["max6675Clk"] | proj->max6675Clk;
+        uint8_t m6Cs = data["max6675Cs"] | proj->max6675Cs;
+        uint8_t m6Do = data["max6675Do"] | proj->max6675Do;
+        bool m6En = data["max6675Enabled"] | proj->max6675Enabled;
+        if (m6Clk != proj->max6675Clk || m6Cs != proj->max6675Cs ||
+            m6Do != proj->max6675Do || m6En != proj->max6675Enabled) {
+            proj->max6675Clk = m6Clk;
+            proj->max6675Cs = m6Cs;
+            proj->max6675Do = m6Do;
+            proj->max6675Enabled = m6En;
+            needsReboot = true;
+        }
+
+        TempSensorMap& tempSensors = _hpController->getTempSensorMap();
+        bool saved = _config->updateConfig("/config.txt", tempSensors, *proj);
+
+        String response;
+        JsonDocument respDoc;
+        if (!saved) {
+            respDoc["error"] = "Failed to save config to SD card";
+            if (errors.length() > 0) respDoc["error"] = errors + "Also failed to save.";
+        } else if (errors.length() > 0) {
+            respDoc["error"] = errors + "Other settings saved.";
+        } else if (needsReboot) {
+            respDoc["message"] = "Settings saved. Rebooting in 2 seconds...";
+            respDoc["reboot"] = true;
+        } else {
+            respDoc["message"] = "Settings saved and applied.";
+        }
+        serializeJson(respDoc, response);
+        request->send(200, "application/json", response);
+
+        if (needsReboot && saved && errors.length() == 0) {
+            Log.info("CONFIG", "Config changed, rebooting in 2s...");
+            if (!_tDelayedReboot) {
+                _tDelayedReboot = new Task(2 * TASK_SECOND, TASK_ONCE, [this]() {
+                    _shouldReboot = true;
+                }, _ts, false);
+            }
+            _tDelayedReboot->restartDelayed(2 * TASK_SECOND);
+        }
+    });
+    _server.addHandler(configPostHandler);
 }
 
 // ---- HTTPS server (delegates to HttpsServer.cpp to avoid header conflicts) ----

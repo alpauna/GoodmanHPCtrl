@@ -46,6 +46,9 @@ class GoodmanHP {
     static constexpr float SUCTION_RESUME_F = 40.0f;      // Resume above this
     static const uint32_t SUCTION_CHECK_MS = 60UL * 1000; // 1 min recheck
 
+    // State table validation interval
+    static const uint32_t STATE_VALIDATE_MS = 10UL * 1000;  // 10s periodic check
+
     GoodmanHP(Scheduler *ts);
 
     void setDallasTemperature(DallasTemperature *sensors);
@@ -87,6 +90,10 @@ class GoodmanHP {
     bool isSuctionLowTempActive() const;
     void setLowTempThreshold(float threshold);
     float getLowTempThreshold() const;
+    void setLowTempEnableW(bool enable);
+    bool getLowTempEnableW() const;
+    void setLowTempEnableAux(bool enable);
+    bool getLowTempEnableAux() const;
 
     bool isStartupLockoutActive() const;
     uint32_t getStartupLockoutRemainingMs() const;
@@ -108,6 +115,12 @@ class GoodmanHP {
     void setCntShortCycleMs(uint32_t ms);
     uint32_t getCntShortCycleMs() const;
     uint32_t getDefrostTransitionRemainingMs() const;
+
+    // HEAT→COOL transition (RV switch sequencing)
+    bool isCoolTransitionActive() const;
+    bool isCoolCntPendingActive() const;
+    uint32_t getCoolTransitionRemainingMs() const;
+    uint32_t getCoolCntPendingRemainingMs() const;
 
     // Configurable defrost parameters
     void setDefrostMinRuntimeMs(uint32_t ms);
@@ -159,6 +172,8 @@ class GoodmanHP {
     bool _lpsFault;
     bool _lowTemp;
     float _lowTempThreshold;
+    bool _lowTempEnableW;
+    bool _lowTempEnableAux;
     bool _compressorOverTemp;
     uint32_t _compressorOverTempStartTick;
     uint32_t _compressorOverTempLastCheckTick;
@@ -174,6 +189,11 @@ class GoodmanHP {
     bool _defrostCntPending;          // True during Phase 2 (RV+W on, waiting for CNT SC)
     uint32_t _defrostCntPendingStart; // millis() when Phase 2 started
     bool _defrostExiting;             // True during defrost exit transition (reverse 3-phase)
+    // HEAT→COOL mode transition (RV switch sequencing)
+    bool _coolTransition;             // Phase 1: CNT+W off, pressure equalization before RV switch
+    uint32_t _coolTransitionStart;
+    bool _coolCntPending;             // Phase 2: RV on, waiting CNT short cycle
+    uint32_t _coolCntPendingStart;
     bool _manualOverride;
     uint32_t _manualOverrideStart;
     bool _startupLockout;
@@ -190,8 +210,12 @@ class GoodmanHP {
     void updateState();
     void accumulateHeatRuntime();
     void checkDefrostNeeded();
+    void checkCoolTransition();
+    void validateOutputStates();
     void startSoftwareDefrost();
     void stopSoftwareDefrost();
+
+    uint32_t _lastValidateTick;
 
     // Runtime callback for OutPins
     static GoodmanHP* _instance;

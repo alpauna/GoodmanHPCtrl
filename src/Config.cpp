@@ -414,6 +414,8 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     if (heatpump.isNull() && doc["lowTemp"].is<JsonObject>()) {
         // Old format: migrate lowTemp.threshold into heatpump section
         proj.lowTempThreshold = doc["lowTemp"]["threshold"] | 20.0f;
+        proj.lowTempEnableW = true;
+        proj.lowTempEnableAux = true;
         proj.highSuctionTempThreshold = 140.0f;
         proj.rvFail = false;
         proj.rvShortCycleMs = 30000;
@@ -425,6 +427,8 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         Serial.println("Config migration: old lowTemp format detected, will migrate on next save");
     } else {
         proj.lowTempThreshold = heatpump["lowTemp"]["threshold"] | 20.0f;
+        proj.lowTempEnableW = heatpump["lowTemp"]["enableW"] | true;
+        proj.lowTempEnableAux = heatpump["lowTemp"]["enableAux"] | true;
         proj.highSuctionTempThreshold = heatpump["highSuctionTemp"]["threshold"] | 140.0f;
         proj.rvFail = heatpump["highSuctionTemp"]["rvFail"] | false;
         proj.rvShortCycleMs = heatpump["shortCycle"]["rv"] | 30000;
@@ -456,6 +460,15 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     if (proj.displayPageIntervalSec > 60) proj.displayPageIntervalSec = 60;
     proj.displayEnabled = doc["display"]["enabled"] | true;
     Serial.printf("Read display: interval=%us enabled=%d\n", proj.displayPageIntervalSec, proj.displayEnabled);
+
+    // Load MAX6675 SPI thermocouple settings
+    JsonObject max6675Obj = doc["sensors"]["max6675"];
+    proj.max6675Clk = max6675Obj["clk"] | 39;
+    proj.max6675Cs = max6675Obj["cs"] | 40;
+    proj.max6675Do = max6675Obj["do"] | 41;
+    proj.max6675Enabled = max6675Obj["enabled"] | true;
+    Serial.printf("Read MAX6675: clk=%d cs=%d do=%d enabled=%d\n",
+                  proj.max6675Clk, proj.max6675Cs, proj.max6675Do, proj.max6675Enabled);
 
     // Load admin password (encrypted same as WiFi/MQTT passwords)
     const char* adminPw = doc["admin"]["password"];
@@ -561,6 +574,8 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     JsonObject heatpump = doc["heatpump"].to<JsonObject>();
     JsonObject hpLowTemp = heatpump["lowTemp"].to<JsonObject>();
     hpLowTemp["threshold"] = proj.lowTempThreshold;
+    hpLowTemp["enableW"] = proj.lowTempEnableW;
+    hpLowTemp["enableAux"] = proj.lowTempEnableAux;
     JsonObject hpHighSuction = heatpump["highSuctionTemp"].to<JsonObject>();
     hpHighSuction["threshold"] = proj.highSuctionTempThreshold;
     hpHighSuction["rvFail"] = proj.rvFail;
@@ -609,6 +624,13 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
         dev["driver"] = kv.second.driver;
         dev["role"] = kv.second.role;
     }
+
+    // Write MAX6675 SPI thermocouple settings
+    JsonObject max6675Obj = sensors["max6675"].to<JsonObject>();
+    max6675Obj["clk"] = proj.max6675Clk;
+    max6675Obj["cs"] = proj.max6675Cs;
+    max6675Obj["do"] = proj.max6675Do;
+    max6675Obj["enabled"] = proj.max6675Enabled;
 
     String output;
     serializeJson(doc, _configFile);
@@ -669,6 +691,8 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     JsonObject heatpump = doc["heatpump"].to<JsonObject>();
     JsonObject hpLowTemp = heatpump["lowTemp"].to<JsonObject>();
     hpLowTemp["threshold"] = proj.lowTempThreshold;
+    hpLowTemp["enableW"] = proj.lowTempEnableW;
+    hpLowTemp["enableAux"] = proj.lowTempEnableAux;
     JsonObject hpHighSuction = heatpump["highSuctionTemp"].to<JsonObject>();
     hpHighSuction["threshold"] = proj.highSuctionTempThreshold;
     hpHighSuction["rvFail"] = proj.rvFail;
@@ -712,6 +736,13 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
         dev["driver"] = kv.second.driver;
         dev["role"] = kv.second.role;
     }
+
+    // Write MAX6675 SPI thermocouple settings
+    JsonObject max6675Upd = sensors["max6675"].to<JsonObject>();
+    max6675Upd["clk"] = proj.max6675Clk;
+    max6675Upd["cs"] = proj.max6675Cs;
+    max6675Upd["do"] = proj.max6675Do;
+    max6675Upd["enabled"] = proj.max6675Enabled;
 
     // Write back
     file = SD.open(filename, FILE_WRITE);

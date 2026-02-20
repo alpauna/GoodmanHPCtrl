@@ -37,6 +37,15 @@ tr:hover td{background:var(--hover-bg);}
 .defrost-status.active{display:block;background:#fff3cd;color:#856404;}
 .sc-badge{background:#ff9800;color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;margin-left:6px;}
 .state-badge{display:inline-block;padding:4px 14px;border-radius:12px;font-weight:bold;font-size:13px;color:#fff;margin-bottom:8px;}
+.flags{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0;}
+.flag{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:bold;border:1px solid var(--border);}
+.flag.off{background:var(--surface);color:var(--text-muted);opacity:0.5;}
+.flag.on{color:#fff;}
+.flag.red{background:#e53935;border-color:#c62828;}
+.flag.orange{background:#ff9800;border-color:#f57c00;}
+.flag.blue{background:#1e88e5;border-color:#1565c0;}
+.flag.green{background:#43a047;border-color:#2e7d32;}
+.flag .cd{font-family:monospace;font-size:10px;margin-left:2px;}
 .footer{text-align:center;color:var(--text-muted);font-size:11px;margin-top:8px;}
 select{background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:12px;}
 select.dup{border-color:#e74c3c;background:#ffebee;}
@@ -66,6 +75,7 @@ select.dup{border-color:#e74c3c;background:#ffebee;}
 <div class='content'>
 
 <div id='stateBadge' class='state-badge' style='background:#9e9e9e;'>--</div>
+<div class='flags' id='flagBox'></div>
 
 <div class='override-box'>
 <label><input type='checkbox' id='overrideChk' onchange='toggleOverride(this.checked)'>Normal Mode Lockout (Manual Override)</label>
@@ -105,6 +115,12 @@ This will auto shut off after <span class='countdown' id='countdown'>30:00</span
 </table>
 <div class='info-text'>I2C driver changes require a reboot to take effect.</div>
 
+<h2>SPI Sensors</h2>
+<table>
+<thead><tr><th>Device</th><th>Role</th><th>Value</th><th>Status</th></tr></thead>
+<tbody id='spiBody'></tbody>
+</table>
+
 <div style='margin:12px 0'>
 <button class='btn-save' id='saveBtn' onclick='saveAssignments()'>Save Assignments</button>
 <div class='msg' id='saveMsg'></div>
@@ -116,8 +132,8 @@ This will auto shut off after <span class='countdown' id='countdown'>30:00</span
 var stateColors={'COOL':'#2196F3','HEAT':'#f44336','DEFROST':'#ff9800','OFF':'#9e9e9e','ERROR':'#d32f2f','LOW_TEMP':'#7b1fa2'};
 var roles=['COMPRESSOR_TEMP','SUCTION_TEMP','AMBIENT_TEMP','CONDENSER_TEMP','LIQUID_TEMP'];
 var roleLabels={'COMPRESSOR_TEMP':'Compressor','SUCTION_TEMP':'Suction','AMBIENT_TEMP':'Ambient','CONDENSER_TEMP':'Condenser','LIQUID_TEMP':'Liquid Line'};
-var drivers=['','MCP9600','Other'];
-var driverLabels={'':'Unassigned','MCP9600':'MCP9600 (Thermocouple)','Other':'Other'};
+var drivers=['','MCP9600','MAX6675','Other'];
+var driverLabels={'':'Unassigned','MCP9600':'MCP9600 (I2C Thermocouple)','MAX6675':'MAX6675 (SPI Thermocouple)','Other':'Other'};
 var manualActive=false;
 var authHeader='';
 var tempSensors=[];
@@ -234,6 +250,7 @@ function loadTemps(){
     tempSensors=data;
     renderOneWire();
     renderI2CRoles();
+    renderSPI();
     checkDups();
   });
 }
@@ -300,6 +317,25 @@ function renderI2CRoles(){
   if(i2cDevices.length>0) renderI2C();
 }
 
+function renderSPI(){
+  var tb=document.getElementById('spiBody'),h='';
+  var found=false;
+  for(var i=0;i<tempSensors.length;i++){
+    if(tempSensors[i].type==='spi'){
+      found=true;
+      var s=tempSensors[i];
+      h+='<tr>';
+      h+='<td class="pin">'+s.devid+'</td>';
+      h+='<td>'+(roleLabels[s.name]||s.name)+'</td>';
+      h+='<td class="v">'+(s.valid==='true'?s.value.toFixed(1)+'\u00B0F':'--')+'</td>';
+      h+='<td><span class="v '+(s.valid==='true'?'v-on':'v-off')+'">'+(s.valid==='true'?'OK':'Invalid')+'</span></td>';
+      h+='</tr>';
+    }
+  }
+  if(!found) h='<tr><td colspan="4" class="v-off">No SPI sensors detected</td></tr>';
+  tb.innerHTML=h;
+}
+
 function saveAssignments(){
   var hdr=authHeader||getAuth();
   if(!hdr) return;
@@ -362,6 +398,44 @@ function showMsg(type,text){
   setTimeout(function(){el.className='msg';},5000);
 }
 
+function fmtSec(s){
+  if(!s||s<=0) return '';
+  var m=Math.floor(s/60),r=s%60;
+  return m>0?(m+':'+(r<10?'0':'')+r):(r+'s');
+}
+
+function renderFlags(d){
+  var flags=[
+    {key:'startupLockout',label:'Startup Lockout',cd:d.startupLockoutRemainSec,color:'blue'},
+    {key:'lpsFault',label:'LPS Fault',color:'red'},
+    {key:'lowTemp',label:'Low Temp',color:'red'},
+    {key:'compressorOverTemp',label:'Comp Over-Temp',color:'red'},
+    {key:'suctionLowTemp',label:'Suction Low',color:'red'},
+    {key:'rvFail',label:'RV Fail',color:'red'},
+    {key:'highSuctionTemp',label:'High Suct Temp',color:'orange'},
+    {key:'defrost',label:'Defrost',color:'orange'},
+    {key:'defrostTransition',label:'Defrost Ph1 (RV SC)',cd:d.defrostTransitionRemainSec,color:'orange'},
+    {key:'defrostCntPending',label:'Defrost Ph2 (CNT SC)',cd:d.defrostCntPendingRemainSec,color:'orange'},
+    {key:'defrostExiting',label:'Defrost Exit',color:'orange'},
+    {key:'coolTransition',label:'Cool Ph1 (RV SC)',cd:d.coolTransitionRemainSec,color:'blue'},
+    {key:'coolCntPending',label:'Cool Ph2 (CNT SC)',cd:d.coolCntPendingRemainSec,color:'blue'},
+    {key:'shortCycleActive',label:'CNT Short Cycle',cd:d.shortCycleRemainSec,color:'orange'}
+  ];
+  var h='';
+  for(var i=0;i<flags.length;i++){
+    var f=flags[i],active=!!d[f.key];
+    var cls='flag '+(active?(f.color+' on'):'off');
+    var label=f.label;
+    if(active&&f.cd&&f.cd>0) label+=' '+fmtSec(f.cd);
+    h+='<span class="'+cls+'">'+label+'</span>';
+  }
+  // Heat runtime (always show if > 0)
+  if(d.heatRuntimeMin>0){
+    h+='<span class="flag green on">Heat Runtime '+d.heatRuntimeMin+'m</span>';
+  }
+  document.getElementById('flagBox').innerHTML=h;
+}
+
 function refresh(){
   var hdrs={};
   if(authHeader) hdrs['Authorization']=authHeader;
@@ -370,6 +444,9 @@ function refresh(){
     var badge=document.getElementById('stateBadge');
     badge.textContent=d.state||'--';
     badge.style.background=stateColors[d.state]||'#9e9e9e';
+
+    // Flags with countdowns
+    renderFlags(d);
 
     // Override state
     var wasActive=manualActive;
