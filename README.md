@@ -17,7 +17,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 ## Features
 
 - **Relay control** — 4 output pins (FAN, Contactor, W-Heat, Reversing Valve) driven by 4 input signals (Low Pressure Switch, Defrost, Y-Cool, O-Heat)
-- **Temperature monitoring** — 4 OneWire (Dallas DS18B20) sensors (compressor, suction, ambient, condenser) + 1 MCP9600 I2C thermocouple (liquid line)
+- **Temperature monitoring** — 4 OneWire (Dallas DS18B20) sensors (compressor, suction, ambient, condenser) + liquid line thermocouple with auto-detection priority: MAX6675 SPI > MAX31850K OneWire > MCP9600 I2C
 - **Remote access** — REST API, WebSocket, and MQTT for monitoring and control
 - **HTTPS/SSL** — Self-signed ECC P-256 certificate on port 443 for secure `/config`, `/update`, and `/ftp` endpoints. Graceful fallback to HTTP-only if no certs found on SD card
 - **Dark/light theme** — Configurable dark/light theme with shared `theme.css` stylesheet. Persisted to SD card config, cached in localStorage for flash-free page loads. Instant preview on config page
@@ -182,7 +182,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | `GoodmanHP` | Central controller with pin maps, temp sensors, and state machine |
 | `InputPin` | Digital/analog input with ISR, debouncing, callbacks |
 | `OutPin` | Output relay with delay, PWM support, state tracking, hardware state validation |
-| `TempSensor` | Temperature sensor with callbacks; supports OneWire (DS18B20) and I2C (MCP9600) |
+| `TempSensor` | Temperature sensor with callbacks; supports OneWire (DS18B20), I2C (MCP9600), and SPI (MAX6675) |
 | `Config` | SD card and JSON configuration management |
 | `Logger` | Multi-output logging with tar.gz rotation, ring buffer, and WebSocket streaming |
 | `WebHandler` | AsyncWebServer (port 80) with REST API, WebSocket, and HTTPS redirects |
@@ -210,6 +210,9 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | SDA | 8 | I/O | I2C data |
 | SCL | 9 | I/O | I2C clock |
 | OneWire | 21 | I/O | Temperature sensor bus |
+| MAX6675 CLK | 39 | Output | SPI thermocouple clock (software SPI) |
+| MAX6675 CS | 40 | Output | SPI thermocouple chip select |
+| MAX6675 DO | 41 | Input | SPI thermocouple data out |
 
 **I2C Devices:**
 
@@ -217,6 +220,12 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 |--------|---------|-------------|
 | MCP9600 | 0x67 | Type-K thermocouple amplifier (LIQUID_TEMP) |
 | SSD1306 | 0x3C | 128x64 OLED display (5-page auto-cycling status) |
+
+**SPI Devices (software SPI):**
+
+| Device | Description |
+|--------|-------------|
+| MAX6675 | Type-K thermocouple reader for LIQUID_TEMP (highest priority in auto-detection) |
 
 ## Getting Started
 
@@ -328,7 +337,8 @@ This prompts for WiFi and MQTT credentials and writes `data/config.txt`. Copy it
       "28C7E8B200000076": { "description": "CONDENSER_TEMP", "name": "CONDENSER_TEMP" },
       "28DCC0B200000013": { "description": "COMPRESSOR_TEMP", "name": "COMPRESSOR_TEMP" },
       "2862D5B2000000A9": { "description": "SUCTION_TEMP", "name": "SUCTION_TEMP" }
-    }
+    },
+    "max6675": { "clk": 39, "cs": 40, "do": 41, "enabled": true }
   }
 }
 ```
@@ -344,6 +354,10 @@ This prompts for WiFi and MQTT credentials and writes `data/config.txt`. Copy it
 - `heatpump.defrost.minRuntimeMs` — Minimum Phase 3 runtime in ms before checking exit conditions (default: 180000 = 3 min)
 - `heatpump.defrost.exitTempF` — Condenser temp (°F) at which Phase 3 exits (default: 60.0)
 - `heatpump.defrost.heatRuntimeThresholdMs` — Accumulated HEAT runtime in ms before triggering defrost (default: 5400000 = 90 min, range: 30–90 min via config page)
+- `sensors.max6675.clk` — MAX6675 SPI clock pin (default: 39, requires reboot)
+- `sensors.max6675.cs` — MAX6675 SPI chip select pin (default: 40, requires reboot)
+- `sensors.max6675.do` — MAX6675 SPI data out pin (default: 41, requires reboot)
+- `sensors.max6675.enabled` — Enable MAX6675 thermocouple sensor (default: true, requires reboot)
 
 **Log file rotation:**
 - Active log: `/log.txt` (uncompressed)
@@ -811,5 +825,6 @@ Managed automatically by PlatformIO. Key libraries:
 - [ArduinoJson](https://github.com/bblanchon/ArduinoJson) — JSON parsing/serialization
 - [ESP32-targz](https://github.com/tobozo/ESP32-targz) — tar.gz compression for log rotation
 - [Adafruit MCP9600](https://github.com/adafruit/Adafruit_MCP9600) — I2C thermocouple amplifier driver
+- [Adafruit MAX6675](https://github.com/adafruit/MAX6675-library) — SPI thermocouple reader driver
 - [SD](https://github.com/espressif/arduino-esp32/tree/master/libraries/SD) — Arduino SD card library (used for all file operations)
 - [SimpleFTPServer](https://github.com/xreef/SimpleFTPServer) — FTP server for SD card file uploads (STORAGE_SD mode)
