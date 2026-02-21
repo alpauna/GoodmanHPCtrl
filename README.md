@@ -227,6 +227,17 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 |--------|-------------|
 | MAX6675 | Type-K thermocouple reader for LIQUID_TEMP (highest priority in auto-detection) |
 
+**MAX6675 Thermocouple Board Mounting:**
+
+The MAX6675 breakout board (32mm x 16mm) mounts to the inner ceiling of the top shell enclosure via a single M3 screw pillar. The terminal block protrudes through a rectangular cutout in the top shell.
+
+- **Mounting pillar**: 6mm OD, 6mm tall, M3 tap hole (2.5mm), attached to inner ceiling
+- **Pillar position**: 35mm from left outer edge, 28mm from top outer edge, offset 2mm toward bottom of board from center
+- **Terminal cutout**: 16mm x 14mm rectangular hole through the top shell at the top end of the board
+- **Countersink**: Shell thinned from 3mm to 1.5mm around the terminal opening, extending to the outer top edge for terminal block clearance
+- **Default SPI pins**: CLK=GPIO 39 (TCK), CS=GPIO 40 (TDO), DO=GPIO 41 (TDI) — freed JTAG header pins on ESP32-S3
+- **3D shell files**: Located in `../Circits/GoodmanHP/Shells/` — `3DShell_GoodmanHPv3_T_3mm_TC.stl` (top with thermocouple mount), `3DShell_GoodmanHPv3_B_3mm.stl` (bottom), wall thickness 3mm
+
 ## Getting Started
 
 ### Prerequisites
