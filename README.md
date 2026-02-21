@@ -236,7 +236,55 @@ The MAX6675 breakout board (32mm x 16mm) mounts to the inner ceiling of the top 
 - **Terminal cutout**: 16mm x 14mm rectangular hole through the top shell at the top end of the board
 - **Countersink**: Shell thinned from 3mm to 1.5mm around the terminal opening, extending to the outer top edge for terminal block clearance
 - **Default SPI pins**: CLK=GPIO 39 (TCK), CS=GPIO 40 (TDO), DO=GPIO 41 (TDI) — freed JTAG header pins on ESP32-S3
-- **3D shell files**: Located in `../Circits/GoodmanHP/Shells/` — `3DShell_GoodmanHPv3_T_3mm_TC.stl` (top with thermocouple mount), `3DShell_GoodmanHPv3_B_3mm.stl` (bottom), wall thickness 3mm
+- **3D shell files**: Located in `shell/` — originals (3mm walls) and modified versions (3.5mm walls, flipped mating profile). See [3D Printed Shell](#3d-printed-shell) section below
+
+### 3D Printed Shell
+
+The enclosure is an EasyEDA-exported 3D shell, post-processed with FreeCAD Python scripts for thicker walls, a flipped mating profile, and mounting hardware. All files are in the `shell/` directory.
+
+**Shell files:**
+
+| File | Description |
+|------|-------------|
+| `3DShell_GoodmanHPv3_T_3mm_TC.step/.stl` | Original top shell (3mm walls, tongue on outer half, TC mount) |
+| `3DShell_GoodmanHPv3_B_3mm.step/.stl` | Original bottom shell (3mm walls, groove on outer half) |
+| `3DShell_GoodmanHPv3_T_3.5mm_TC_flipped.step/.stl` | Modified top shell (3.5mm walls, groove replaces tongue) |
+| `3DShell_GoodmanHPv3_B_3.5mm_flipped.step/.stl` | Modified bottom shell (3.5mm walls, tongue replaces groove) |
+| `modify_top.py` | FreeCAD script to generate the modified top shell |
+| `modify_bottom.py` | FreeCAD script to generate the modified bottom shell |
+
+**Why the mating profile was flipped:** The original design had a tongue (raised band) on the top shell mating rim. When 3D printed, this thin horizontal band is prone to layer separation because it prints as an unsupported overhang at the shell's open edge. Moving the tongue to the bottom shell and the groove to the top eliminates this — the bottom tongue prints vertically up from the floor (strong layer adhesion), and the top groove is simply a recess in a solid wall.
+
+**Modifications applied:**
+
+1. **Wall thickening (3mm to 3.5mm)** — 0.5mm added to the outer face of all 4 walls. Inner cavity dimensions unchanged so the PCB still fits. Wall cutouts (connector openings on right and back walls) are preserved by pre-cutting matching holes in the thickening ring before fusing.
+
+2. **Mating profile flip** — The rabbet/step joint between shells was inverted:
+   - **Bottom**: Original groove (Z=31-35) filled, new outer tongue added with 0.10mm clearance per side
+   - **Top**: Original tongue (Z=28-32) removed, new inner lip + outer groove cut
+
+3. **M3 screw pillar** — 5mm OD, 3mm tall pillar on the top shell ceiling for mounting the MAX6675 thermocouple board, with M3 (2.5mm) through-hole centered in the pillar
+
+**Regenerating modified shells:**
+
+```bash
+# Requires FreeCAD installed (sudo apt install freecad)
+freecadcmd shell/modify_top.py
+freecadcmd shell/modify_bottom.py
+```
+
+**Key geometry constants (all in mm, origin at EasyEDA export origin):**
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| Outer walls | X[-98.26, 4.92] Y[-32.48, 97.12] | Original 3mm outer face |
+| Inner walls | X[-95.26, 1.92] Y[-29.48, 94.12] | Original 3mm inner face |
+| New outer | X[-98.76, 5.42] Y[-32.98, 97.62] | After 0.5mm thickening |
+| Bottom mating zone | Z=31 to Z=35 | Groove (original) / Tongue (modified) |
+| Top mating zone | Z=28 to Z=32 | Tongue (original) / Groove (modified) |
+| Right wall cutout | Y[47, 88.5] Z[7, 24] | Connector opening, +X wall |
+| Back wall lower cutout | X[-50, -35] Z[6, 13] | Opening, +Y wall |
+| Back wall upper cutout | X[-89.5, -3.5] Z[14, 17] | Opening, +Y wall |
 
 ### Modifying EasyEDA 3D Shell Exports with Claude Code
 
