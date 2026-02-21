@@ -238,6 +238,64 @@ The MAX6675 breakout board (32mm x 16mm) mounts to the inner ceiling of the top 
 - **Default SPI pins**: CLK=GPIO 39 (TCK), CS=GPIO 40 (TDO), DO=GPIO 41 (TDI) — freed JTAG header pins on ESP32-S3
 - **3D shell files**: Located in `../Circits/GoodmanHP/Shells/` — `3DShell_GoodmanHPv3_T_3mm_TC.stl` (top with thermocouple mount), `3DShell_GoodmanHPv3_B_3mm.stl` (bottom), wall thickness 3mm
 
+### Modifying EasyEDA 3D Shell Exports with Claude Code
+
+EasyEDA exports PCB enclosures as STEP files with thin walls (typically 1.5mm). These often need post-processing — thicker walls, mating features, mounting hardware, cutouts — which can be done programmatically via FreeCAD's Python API and Claude Code. Below is a reusable prompt template and the key lessons learned from this project's shell modifications.
+
+**Prerequisites:** `freecad` package installed (`sudo apt install freecad`), STEP files exported from EasyEDA's 3D shell generator.
+
+**Prompt template** — adapt the bracketed sections to your project:
+
+> I have EasyEDA-exported STEP enclosure shells at `[path/to/shells/]`:
+> - `[Bottom_Shell.step]` — bottom half, open top
+> - `[Top_Shell.step]` — top half, open bottom
+>
+> The shells have [1.5mm] walls. I need the following modifications:
+>
+> 1. **Wall thickening** — Increase wall thickness from [1.5mm] to [3mm] by expanding outward. Keep inner cavity dimensions identical to the original so the PCB still fits. Preserve all interior features (screw pillars, standoffs, alignment posts) from the original STEP by extracting them via boolean intersection and fusing them back into the thickened shell.
+>
+> 2. **Mating joint** — Add a rabbet/step joint between top and bottom shells in the overlap zone where both rims meet:
+>    - Bottom: remove outer half of wall for [4mm] from the rim (groove)
+>    - Top: remove inner half of wall in the overlap zone + add outer-half tongue extending [4mm] below the rim with [0.2mm] clearance
+>    - The tongue must overlap at least [2mm] into existing wall geometry above the rim for OCCT fuse to succeed (coincident-face workaround)
+>
+> 3. **Screw holes** — Drill [M1.2] through-holes at [left and right wall midpoints], centered in the interlocking overlap zone so the screw passes through both the tongue and groove lip
+>
+> 4. **Cutouts** — Cut rectangular openings in the top shell for: [LCD window at X1,Y1 to X2,Y2], [wire pass-through at ...], [connector at ...]
+>
+> 5. **Mounting features** — Add a screw pillar on the inner ceiling of the top shell at [position] for mounting a [component]. [Xmm] OD, [Xmm] tall, [MX] tap hole
+>
+> Write a FreeCAD Python script (`freecadcmd script.py`) that loads the STEP files, performs all modifications via boolean operations, and exports both STL and STEP. Include a verification section that cross-sections the results and prints geometry at key Z levels.
+
+**Key lessons for FreeCAD/OCCT boolean operations:**
+
+| Issue | Symptom | Fix |
+|-------|---------|-----|
+| Coincident face fuse failure | `fuse()` adds volume but geometry doesn't extend beyond shared face | Extend the new body 1-2mm past the shared face into existing solid so they overlap, not just touch |
+| `makeOffsetShape` fails on complex shells | Exception or degenerate result | Rebuild parametrically: create outer box, cut inner cavity, extract+fuse interior features from original via `common()` |
+| Thickening shifts features | Mounting tabs, screw pillars stay at original positions | After thickening, extract features by region (`common()` with probe box), `translated()` to correct position, cut old + fuse shifted |
+| Groove/tongue on wrong wall half | Joint doesn't interlock — both pieces occupy same space | Groove removes **outer** half; tongue occupies **outer** half (filling the groove space). Cut **inner** half of mating shell in overlap zone so it nests with the other shell's remaining inner lip |
+| `removeSplitter()` drops geometry | Thin or newly-fused features disappear | Check volume before/after; if features vanish, skip `removeSplitter()` or increase overlap |
+| STEP export loses thin features | Feature exists in memory (volume correct) but missing after reload | Ensure minimum 0.5mm thickness on all features; export STL as backup (mesh-based, more tolerant) |
+
+**Verification pattern** — always include in your script:
+```python
+# Cross-section at key Z levels to verify wall profiles
+for z in [key_z_values]:
+    plane = Part.makePlane(250, 200, Vector(-150, -100, z), Vector(0, 0, 1))
+    sec = shape.section(plane)
+    sbb = sec.BoundBox
+    print(f"Z={z}: X[{sbb.XMin:.2f},{sbb.XMax:.2f}] Y[{sbb.YMin:.2f},{sbb.YMax:.2f}]")
+```
+
+**Typical workflow:**
+1. **Analyze** — Load STEP, print bounding boxes, cross-section at rim levels to get exact wall coordinates (outer, inner, midpoint)
+2. **Thicken** — Parametric rebuild with `makeBox` + `cut` (more reliable than `makeOffsetShape` on EasyEDA exports)
+3. **Interior features** — `original.common(cavity_box)` extracts pillars/standoffs, `fuse()` them into new shell
+4. **Mating edge** — Groove (cut outer half) + tongue (fuse outer half extension with 2mm overlap into wall) + step (cut inner half in overlap zone)
+5. **Hardware** — Screw holes (`makeCylinder` + `cut`), mounting pillars (`makeCylinder` + `fuse`), cutouts (`makeBox` + `cut`)
+6. **Export** — `.exportStep()` for CAD, `MeshPart.meshFromShape()` + `.write()` for STL printing
+
 ## Getting Started
 
 ### Prerequisites
