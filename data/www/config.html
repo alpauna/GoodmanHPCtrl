@@ -101,9 +101,9 @@ button:hover{background:#45a049;}
 </fieldset>
 <fieldset><legend>MAX6675 Thermocouple <span class='tag tag-reboot'>reboot</span></legend>
 <label><input type='checkbox' id='max6675Enabled' style='width:auto;margin-right:6px;'>Enabled</label>
-<label>CLK Pin</label><input type='number' id='max6675Clk' min='0' max='48'>
-<label>CS Pin</label><input type='number' id='max6675Cs' min='0' max='48'>
-<label>DO Pin</label><input type='number' id='max6675Do' min='0' max='48'>
+<label>CLK Pin</label><select id='max6675Clk' onchange='syncMaxPins()'></select>
+<label>CS Pin</label><select id='max6675Cs' onchange='syncMaxPins()'></select>
+<label>DO Pin</label><select id='max6675Do' onchange='syncMaxPins()'></select>
 </fieldset>
 <fieldset><legend>Logging <span class='tag tag-live'>live</span></legend>
 <label>Max Log Size (MB)</label><input type='number' step='1' id='maxLogSizeMB'>
@@ -137,6 +137,10 @@ fields.forEach(f=>{var e=document.getElementById(f);if(e)e.value=d[f]!=null?d[f]
 document.getElementById('maxLogSizeMB').value=d.maxLogSize!=null?Math.round(d.maxLogSize/(1024*1024)):'';
 document.getElementById('displayEnabled').checked=d.displayEnabled!==false;
 document.getElementById('max6675Enabled').checked=d.max6675Enabled!==false;
+if(d.max6675Clk!=null)document.getElementById('max6675Clk').value=d.max6675Clk;
+if(d.max6675Cs!=null)document.getElementById('max6675Cs').value=d.max6675Cs;
+if(d.max6675Do!=null)document.getElementById('max6675Do').value=d.max6675Do;
+syncMaxPins();
 document.getElementById('lowTempEnableW').checked=d.lowTempEnableW!==false;
 document.getElementById('lowTempEnableAux').checked=d.lowTempEnableAux!==false;
 adminPwSet=!!d.adminPasswordSet;
@@ -224,6 +228,29 @@ el.textContent='Type: '+d.type+' | Total: '+d.totalMB+' MB | Used: '+d.usedMB+' 
 }).catch(()=>{document.getElementById('sdInfo').textContent='Error loading SD info';});
 }
 loadSDInfo();
+var _maxPinIds=['max6675Clk','max6675Cs','max6675Do'];
+var _maxPins=[3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,38,39,40,41,42,43,44,45,46,47,48];
+var _jtagMap={39:'TCK',40:'TDO',41:'TDI',42:'TMS'};
+function _pinLabel(p){var s='GPIO '+p;if(_jtagMap[p])s+=' ('+_jtagMap[p]+')';return s;}
+function initMaxPins(){
+_maxPinIds.forEach(function(id){
+var sel=document.getElementById(id);
+sel.innerHTML='';
+_maxPins.forEach(function(p){var o=document.createElement('option');o.value=p;o.textContent=_pinLabel(p);sel.appendChild(o);});
+});
+}
+function syncMaxPins(){
+var vals={};
+_maxPinIds.forEach(function(id){vals[id]=document.getElementById(id).value;});
+_maxPinIds.forEach(function(id){
+var sel=document.getElementById(id);
+var others=_maxPinIds.filter(function(x){return x!==id;}).map(function(x){return vals[x];});
+for(var i=0;i<sel.options.length;i++){
+sel.options[i].disabled=others.indexOf(sel.options[i].value)>=0;
+}
+});
+}
+initMaxPins();
 function formatSD(){
 if(!window.confirm('This will erase logs and temp history from the SD card. Credentials and certs are preserved. Continue?'))return;
 var st=document.getElementById('sdFormatStatus');
