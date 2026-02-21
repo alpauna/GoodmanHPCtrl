@@ -619,9 +619,23 @@ void setup() {
   // Start GoodmanHP controller
   hpController.setDallasTemperature(&sensors);
 
-  // Add LIQUID_TEMP sensor: MAX31850K OneWire > MCP9600 I2C > MAX6675 SPI
+  // Add LIQUID_TEMP sensor: MAX6675 SPI > MAX31850K OneWire > MCP9600 I2C
+  // MAX6675 is preferred when detected — replaces any OneWire LIQUID_TEMP
   TempSensorMap& postDiscoveryMap = hpController.getTempSensorMap();
-  if (postDiscoveryMap.count("LIQUID_TEMP") > 0) {
+  if (max6675Ptr != nullptr) {
+    // Remove OneWire LIQUID_TEMP if it was auto-discovered (MAX6675 takes priority)
+    if (postDiscoveryMap.count("LIQUID_TEMP") > 0) {
+      Log.info("MAIN", "LIQUID_TEMP: replacing OneWire with MAX6675 SPI (higher priority)");
+      delete postDiscoveryMap["LIQUID_TEMP"];
+      postDiscoveryMap.erase("LIQUID_TEMP");
+    }
+    TempSensor* liquidSensor = new TempSensor("LIQUID_TEMP");
+    liquidSensor->setMAX6675(max6675Ptr);
+    liquidSensor->setUpdateCallback(tempSensorUpdateCallback);
+    liquidSensor->setChangeCallback(tempSensorChangeCallback);
+    hpController.addTempSensor("LIQUID_TEMP", liquidSensor);
+    Log.info("MAIN", "LIQUID_TEMP sensor added (MAX6675 SPI)");
+  } else if (postDiscoveryMap.count("LIQUID_TEMP") > 0) {
     Log.info("MAIN", "LIQUID_TEMP found on OneWire bus (MAX31850K)");
   } else if (mcp9600Ready) {
     TempSensor* liquidSensor = new TempSensor("LIQUID_TEMP");
@@ -631,15 +645,8 @@ void setup() {
     liquidSensor->setChangeCallback(tempSensorChangeCallback);
     hpController.addTempSensor("LIQUID_TEMP", liquidSensor);
     Log.info("MAIN", "LIQUID_TEMP sensor added (MCP9600 I2C fallback)");
-  } else if (max6675Ptr != nullptr) {
-    TempSensor* liquidSensor = new TempSensor("LIQUID_TEMP");
-    liquidSensor->setMAX6675(max6675Ptr);
-    liquidSensor->setUpdateCallback(tempSensorUpdateCallback);
-    liquidSensor->setChangeCallback(tempSensorChangeCallback);
-    hpController.addTempSensor("LIQUID_TEMP", liquidSensor);
-    Log.info("MAIN", "LIQUID_TEMP sensor added (MAX6675 SPI fallback)");
   } else {
-    Log.warn("MAIN", "No LIQUID_TEMP sensor found (no MAX31850K, MCP9600, or MAX6675)");
+    Log.warn("MAIN", "No LIQUID_TEMP sensor found (no MAX6675, MAX31850K, or MCP9600)");
   }
 
   hpController.setStateChangeCallback([](GoodmanHP::State, GoodmanHP::State) {
