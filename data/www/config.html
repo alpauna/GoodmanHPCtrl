@@ -231,12 +231,15 @@ loadSDInfo();
 var _maxPinIds=['max6675Clk','max6675Cs','max6675Do'];
 var _maxPins=[3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,38,39,40,41,42,43,44,45,46,47,48];
 var _jtagMap={39:'TCK',40:'TDO',41:'TDI',42:'TMS'};
-function _pinLabel(p){var s='GPIO '+p;if(_jtagMap[p])s+=' ('+_jtagMap[p]+')';return s;}
+var _usedPins={};
+function _pinLabel(p){var s='GPIO '+p;if(_jtagMap[p])s+=' ('+_jtagMap[p]+')';if(_usedPins[p])s+=' ['+_usedPins[p]+']';return s;}
 function initMaxPins(){
 _maxPinIds.forEach(function(id){
 var sel=document.getElementById(id);
+var cur=sel.value;
 sel.innerHTML='';
 _maxPins.forEach(function(p){var o=document.createElement('option');o.value=p;o.textContent=_pinLabel(p);sel.appendChild(o);});
+if(cur)sel.value=cur;
 });
 }
 function syncMaxPins(){
@@ -246,11 +249,18 @@ _maxPinIds.forEach(function(id){
 var sel=document.getElementById(id);
 var others=_maxPinIds.filter(function(x){return x!==id;}).map(function(x){return vals[x];});
 for(var i=0;i<sel.options.length;i++){
-sel.options[i].disabled=others.indexOf(sel.options[i].value)>=0;
+var v=sel.options[i].value;
+sel.options[i].disabled=others.indexOf(v)>=0||!!_usedPins[parseInt(v)];
 }
 });
 }
 initMaxPins();
+fetch('/pins?format=json').then(function(r){return r.json();}).then(function(d){
+var ins=d.inputs||[];for(var i=0;i<ins.length;i++)_usedPins[ins[i].pin]=ins[i].name;
+var outs=d.outputs||[];for(var i=0;i<outs.length;i++)_usedPins[outs[i].pin]=outs[i].name;
+_usedPins[8]='SDA';_usedPins[9]='SCL';_usedPins[21]='OneWire';
+initMaxPins();syncMaxPins();
+});
 function formatSD(){
 if(!window.confirm('This will erase logs and temp history from the SD card. Credentials and certs are preserved. Continue?'))return;
 var st=document.getElementById('sdFormatStatus');

@@ -120,6 +120,12 @@ This will auto shut off after <span class='countdown' id='countdown'>30:00</span
 <thead><tr><th>Device</th><th>Role</th><th>Value</th><th>Status</th></tr></thead>
 <tbody id='spiBody'></tbody>
 </table>
+<div id='spiPins' style='display:none;margin-top:-10px;margin-bottom:16px;'>
+<table>
+<thead><tr><th>Pin</th><th>Function</th><th>JTAG</th></tr></thead>
+<tbody id='spiPinBody'></tbody>
+</table>
+</div>
 
 <div style='margin:12px 0'>
 <button class='btn-save' id='saveBtn' onclick='saveAssignments()'>Save Assignments</button>
@@ -317,6 +323,8 @@ function renderI2CRoles(){
   if(i2cDevices.length>0) renderI2C();
 }
 
+var _spiCfg=null;
+var _jtagMap={39:'TCK',40:'TDO',41:'TDI',42:'TMS'};
 function renderSPI(){
   var tb=document.getElementById('spiBody'),h='';
   var found=false;
@@ -334,6 +342,29 @@ function renderSPI(){
   }
   if(!found) h='<tr><td colspan="4" class="v-off">No SPI sensors detected</td></tr>';
   tb.innerHTML=h;
+  renderSPIPins();
+}
+function renderSPIPins(){
+  var wrap=document.getElementById('spiPins');
+  if(!_spiCfg||!_spiCfg.max6675Enabled){wrap.style.display='none';return;}
+  var pins=[
+    {pin:_spiCfg.max6675Clk,fn:'CLK'},
+    {pin:_spiCfg.max6675Cs,fn:'CS'},
+    {pin:_spiCfg.max6675Do,fn:'DO'}
+  ];
+  var h='';
+  for(var i=0;i<pins.length;i++){
+    var p=pins[i],jtag=_jtagMap[p.pin]||'--';
+    h+='<tr><td class="pin">GPIO '+p.pin+'</td><td>'+p.fn+'</td><td>'+jtag+'</td></tr>';
+  }
+  document.getElementById('spiPinBody').innerHTML=h;
+  wrap.style.display='block';
+}
+function loadSPIConfig(){
+  fetch('/config?format=json').then(function(r){return r.json();}).then(function(d){
+    _spiCfg=d;
+    renderSPIPins();
+  }).catch(function(){});
 }
 
 function saveAssignments(){
@@ -509,5 +540,6 @@ fetch('/theme').then(function(r){return r.json();}).then(function(d){
 });
 loadTemps();
 scanI2C();
+loadSPIConfig();
 refresh();setInterval(refresh,2000);
 </script></body></html>
