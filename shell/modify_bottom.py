@@ -6,28 +6,13 @@ import os, sys
 shell_dir = os.path.dirname(os.path.abspath(__file__)) + "/"
 sys.path.insert(0, shell_dir)
 
-from cutout import wall_ring, drill_hole_lateral
+from cutout import wall_ring, wall_opening, drill_hole_lateral
 
 bot_orig = Part.read(shell_dir + "3DShell_GoodmanHPv3_B_3mm.step")
 bb = bot_orig.BoundBox
 
 OX_L = -98.262; IX_L = -95.262; IX_R = 1.917; OX_R = 4.917
 OY_F = -32.48;  IY_F = -29.48;  IY_B = 94.12;  OY_B = 97.12
-
-# ---------------------------------------------------------------------------
-# Wall cutout features (coordinates from probed original shell)
-# ---------------------------------------------------------------------------
-BOTTOM_FEATURES = {
-    "ACCESS": {  # General access / venting
-        "wall": "right", "y1": 47.0, "y2": 88.5, "z1": 7, "z2": 24,
-    },
-    "VENT": {  # Air vent slot
-        "wall": "back", "x1": -89.5, "x2": -3.5, "z1": 14, "z2": 17,
-    },
-    "ANTENNA": {  # ESP32 antenna clearance
-        "wall": "back", "x1": -50.0, "x2": -35.0, "z1": 6, "z2": 13,
-    },
-}
 THICK = 0.5; CLR = 0.10
 NX_L = OX_L - THICK; NX_R = OX_R + THICK
 NY_F = OY_F - THICK; NY_B = OY_B + THICK
@@ -38,83 +23,58 @@ MX_L = -96.762; MX_R = 3.417; MY_F = -30.98; MY_B = 95.62
 BOT_GROOVE_Z = 31.0; BOT_RIM_Z = 35.0
 FLOOR_Z = bb.ZMin  # actual floor Z
 
+# ---------------------------------------------------------------------------
+# Wall cutout features (coordinates from probed original shell)
+# ---------------------------------------------------------------------------
+WALL_COORDS = {"left": OX_L, "right": OX_R, "front": OY_F, "back": OY_B}
+
+BOTTOM_FEATURES = {
+    "ACCESS": {  # General access / venting
+        "wall": "right", "y1": 47.0, "y2": 88.5, "z1": 7, "z2": 24,
+    },
+    "ACCESS_SMALL": {  # Small right wall cutout near floor
+        "wall": "right", "y1": 4.0, "y2": 7.5, "z1": 1, "z2": 4,
+    },
+    "ANTENNA": {  # ESP32 antenna clearance
+        "wall": "back", "x1": -50.0, "x2": -35.0, "z1": 6, "z2": 13,
+    },
+    "VENT": {  # Air vent slot
+        "wall": "back", "x1": -89.5, "x2": -3.5, "z1": 14, "z2": 17,
+    },
+    "FLOOR_RIGHT": {  # Right wall floor-level gap
+        "wall": "right", "y1": -29, "y2": 94, "z1": FLOOR_Z, "z2": FLOOR_Z + 2,
+    },
+    "FLOOR_BACK": {  # Back wall floor-level gap
+        "wall": "back", "x1": -95, "x2": -6, "z1": FLOOR_Z, "z2": FLOOR_Z + 2,
+    },
+}
+
+# Enclosure screw holes (shared with top shell)
+SCREW = {
+    "axis": "x", "cy": None,  # computed: wall Y midpoint
+    "cz": 30.0,               # 2mm above bottom lip edge (Z=28)
+    "radius": 0.75,           # M1.5
+}
+
 print(f"Original volume: {bot_orig.Volume:.0f}")
 print(f"BoundBox: X[{bb.XMin:.2f},{bb.XMax:.2f}] Y[{bb.YMin:.2f},{bb.YMax:.2f}] Z[{bb.ZMin:.2f},{bb.ZMax:.2f}]")
 
 # === 1. Create wall thickening ring (Z=FLOOR to Z=31) ===
-# This adds 0.5mm to all 4 walls
 thk_ring = wall_ring(NX_L, NY_F, NX_R, NY_B,
                      OX_L, OY_F, OX_R, OY_B,
                      FLOOR_Z, BOT_GROOVE_Z)
 print(f"\n1. Raw thickening ring volume: {thk_ring.Volume:.0f}")
 
-# === 2. Cut out holes matching the original wall cutouts ===
-# These are openings in the original shell walls that the ring would fill
-
-# Right wall (+X side, at X=OX_R=4.917): large cutout
-# Mapped: Y=[47.0, 88.5], Z=[7, 24]
-# Use generous margins and span the full ring thickness
-right_cutout = Part.makeBox(
-    THICK + 2,           # X span: through entire ring + margin
-    88.5 - 47.0,         # Y span
-    24 - 7,              # Z span
-    Vector(OX_R - 0.5, 47.0, 7)  # start inside wall, go outward
-)
-thk_ring = thk_ring.cut(right_cutout)
-print(f"2a. After right wall main cutout: {thk_ring.Volume:.0f}")
-
-# Right wall small cutout near floor
-# Mapped: Y=[4.5, 6.0], Z=2 (very small, Z~1-3)
-right_small = Part.makeBox(
-    THICK + 2,
-    6.0 - 4.5 + 1,  # small margin
-    3,               # Z=1 to Z=4
-    Vector(OX_R - 0.5, 4.0, 1)
-)
-thk_ring = thk_ring.cut(right_small)
-print(f"2b. After right wall small cutout: {thk_ring.Volume:.0f}")
-
-# Back wall (+Y side, at Y=OY_B=97.12): lower cutout
-# Mapped: X=[-50.0, -35.0], Z=[6, 13]
-back_lower = Part.makeBox(
-    -35.0 - (-50.0),    # X span
-    THICK + 2,           # Y span: through entire ring + margin
-    13 - 6,              # Z span
-    Vector(-50.0, OY_B - 0.5, 6)
-)
-thk_ring = thk_ring.cut(back_lower)
-print(f"2c. After back wall lower cutout: {thk_ring.Volume:.0f}")
-
-# Back wall: upper cutout
-# Mapped: X=[-89.5, -3.5], Z=[14, 17]
-back_upper = Part.makeBox(
-    -3.5 - (-89.5),     # X span
-    THICK + 2,           # Y span
-    17 - 14,             # Z span
-    Vector(-89.5, OY_B - 0.5, 14)
-)
-thk_ring = thk_ring.cut(back_upper)
-print(f"2d. After back wall upper cutout: {thk_ring.Volume:.0f}")
-
-# Z=1 floor-level gaps (both walls have large gaps at Z=1)
-# Right wall Z=1: Y=[-29, 94]
-right_floor = Part.makeBox(
-    THICK + 2,
-    94 - (-29),
-    2,  # Z=0 to Z=2
-    Vector(OX_R - 0.5, -29, FLOOR_Z)
-)
-thk_ring = thk_ring.cut(right_floor)
-
-# Back wall Z=1: X=[-95, -6]
-back_floor = Part.makeBox(
-    -6 - (-95),
-    THICK + 2,
-    2,
-    Vector(-95, OY_B - 0.5, FLOOR_Z)
-)
-thk_ring = thk_ring.cut(back_floor)
-print(f"2e. After floor-level cutouts: {thk_ring.Volume:.0f}")
+# === 2. Cut wall openings to preserve original shell cutouts ===
+for name, feat in BOTTOM_FEATURES.items():
+    w = feat["wall"]
+    if w in ("left", "right"):
+        a1, a2 = feat["y1"], feat["y2"]
+    else:
+        a1, a2 = feat["x1"], feat["x2"]
+    thk_ring = wall_opening(thk_ring, w, a1, a2, feat["z1"], feat["z2"],
+                            wall_coord=WALL_COORDS[w], ring_thick=THICK)
+    print(f"2. {name}: {w} wall [{a1},{a2}] Z=[{feat['z1']},{feat['z2']}] vol={thk_ring.Volume:.0f}")
 
 # === 3. Fuse trimmed ring with original ===
 result = bot_orig.fuse(thk_ring)
@@ -200,10 +160,10 @@ for z in [32, 33, 34]:
                 segs.append(f"[{xs[i]:.2f},{xs[i+1]:.2f}]={w:.2f}mm")
         print(f"  Z={z}: {' | '.join(segs)}")
 
-# === 7. Drill M1.5 screw holes through left and right walls ===
-# Original EasyEDA holes were at wall Y-midpoint, Z=32.65, lost during profile flip
+# === 7. M1.5 enclosure screw holes through left and right walls ===
 result = drill_hole_lateral(result, axis='x', start=NX_L, end=NX_R,
-                            cy=(OY_F + OY_B) / 2, cz=32.65, radius=0.75)
+                            cy=(OY_F + OY_B) / 2, cz=SCREW["cz"],
+                            radius=SCREW["radius"])
 print(f"7. Screw holes drilled: {result.Volume:.0f}")
 
 print(f"\nBoundBox: X[{result.BoundBox.XMin:.2f},{result.BoundBox.XMax:.2f}] Y[{result.BoundBox.YMin:.2f},{result.BoundBox.YMax:.2f}] Z[{result.BoundBox.ZMin:.2f},{result.BoundBox.ZMax:.2f}]")

@@ -485,14 +485,96 @@ def emboss_text(shape, text, x, y, z_surface, height=4.0, depth=0.4,
 # Component mount templates
 # ---------------------------------------------------------------------------
 
+def labeled_cutout(shape, x1, y1, x2, y2, z_inner, z_outer,
+                   label=None, label_pos="above", label_gap=2.0,
+                   label_height=5.0, label_depth=0.8, cut=True):
+    """Rectangular cutout with optional debossed text label.
+
+    Combines rectangular_cutout() + deboss_text() for labeled openings
+    like wire pass-throughs and connector slots.
+
+    Args:
+        shape:        Shape to modify.
+        x1, y1:       Bottom-left corner of cutout.
+        x2, y2:       Top-right corner of cutout (x2 > x1, y2 > y1).
+        z_inner:      Z of the inner (cavity-side) surface.
+        z_outer:      Z of the outer surface.
+        label:        Text string for debossed label (None to skip).
+        label_pos:    'above' or 'below' the cutout (default 'above').
+        label_gap:    Gap between cutout edge and label baseline (default 2.0mm).
+        label_height: Font height in mm (default 5.0).
+        label_depth:  Deboss depth in mm (default 0.8).
+        cut:          Whether to cut the rectangular hole (default True).
+                      Set False if the cutout already exists in the shell.
+
+    Returns:
+        Modified shape with cutout (if cut=True) and label (if label set).
+    """
+    if cut:
+        shape = rectangular_cutout(shape, x1, y1, x2, y2, z_inner, z_outer)
+
+    if label:
+        cx = (x1 + x2) / 2
+        if label_pos == "above":
+            ly = y2 + label_gap
+        else:
+            ly = y1 - label_gap - label_height
+        z_surface = max(z_inner, z_outer)
+        shape = deboss_text(shape, label, x=cx, y=ly,
+                            z_surface=z_surface, height=label_height,
+                            depth=label_depth, anchor="center")
+    return shape
+
+
+def wall_opening(shape, wall, a1, a2, z1, z2,
+                 wall_coord, ring_thick, margin=2.0, inset=0.5):
+    """Cut an opening in a wall-parallel region.
+
+    For preserving existing wall cutouts when adding a thickening ring.
+    Produces a box oriented perpendicular to the specified wall, spanning
+    from inset mm inside the wall to margin mm past the ring.
+
+    Args:
+        shape:       Shape to modify (typically the thickening ring).
+        wall:        Wall side: 'left' (-X), 'right' (+X), 'front' (-Y), 'back' (+Y).
+        a1, a2:      Along-wall coordinate range (Y for left/right, X for front/back).
+        z1, z2:      Z range of the opening.
+        wall_coord:  Original outer wall coordinate (e.g., OX_R for right wall).
+        ring_thick:  Thickening ring thickness (e.g., 0.5mm).
+        margin:      Extra depth past the ring for reliable cut (default 2.0mm).
+        inset:       How far inside the wall to start the cut (default 0.5mm).
+
+    Returns:
+        Modified shape with the wall opening cut.
+    """
+    through = ring_thick + margin
+    if wall == 'right':
+        box = Part.makeBox(through + inset, a2 - a1, z2 - z1,
+                           Vector(wall_coord - inset, a1, z1))
+    elif wall == 'left':
+        box = Part.makeBox(through + inset, a2 - a1, z2 - z1,
+                           Vector(wall_coord - through, a1, z1))
+    elif wall == 'back':
+        box = Part.makeBox(a2 - a1, through + inset, z2 - z1,
+                           Vector(a1, wall_coord - inset, z1))
+    elif wall == 'front':
+        box = Part.makeBox(a2 - a1, through + inset, z2 - z1,
+                           Vector(a1, wall_coord - through, z1))
+    else:
+        raise ValueError(f"wall must be 'left', 'right', 'front', or 'back', got '{wall}'")
+    return shape.cut(box)
+
+
 def max6675_mount(shape, cutout_x1, cutout_y1, z_inner, z_outer,
                   cutout_w=16.0, cutout_h=14.0,
-                  pillar_offset_y=4.5, pillar_radius=2.5, pillar_height=3.0,
+                  pillar_x=None, pillar_y=None,
+                  pillar_radius=2.5, pillar_height=6.0,
                   hole_radius=1.25):
     """Add MAX6675 thermocouple board mount: terminal cutout + pillar + screw hole.
 
-    Creates a rectangular cutout for the terminal block, a support pillar
-    centered below, and a screw hole through the pillar and ceiling.
+    Creates a rectangular cutout for the terminal block, a support pillar,
+    and a screw hole through the pillar and ceiling. The pillar is
+    positioned below the cutout by default for board offset/clearance.
 
     Args:
         shape:          Shape to modify.
@@ -502,9 +584,10 @@ def max6675_mount(shape, cutout_x1, cutout_y1, z_inner, z_outer,
         z_outer:        Z of outer ceiling surface.
         cutout_w:       Cutout width in X (default 16.0mm).
         cutout_h:       Cutout height in Y (default 14.0mm).
-        pillar_offset_y: Y distance from cutout bottom to pillar center (default 4.5mm).
+        pillar_x:       Absolute X of pillar center (default: centered in cutout).
+        pillar_y:       Absolute Y of pillar center (default: 4.5mm below cutout).
         pillar_radius:  Pillar outer radius (default 2.5mm).
-        pillar_height:  Pillar height below inner surface (default 3.0mm).
+        pillar_height:  Pillar height below inner surface (default 6.0mm).
         hole_radius:    Screw hole radius (default 1.25mm for M3).
 
     Returns:
@@ -517,15 +600,15 @@ def max6675_mount(shape, cutout_x1, cutout_y1, z_inner, z_outer,
     shape = rectangular_cutout(shape, cutout_x1, cutout_y1,
                                cutout_x2, cutout_y2, z_inner, z_outer)
 
-    # 2. Support pillar centered in X, offset in Y from bottom edge
-    pil_x = (cutout_x1 + cutout_x2) / 2
-    pil_y = cutout_y1 + pillar_offset_y
-    shape = add_standoff(shape, pil_x, pil_y, z_surface=z_inner,
+    # 2. Support pillar — default: centered in X, 4.5mm below cutout in Y
+    px = pillar_x if pillar_x is not None else (cutout_x1 + cutout_x2) / 2
+    py = pillar_y if pillar_y is not None else cutout_y1 - 4.5
+    shape = add_standoff(shape, px, py, z_surface=z_inner,
                          height=pillar_height, radius=pillar_radius,
                          z_outer=z_outer)
 
     # 3. Screw hole through pillar + ceiling
-    shape = drill_hole(shape, pil_x, pil_y,
+    shape = drill_hole(shape, px, py,
                        z_bottom=z_inner - pillar_height,
                        z_top=z_outer, radius=hole_radius)
 

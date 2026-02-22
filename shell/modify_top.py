@@ -6,11 +6,11 @@ import os, sys
 shell_dir = os.path.dirname(os.path.abspath(__file__)) + "/"
 sys.path.insert(0, shell_dir)
 
-from cutout import (wall_ring, add_standoff, drill_hole, drill_hole_lateral,
-                    reposition_cutout, deboss_text,
+from cutout import (wall_ring, drill_hole_lateral, reposition_cutout,
+                    max6675_mount, labeled_cutout, deboss_text,
                     verify_cutout, z_probe, print_volume)
 
-# Rebuild: original -> mating flip -> wall thicken -> pillar -> drill -> LCD reposition -> labels
+# Rebuild: original -> mating flip -> wall thicken -> TC mount -> drill -> LCD reposition -> labels
 top_orig = Part.read(shell_dir + "3DShell_GoodmanHPv3_T_3mm_TC.step")
 bb = top_orig.BoundBox
 
@@ -46,12 +46,16 @@ FEATURES = {
         "old_x1": -38.48, "old_y1": 59.59, "old_x2": -11.43, "old_y2": 76.59,
         "new_y1": 61.59, "new_y2": 77.59,
     },
+    "SCREW": {  # M1.5 enclosure screws — left and right walls
+        "axis": "x", "cy": None,  # computed: wall Y midpoint
+        "cz": 30.0,               # 2mm above bottom lip edge (Z=28)
+        "radius": 0.75,           # M1.5
+    },
 }
 
-LV = FEATURES["LV"]
-HV = FEATURES["HV"]
 TC = FEATURES["TC"]
 LCD = FEATURES["LCD"]
+SCREW = FEATURES["SCREW"]
 
 # 1. Remove tongue
 result = top_orig.cut(wall_ring(OX_L-2, OY_F-2, OX_R+2, OY_B+2,
@@ -70,25 +74,28 @@ result = result.fuse(wall_ring(NX_L, NY_F, NX_R, NY_B,
                                OX_L, OY_F, OX_R, OY_B,
                                TOP_RIM_Z, CEIL_Z))
 
-# 5. M3 pillar below ceiling (below TC cutout, board screw mount)
-pil_x = bb.XMin + 35   # -63.76 — centered under TC cutout in X
-pil_y = bb.YMax - 30    # 67.14 — below TC cutout bottom edge (71.5)
-result = add_standoff(result, pil_x, pil_y, z_surface=CEIL_INNER,
-                      height=3.0, radius=2.5, z_outer=CEIL_Z)
-
-# 6. M3 hole through pillar + ceiling
-result = drill_hole(result, pil_x, pil_y,
-                    z_bottom=CEIL_INNER - 3.0, z_top=CEIL_Z, radius=1.25)
-print_volume(result, "After pillar+hole")
+# 5. MAX6675 thermocouple mount (cutout + 6mm pillar + M3 hole)
+result = max6675_mount(result,
+                       cutout_x1=TC["x1"], cutout_y1=TC["y1"],
+                       z_inner=CEIL_INNER, z_outer=CEIL_Z,
+                       cutout_w=TC["x2"] - TC["x1"],
+                       cutout_h=TC["y2"] - TC["y1"],
+                       pillar_x=bb.XMin + 35,   # -63.76
+                       pillar_y=bb.YMax - 30,    # 67.14 — below cutout
+                       pillar_height=6.0)
+print_volume(result, "After TC mount")
 
 # Verify pillar and hole
+pil_x = bb.XMin + 35
+pil_y = bb.YMax - 30
 for dx, dy, label in [(0, 0, "hole center"), (2, 0, "pillar wall")]:
     zs = z_probe(result, pil_x + dx, pil_y + dy)
     print(f"  {label}: Z={[f'{z:.2f}' for z in zs]}" if zs else f"  {label}: OPEN")
 
-# 6. M1.5 screw holes through left and right walls at mating zone midpoint
+# 6. M1.5 enclosure screw holes through left and right walls
 result = drill_hole_lateral(result, axis='x', start=NX_L, end=NX_R,
-                            cy=(OY_F + OY_B) / 2, cz=32.65, radius=0.75)
+                            cy=(OY_F + OY_B) / 2, cz=SCREW["cz"],
+                            radius=SCREW["radius"])
 print_volume(result, "After screw holes")
 
 # 7. Reposition LCD cutout: shift bottom up 2mm, top up 1mm (27x16mm)
@@ -103,25 +110,23 @@ print_volume(result, "After LCD reposition")
 verify_cutout(result, LCD["old_x1"], LCD["new_y1"],
               LCD["old_x2"], LCD["new_y2"], CEIL_INNER, CEIL_Z, "LCD")
 
-# 8. Deboss feature labels (0.8mm depth for slicer visibility)
-# LV: "24v Signal Wires" centered above cutout
-result = deboss_text(result, LV["label"],
-    x=(LV["x1"] + LV["x2"]) / 2, y=LV["y2"] + 2.0,
-    z_surface=CEIL_Z, height=5.0, depth=0.8, anchor="center")
-print_volume(result, "After LV label")
+# 8. Deboss feature labels
+# LV and HV: auto-labeled from FEATURES dict
+for name, feat in FEATURES.items():
+    if "label" in feat and "label_pos" in feat:
+        result = labeled_cutout(result, feat["x1"], feat["y1"],
+                                feat["x2"], feat["y2"],
+                                CEIL_INNER, CEIL_Z,
+                                label=feat["label"],
+                                label_pos=feat["label_pos"],
+                                cut=False)
+        print_volume(result, f"After {name} label")
 
-# HV: "240 V" centered above cutout
-result = deboss_text(result, HV["label"],
-    x=(HV["x1"] + HV["x2"]) / 2, y=HV["y2"] + 2.0,
-    z_surface=CEIL_Z, height=5.0, depth=0.8, anchor="center")
-print_volume(result, "After HV label")
-
-# TC: "+" below-left, "-" below-right
+# TC: polarity symbols + multi-line text (unique layout, not data-driven)
 result = deboss_text(result, "+", x=TC["x1"] + 2, y=TC["y1"] - 5.0,
     z_surface=CEIL_Z, height=5.0, depth=0.8)
 result = deboss_text(result, "-", x=TC["x2"] - 4, y=TC["y1"] - 5.0,
     z_surface=CEIL_Z, height=5.0, depth=0.8)
-# TC: "Liquid" / "Line" below the +/- symbols
 result = deboss_text(result, ["Liquid", "Line"],
     x=(TC["x1"] + TC["x2"]) / 2, y=TC["y1"] - 12.0,
     z_surface=CEIL_Z, height=4.0, depth=0.8, anchor="center")

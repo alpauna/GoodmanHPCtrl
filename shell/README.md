@@ -61,6 +61,8 @@ freecadcmd shell/modify_bottom.py
 |----------|-------------|
 | `rectangular_cutout(shape, x1, y1, x2, y2, z_inner, z_outer)` | Cut rectangular through-hole in Z-normal surface |
 | `reposition_cutout(shape, old_*, new_*, z_inner, z_outer)` | Plug existing cutout, re-cut at new position |
+| `labeled_cutout(shape, x1, y1, x2, y2, z_inner, z_outer, label, ...)` | Rectangular cutout with optional debossed text label (above/below) |
+| `wall_opening(shape, wall, a1, a2, z1, z2, wall_coord, ring_thick)` | Cut opening in a wall-parallel region (for thickening ring cutouts) |
 
 ### Mounting Features
 
@@ -70,7 +72,7 @@ freecadcmd shell/modify_bottom.py
 | `drill_hole(shape, cx, cy, z_bottom, z_top, radius)` | Vertical cylindrical hole along Z axis |
 | `drill_hole_lateral(shape, axis, start, end, cy, cz, radius)` | Horizontal through-hole along X or Y axis |
 | `add_standoffs_with_holes(shape, positions, z_surface, height)` | Multiple standoffs with centered screw holes |
-| `max6675_mount(shape, cutout_x1, cutout_y1, z_inner, z_outer)` | MAX6675 board mount: terminal cutout + pillar + screw hole |
+| `max6675_mount(shape, cutout_x1, cutout_y1, z_inner, z_outer, ...)` | MAX6675 board mount: terminal cutout + 6mm offset pillar + screw hole |
 
 ### Text Operations
 
