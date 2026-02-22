@@ -43,17 +43,17 @@ bool WebHandler::checkAuth(AsyncWebServerRequest* request) {
             if (token.length() > 0) {
                 if (_sessionMgr.validateSession(token))
                     return true;
-                // Expired session
-                redirectToLogin(request, true);
-                return false;
+                // Expired session — fall through to Basic Auth if header present
             }
         }
-        // No session cookie
-        redirectToLogin(request, false);
-        return false;
+        // No valid session cookie — allow Basic Auth fallback for API/script access
+        if (!request->hasHeader("Authorization")) {
+            redirectToLogin(request, false);
+            return false;
+        }
     }
 
-    // Legacy mode: Basic Auth
+    // Basic Auth (legacy mode or session mode fallback for scripts/API clients)
     String authHeader = request->header("Authorization");
     if (!authHeader.startsWith("Basic ")) {
         request->requestAuthentication(nullptr, false);

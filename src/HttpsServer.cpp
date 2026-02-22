@@ -94,18 +94,19 @@ static bool checkHttpsAuth(httpd_req_t* req) {
                 if (token.length() > 0) {
                     if (ctx->sessionMgr->validateSession(token))
                         return true;
-                    // Expired session
-                    redirectToLoginHttps(req, true);
-                    return false;
+                    // Expired session — fall through to Basic Auth if header present
                 }
             }
         }
-        // No session cookie
-        redirectToLoginHttps(req, false);
-        return false;
+        // No valid session cookie — allow Basic Auth fallback for API/script access
+        size_t authCheck = httpd_req_get_hdr_value_len(req, "Authorization");
+        if (authCheck == 0) {
+            redirectToLoginHttps(req, false);
+            return false;
+        }
     }
 
-    // Legacy mode: Basic Auth
+    // Basic Auth (legacy mode or session mode fallback for scripts/API clients)
     size_t authLen = httpd_req_get_hdr_value_len(req, "Authorization");
     if (authLen == 0) {
         sendUnauthorized(req, ctx);
