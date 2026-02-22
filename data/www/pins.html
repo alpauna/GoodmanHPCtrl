@@ -549,11 +549,14 @@ function refresh(){
   });
 }
 
+var _pollTimer;
+function startPolling(ms){if(_pollTimer)clearInterval(_pollTimer);_pollTimer=setInterval(refresh,ms);}
 fetch('/theme').then(function(r){return r.json();}).then(function(d){
   if(d.theme){document.documentElement.dataset.theme=d.theme;localStorage.setItem('hp-theme',d.theme);}if(d.systemName){var b=document.querySelector('.brand');if(b)b.textContent=d.systemName;document.title=document.title.replace('Goodman HP',d.systemName);}
+  if(d.pollIntervalSec)startPolling(d.pollIntervalSec*1000);
 });
 loadTemps();
 scanI2C();
 loadSPIConfig();
-refresh();setInterval(refresh,2000);
+refresh();startPolling(2000);
 </script></body></html>

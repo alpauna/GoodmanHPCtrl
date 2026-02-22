@@ -55,6 +55,7 @@ struct ProjectInfo {
     String systemName;               // System display name, max 20 chars alphanumeric+spaces (default "Goodman HP"), also used as AP SSID
     String mqttPrefix;               // MQTT topic prefix (default "goodman"), topics: prefix/temps, prefix/state, etc.
     uint32_t sessionTimeoutMinutes;  // Session timeout in minutes (0=disabled/Basic Auth, default 0)
+    uint8_t pollIntervalSec;         // Dashboard/pins polling interval in seconds (1-10, default 2)
 };
 
 class Config {

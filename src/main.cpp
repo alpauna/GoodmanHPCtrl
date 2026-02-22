@@ -81,16 +81,31 @@ u_int32_t _idleLoopCount = 0;
 u_int32_t _workLoopCount = 0;
 volatile bool InISR, InitialPinStateSet, FinalPinSetState;
 
-// CPU load monitoring via FreeRTOS idle hooks
-static volatile uint32_t _idleCountCore0 = 0;
-static volatile uint32_t _idleCountCore1 = 0;
-static uint32_t _maxIdleCore0 = 0;
-static uint32_t _maxIdleCore1 = 0;
+// CPU load monitoring via FreeRTOS idle hooks (timer-based)
+// Tracks actual idle microseconds per second using esp_timer_get_time().
+// Consecutive idle hook calls < 200us apart = continuous idle time.
+// Gaps > 200us = preempted by higher-priority task (not counted as idle).
+static volatile int64_t _lastIdleCore0 = 0;
+static volatile int64_t _lastIdleCore1 = 0;
+static volatile uint32_t _idleUsCore0 = 0;
+static volatile uint32_t _idleUsCore1 = 0;
 static uint8_t _cpuLoadCore0 = 0;
 static uint8_t _cpuLoadCore1 = 0;
 
-static bool idleHookCore0() { _idleCountCore0++; return false; }
-static bool idleHookCore1() { _idleCountCore1++; return false; }
+static bool idleHookCore0() {
+  int64_t now = esp_timer_get_time();
+  int64_t delta = now - _lastIdleCore0;
+  _lastIdleCore0 = now;
+  if (delta > 0 && delta < 200) _idleUsCore0 += (uint32_t)delta;
+  return false;
+}
+static bool idleHookCore1() {
+  int64_t now = esp_timer_get_time();
+  int64_t delta = now - _lastIdleCore1;
+  _lastIdleCore1 = now;
+  if (delta > 0 && delta < 200) _idleUsCore1 += (uint32_t)delta;
+  return false;
+}
 
 uint8_t getCpuLoadCore0() { return _cpuLoadCore0; }
 uint8_t getCpuLoadCore1() { return _cpuLoadCore1; }
@@ -208,7 +223,8 @@ ProjectInfo proj = {
   false,              // forceSafeMode: not forced
   "Goodman HP",       // systemName: default system name
   "goodman",          // mqttPrefix: default MQTT topic prefix
-  0                   // sessionTimeoutMinutes: disabled by default
+  0,                  // sessionTimeoutMinutes: disabled by default
+  2                   // pollIntervalSec: 2 second default
 };
 
 
@@ -962,29 +978,21 @@ void onSaveRuntime(){
   }
 }
 
-static uint8_t _cpuLoadWarmup = 15; // Skip first 15s (WiFi/MQTT/NTP settle)
+static uint8_t _cpuLoadWarmup = 5; // Skip first 5s for idle hooks to stabilize
 
 void onCalcCpuLoad() {
-  uint32_t count0 = _idleCountCore0;
-  uint32_t count1 = _idleCountCore1;
-  _idleCountCore0 = 0;
-  _idleCountCore1 = 0;
+  // Atomically read and reset idle microsecond accumulators
+  uint32_t idle0 = _idleUsCore0; _idleUsCore0 = 0;
+  uint32_t idle1 = _idleUsCore1; _idleUsCore1 = 0;
 
   if (_cpuLoadWarmup > 0) {
     _cpuLoadWarmup--;
-    // Seed max with highest count seen during warmup
-    if (count0 > _maxIdleCore0) _maxIdleCore0 = count0;
-    if (count1 > _maxIdleCore1) _maxIdleCore1 = count1;
     return;
   }
 
-  // New highs update max immediately
-  if (count0 > _maxIdleCore0) _maxIdleCore0 = count0;
-  if (count1 > _maxIdleCore1) _maxIdleCore1 = count1;
-
-  // Raw load for this second
-  uint8_t raw0 = (_maxIdleCore0 > 0) ? 100 - (count0 * 100 / _maxIdleCore0) : 0;
-  uint8_t raw1 = (_maxIdleCore1 > 0) ? 100 - (count1 * 100 / _maxIdleCore1) : 0;
+  // Convert idle microseconds to load % (1 second = 1,000,000 us)
+  uint8_t raw0 = (idle0 >= 1000000) ? 0 : (uint8_t)(100 - idle0 / 10000);
+  uint8_t raw1 = (idle1 >= 1000000) ? 0 : (uint8_t)(100 - idle1 / 10000);
 
   // EMA smoothing: 25% new + 75% old
   _cpuLoadCore0 = (_cpuLoadCore0 * 3 + raw0 + 2) / 4;

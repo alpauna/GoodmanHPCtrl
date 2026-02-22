@@ -450,14 +450,16 @@ void WebHandler::setupRoutes() {
     _server.on("/theme", HTTP_GET, [this](AsyncWebServerRequest *request) {
         String theme = "dark";
         String sysName = "Goodman HP";
+        uint8_t poll = 2;
         if (_config && _config->getProjectInfo()) {
             theme = _config->getProjectInfo()->theme;
             if (theme.length() == 0) theme = "dark";
             if (_config->getProjectInfo()->systemName.length() > 0)
                 sysName = _config->getProjectInfo()->systemName;
+            poll = _config->getProjectInfo()->pollIntervalSec;
         }
         request->send(200, "application/json",
-            "{\"theme\":\"" + theme + "\",\"systemName\":\"" + sysName + "\"}");
+            "{\"theme\":\"" + theme + "\",\"systemName\":\"" + sysName + "\",\"pollIntervalSec\":" + String(poll) + "}");
     });
 
     // Login page — no auth required
@@ -1022,6 +1024,7 @@ void WebHandler::setupRoutes() {
                 doc["forceSafeMode"] = proj->forceSafeMode;
                 doc["safeMode"] = _safeMode ? *_safeMode : false;
                 doc["sessionTimeoutMinutes"] = proj->sessionTimeoutMinutes;
+                doc["pollIntervalSec"] = proj->pollIntervalSec;
                 String json;
                 serializeJson(doc, json);
                 request->send(200, "application/json", json);
@@ -1722,6 +1725,14 @@ void WebHandler::setupRoutes() {
             uint32_t stm = data["sessionTimeoutMinutes"] | 0;
             proj->sessionTimeoutMinutes = stm;
             _sessionMgr.setTimeoutMinutes(stm);
+        }
+
+        // Poll interval (live)
+        if (data["pollIntervalSec"].is<int>()) {
+            uint8_t pi = data["pollIntervalSec"] | 2;
+            if (pi < 1) pi = 1;
+            if (pi > 10) pi = 10;
+            proj->pollIntervalSec = pi;
         }
 
         String tz = data["timezone"] | proj->timezone;

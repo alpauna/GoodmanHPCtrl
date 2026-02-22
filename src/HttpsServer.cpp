@@ -249,6 +249,7 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["forceSafeMode"] = proj->forceSafeMode;
         doc["safeMode"] = ctx->safeMode ? *(ctx->safeMode) : false;
         doc["sessionTimeoutMinutes"] = proj->sessionTimeoutMinutes;
+        doc["pollIntervalSec"] = proj->pollIntervalSec;
         String json;
         serializeJson(doc, json);
         httpd_resp_set_type(req, "application/json");
@@ -384,6 +385,14 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         uint32_t stm = data["sessionTimeoutMinutes"] | 0;
         proj->sessionTimeoutMinutes = stm;
         if (ctx->sessionMgr) ctx->sessionMgr->setTimeoutMinutes(stm);
+    }
+
+    // Poll interval (live)
+    if (data["pollIntervalSec"].is<int>()) {
+        uint8_t pi = data["pollIntervalSec"] | 2;
+        if (pi < 1) pi = 1;
+        if (pi > 10) pi = 10;
+        proj->pollIntervalSec = pi;
     }
 
     // Timezone (live)
@@ -1454,13 +1463,15 @@ static esp_err_t themeGetHandler(httpd_req_t* req) {
     HttpsContext* ctx = (HttpsContext*)req->user_ctx;
     String theme = "dark";
     String sysName = "Goodman HP";
+    uint8_t poll = 2;
     if (ctx->config && ctx->config->getProjectInfo()) {
         theme = ctx->config->getProjectInfo()->theme;
         if (theme.length() == 0) theme = "dark";
         if (ctx->config->getProjectInfo()->systemName.length() > 0)
             sysName = ctx->config->getProjectInfo()->systemName;
+        poll = ctx->config->getProjectInfo()->pollIntervalSec;
     }
-    String json = "{\"theme\":\"" + theme + "\",\"systemName\":\"" + sysName + "\"}";
+    String json = "{\"theme\":\"" + theme + "\",\"systemName\":\"" + sysName + "\",\"pollIntervalSec\":" + String(poll) + "}";
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json.c_str(), json.length());
     return ESP_OK;

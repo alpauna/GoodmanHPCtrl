@@ -506,6 +506,11 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     proj.sessionTimeoutMinutes = doc["auth"]["sessionTimeoutMinutes"] | 0;
     Serial.printf("Read session timeout: %u min\n", proj.sessionTimeoutMinutes);
 
+    // Load poll interval
+    proj.pollIntervalSec = doc["ui"]["pollIntervalSec"] | 2;
+    if (proj.pollIntervalSec < 1) proj.pollIntervalSec = 1;
+    if (proj.pollIntervalSec > 10) proj.pollIntervalSec = 10;
+
     // Load admin password (encrypted same as WiFi/MQTT passwords)
     const char* adminPw = doc["admin"]["password"];
     String adminPwStr = (adminPw != nullptr && strlen(adminPw) > 0) ? String(adminPw) : "";
@@ -628,6 +633,7 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
 
     JsonObject ui = doc["ui"].to<JsonObject>();
     ui["theme"] = proj.theme.length() > 0 ? proj.theme : "dark";
+    ui["pollIntervalSec"] = proj.pollIntervalSec;
 
     JsonObject displayObj = doc["display"].to<JsonObject>();
     displayObj["pageIntervalSec"] = proj.displayPageIntervalSec;
@@ -761,6 +767,7 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
 
     JsonObject ui = doc["ui"].to<JsonObject>();
     ui["theme"] = proj.theme.length() > 0 ? proj.theme : "dark";
+    ui["pollIntervalSec"] = proj.pollIntervalSec;
 
     JsonObject displayObj = doc["display"].to<JsonObject>();
     displayObj["pageIntervalSec"] = proj.displayPageIntervalSec;
