@@ -1012,6 +1012,7 @@ void WebHandler::setupRoutes() {
                 doc["maxOldLogCount"] = proj->maxOldLogCount;
                 doc["tempHistoryIntervalSec"] = proj->tempHistoryIntervalSec;
                 doc["adminPasswordSet"] = _config->hasAdminPassword();
+                doc["ftpPasswordSet"] = proj->ftpPassword.length() > 0;
                 doc["theme"] = proj->theme.length() > 0 ? proj->theme : "dark";
                 doc["displayPageIntervalSec"] = proj->displayPageIntervalSec;
                 doc["displayEnabled"] = proj->displayEnabled;
@@ -1811,6 +1812,11 @@ void WebHandler::setupRoutes() {
 
         if (data["apPassword"].is<const char*>()) {
             proj->apPassword = data["apPassword"] | String("");
+        }
+
+        // FTP password (live — takes effect on next FTP enable)
+        if (data["ftpPassword"].is<const char*>()) {
+            proj->ftpPassword = data["ftpPassword"] | String("");
         }
 
         uint32_t maxLogSize = data["maxLogSize"] | proj->maxLogSize;

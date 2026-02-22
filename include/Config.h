@@ -39,6 +39,7 @@ struct ProjectInfo {
     bool softwareDefrost;                // Persisted software defrost state (survives reboot)
     uint32_t apFallbackSeconds;  // WiFi disconnect time before AP fallback (default 600 = 10 min)
     String apPassword;           // AP mode password override (empty = auto-generate)
+    String ftpPassword;          // FTP server password (empty = default "admin")
     uint32_t tempHistoryIntervalSec; // Temp history capture interval in seconds (30-300, default 120)
     String theme;                // UI theme: "light" or "dark" (default "light")
     // Display settings

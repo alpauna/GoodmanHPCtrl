@@ -7,7 +7,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKUP_DIR="$SCRIPT_DIR/../backups"
 FTP_USER="admin"
-FTP_PASS="admin"
+FTP_PASS=""
 
 read -rp "Device IP: " DEVICE_IP
 if [ -z "$DEVICE_IP" ]; then
@@ -55,6 +55,14 @@ if echo "$RESP" | grep -q '"error"'; then
     exit 1
 fi
 echo "FTP enabled."
+
+# Get FTP password from status endpoint
+FTP_STATUS=$(curl $CURL_OPTS $AUTH_OPTS "$BASE_URL/ftp" 2>/dev/null)
+FTP_PASS=$(echo "$FTP_STATUS" | grep -o '"password":"[^"]*"' | cut -d'"' -f4)
+if [ -z "$FTP_PASS" ]; then
+    FTP_PASS="admin"
+fi
+echo "FTP password: $FTP_PASS"
 
 sleep 2
 

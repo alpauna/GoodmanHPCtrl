@@ -245,6 +245,7 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["maxOldLogCount"] = proj->maxOldLogCount;
         doc["tempHistoryIntervalSec"] = proj->tempHistoryIntervalSec;
         doc["adminPasswordSet"] = ctx->config->hasAdminPassword();
+        doc["ftpPasswordSet"] = proj->ftpPassword.length() > 0;
         doc["theme"] = proj->theme.length() > 0 ? proj->theme : "dark";
         doc["displayPageIntervalSec"] = proj->displayPageIntervalSec;
         doc["displayEnabled"] = proj->displayEnabled;
@@ -488,6 +489,11 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         proj->apPassword = data["apPassword"] | String("");
     }
 
+    // FTP password (live — takes effect on next FTP enable)
+    if (data["ftpPassword"].is<const char*>()) {
+        proj->ftpPassword = data["ftpPassword"] | String("");
+    }
+
     // Logging (live)
     uint32_t maxLogSize = data["maxLogSize"] | proj->maxLogSize;
     uint8_t maxOldLogCount = data["maxOldLogCount"] | proj->maxOldLogCount;
@@ -694,8 +700,11 @@ static esp_err_t ftpGetHandler(httpd_req_t* req) {
         }
     }
 
+    ProjectInfo* proj = ctx->config ? ctx->config->getProjectInfo() : nullptr;
+    String ftpPw = (proj && proj->ftpPassword.length() > 0) ? proj->ftpPassword : "admin";
     String json = "{\"active\":" + String(active ? "true" : "false") +
-                  ",\"remainingMinutes\":" + String(remainingMin) + "}";
+                  ",\"remainingMinutes\":" + String(remainingMin) +
+                  ",\"password\":\"" + ftpPw + "\"}";
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json.c_str(), json.length());
     return ESP_OK;

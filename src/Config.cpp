@@ -394,9 +394,12 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     proj.apFallbackSeconds = wifiObj["apFallbackSeconds"] | 600;
     const char* apPw = wifiObj["apPassword"];
     proj.apPassword = (apPw != nullptr && strlen(apPw) > 0) ? decryptPassword(String(apPw)) : "";
-    Serial.printf("Read WiFi SSID:%s apFallback:%us apPassword:%s\n",
+    const char* ftpPw = doc["admin"]["ftpPassword"];
+    proj.ftpPassword = (ftpPw != nullptr && strlen(ftpPw) > 0) ? decryptPassword(String(ftpPw)) : "";
+    Serial.printf("Read WiFi SSID:%s apFallback:%us apPassword:%s ftpPassword:%s\n",
                   wifi_ssid ? wifi_ssid : "", proj.apFallbackSeconds,
-                  proj.apPassword.length() > 0 ? "set" : "auto");
+                  proj.apPassword.length() > 0 ? "set" : "auto",
+                  proj.ftpPassword.length() > 0 ? "set" : "default");
 
     JsonObject mqtt = doc["mqtt"];
     const char* mqtt_user = mqtt["user"];
@@ -651,6 +654,9 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
 
     JsonObject admin = doc["admin"].to<JsonObject>();
     admin["password"] = "";
+    if (proj.ftpPassword.length() > 0) {
+        admin["ftpPassword"] = encryptPassword(proj.ftpPassword);
+    }
 
     JsonObject sensors = doc["sensors"].to<JsonObject>();
     JsonObject sensors_temp = sensors["temp"].to<JsonObject>();
@@ -785,6 +791,11 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
 
     JsonObject admin = doc["admin"].to<JsonObject>();
     admin["password"] = encryptPassword(_adminPasswordHash);
+    if (proj.ftpPassword.length() > 0) {
+        admin["ftpPassword"] = encryptPassword(proj.ftpPassword);
+    } else {
+        admin.remove("ftpPassword");
+    }
 
     // Update temp sensor assignments (to<JsonObject>() clears existing content)
     JsonObject sensors = doc["sensors"].to<JsonObject>();

@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 
 $BackupDir = Join-Path $PSScriptRoot "..\backups"
 $FtpUser = "admin"
-$FtpPass = "admin"
+$FtpPass = ""
 
 $DeviceIP = Read-Host "Device IP"
 if ([string]::IsNullOrEmpty($DeviceIP)) {
@@ -40,6 +40,11 @@ if ($resp -match '"error"') {
     Write-Error "Error: $resp"; exit 1
 }
 Write-Host "FTP enabled."
+
+# Get FTP password from status endpoint
+$ftpStatus = & curl @CurlBase "$BaseURL/ftp" 2>$null | ConvertFrom-Json
+$FtpPass = if ($ftpStatus.password) { $ftpStatus.password } else { "admin" }
+Write-Host "FTP password: $FtpPass"
 
 Start-Sleep -Seconds 2
 

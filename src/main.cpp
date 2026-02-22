@@ -212,6 +212,7 @@ ProjectInfo proj = {
   false,              // softwareDefrost: not active
   600,                // apFallbackSeconds: 10 minutes
   "",                 // apPassword: empty = auto-generate
+  "",                 // ftpPassword: empty = default "admin"
   120,                // tempHistoryIntervalSec: 2 minutes default
   "dark",             // theme: dark default
   10,                 // displayPageIntervalSec: 10s default
@@ -761,9 +762,10 @@ void setup() {
   // FTP control callbacks — SD is already initialized, no swap needed
   webHandler.setFtpControl(
     // Enable callback
-    [sdCardReady](int durationMin) {
+    [sdCardReady, &proj](int durationMin) {
       if (!sdCardReady) return;
-      ftpSrv.begin("admin", "admin");
+      String ftpPw = proj.ftpPassword.length() > 0 ? proj.ftpPassword : "admin";
+      ftpSrv.begin("admin", ftpPw.c_str());
       ftpActive = true;
       ftpStopTime = millis() + ((unsigned long)durationMin * 60000UL);
       Log.info("FTP", "FTP enabled for %d minutes", durationMin);
@@ -778,7 +780,7 @@ void setup() {
       }
     },
     // Status callback
-    []() -> String {
+    [&proj]() -> String {
       int remainingMin = 0;
       if (ftpActive && ftpStopTime > 0) {
         unsigned long now = millis();
@@ -786,8 +788,10 @@ void setup() {
           remainingMin = (int)((ftpStopTime - now) / 60000) + 1;
         }
       }
+      String ftpPw = proj.ftpPassword.length() > 0 ? proj.ftpPassword : "admin";
       return "{\"active\":" + String(ftpActive ? "true" : "false") +
-             ",\"remainingMinutes\":" + String(remainingMin) + "}";
+             ",\"remainingMinutes\":" + String(remainingMin) +
+             ",\"password\":\"" + ftpPw + "\"}";
     }
   );
   webHandler.setFtpState(&ftpActive, &ftpStopTime);
