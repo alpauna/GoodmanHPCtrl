@@ -325,3 +325,207 @@ def print_volume(shape, label=""):
     else:
         print(f"Volume: {v:.0f}")
     return v
+
+
+# ---------------------------------------------------------------------------
+# Text operations (deboss / emboss)
+# ---------------------------------------------------------------------------
+
+# Default font — available on all Ubuntu/Debian systems
+_DEFAULT_FONT_DIR = "/usr/share/fonts/truetype/dejavu/"
+_DEFAULT_FONT_FILE = "DejaVuSans.ttf"
+
+
+def _make_text_solid(text, height, font_dir=None, font_file=None, track=0):
+    """Create a 3D solid from text string(s), 1mm thick, at the origin.
+
+    Handles multi-wire glyphs (letters with holes like D, O, A, B, P, etc.)
+    by using the outer wire as the face and inner wires as holes.
+
+    Args:
+        text:      String or list of strings (multi-line).
+        height:    Font height in mm.
+        font_dir:  Directory containing the font file.
+        font_file: TrueType font filename.
+        track:     Extra spacing between characters (default 0).
+
+    Returns:
+        (solid, width, total_height) — the fused solid, its X extent, and Y extent.
+    """
+    if font_dir is None:
+        font_dir = _DEFAULT_FONT_DIR
+    if font_file is None:
+        font_file = _DEFAULT_FONT_FILE
+
+    if isinstance(text, str):
+        lines = [text]
+    else:
+        lines = list(text)
+
+    line_spacing = height * 1.4
+    all_chars = []
+    max_width = 0.0
+    total_height = height + line_spacing * (len(lines) - 1)
+
+    for line_idx, line_text in enumerate(lines):
+        y_offset = -line_idx * line_spacing
+        wire_sets = Part.makeWireString(line_text, font_dir, font_file,
+                                        height, track)
+        if not wire_sets:
+            continue
+
+        for char_wires in wire_sets:
+            if not char_wires:
+                continue
+            # First wire is the outer boundary, remaining are holes
+            outer_wire = char_wires[0]
+            inner_wires = char_wires[1:] if len(char_wires) > 1 else []
+
+            face = Part.Face(outer_wire)
+            for hole_wire in inner_wires:
+                hole_face = Part.Face(hole_wire)
+                face = face.cut(hole_face)
+
+            char_solid = face.extrude(Vector(0, 0, 1.0))
+            if y_offset != 0:
+                char_solid.translate(Vector(0, y_offset, 0))
+            all_chars.append(char_solid)
+
+        # Track max width across lines
+        line_bb_max_x = max(c.BoundBox.XMax for c in all_chars) if all_chars else 0
+        if line_bb_max_x > max_width:
+            max_width = line_bb_max_x
+
+    if not all_chars:
+        return None, 0, 0
+
+    solid = all_chars[0]
+    for c in all_chars[1:]:
+        solid = solid.fuse(c)
+
+    return solid, solid.BoundBox.XLength, total_height
+
+
+def deboss_text(shape, text, x, y, z_surface, height=4.0, depth=0.4,
+                font_dir=None, font_file=None, anchor="left"):
+    """Cut text into a Z-normal surface (recessed lettering).
+
+    Args:
+        shape:     Shape to modify.
+        text:      String or list of strings (multi-line, top line first).
+        x, y:      Position of the text baseline.
+        z_surface: Z of the outer surface to deboss into.
+        height:    Font height in mm (default 4.0).
+        depth:     Cut depth in mm (default 0.4).
+        font_dir:  Font directory (default: system DejaVuSans).
+        font_file: Font filename (default: DejaVuSans.ttf).
+        anchor:    'left', 'center', or 'right' horizontal alignment.
+
+    Returns:
+        Modified shape with text cut into the surface.
+    """
+    solid, width, _ = _make_text_solid(text, height, font_dir, font_file)
+    if solid is None:
+        return shape
+
+    # Scale Z to desired depth
+    bb = solid.BoundBox
+    import FreeCAD
+    mat = FreeCAD.Matrix()
+    mat.A33 = depth / bb.ZLength if bb.ZLength > 0 else 1.0
+    solid = solid.transformGeometry(mat)
+
+    # Position: anchor alignment
+    if anchor == "center":
+        dx = x - width / 2
+    elif anchor == "right":
+        dx = x - width
+    else:
+        dx = x
+
+    solid.translate(Vector(dx, y, z_surface - depth))
+    return shape.cut(solid)
+
+
+def emboss_text(shape, text, x, y, z_surface, height=4.0, depth=0.4,
+                font_dir=None, font_file=None, anchor="left"):
+    """Raise text above a Z-normal surface (protruding lettering).
+
+    Args:
+        Same as deboss_text, but text protrudes outward from z_surface.
+
+    Returns:
+        Modified shape with text raised above the surface.
+    """
+    solid, width, _ = _make_text_solid(text, height, font_dir, font_file)
+    if solid is None:
+        return shape
+
+    # Scale Z to desired depth
+    bb = solid.BoundBox
+    import FreeCAD
+    mat = FreeCAD.Matrix()
+    mat.A33 = depth / bb.ZLength if bb.ZLength > 0 else 1.0
+    solid = solid.transformGeometry(mat)
+
+    # Position: anchor alignment
+    if anchor == "center":
+        dx = x - width / 2
+    elif anchor == "right":
+        dx = x - width
+    else:
+        dx = x
+
+    solid.translate(Vector(dx, y, z_surface))
+    return shape.fuse(solid)
+
+
+# ---------------------------------------------------------------------------
+# Component mount templates
+# ---------------------------------------------------------------------------
+
+def max6675_mount(shape, cutout_x1, cutout_y1, z_inner, z_outer,
+                  cutout_w=16.0, cutout_h=14.0,
+                  pillar_offset_y=4.5, pillar_radius=2.5, pillar_height=3.0,
+                  hole_radius=1.25):
+    """Add MAX6675 thermocouple board mount: terminal cutout + pillar + screw hole.
+
+    Creates a rectangular cutout for the terminal block, a support pillar
+    centered below, and a screw hole through the pillar and ceiling.
+
+    Args:
+        shape:          Shape to modify.
+        cutout_x1:      Left X of terminal cutout.
+        cutout_y1:      Bottom Y of terminal cutout.
+        z_inner:        Z of inner (cavity-side) ceiling surface.
+        z_outer:        Z of outer ceiling surface.
+        cutout_w:       Cutout width in X (default 16.0mm).
+        cutout_h:       Cutout height in Y (default 14.0mm).
+        pillar_offset_y: Y distance from cutout bottom to pillar center (default 4.5mm).
+        pillar_radius:  Pillar outer radius (default 2.5mm).
+        pillar_height:  Pillar height below inner surface (default 3.0mm).
+        hole_radius:    Screw hole radius (default 1.25mm for M3).
+
+    Returns:
+        Modified shape with cutout, pillar, and hole.
+    """
+    cutout_x2 = cutout_x1 + cutout_w
+    cutout_y2 = cutout_y1 + cutout_h
+
+    # 1. Terminal block cutout
+    shape = rectangular_cutout(shape, cutout_x1, cutout_y1,
+                               cutout_x2, cutout_y2, z_inner, z_outer)
+
+    # 2. Support pillar centered in X, offset in Y from bottom edge
+    pil_x = (cutout_x1 + cutout_x2) / 2
+    pil_y = cutout_y1 + pillar_offset_y
+    shape = add_standoff(shape, pil_x, pil_y, z_surface=z_inner,
+                         height=pillar_height, radius=pillar_radius,
+                         z_outer=z_outer)
+
+    # 3. Screw hole through pillar + ceiling
+    shape = drill_hole(shape, pil_x, pil_y,
+                       z_bottom=z_inner - pillar_height,
+                       z_top=z_outer, radius=hole_radius)
+
+    return shape

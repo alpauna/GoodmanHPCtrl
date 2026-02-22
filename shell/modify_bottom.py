@@ -13,6 +13,21 @@ bb = bot_orig.BoundBox
 
 OX_L = -98.262; IX_L = -95.262; IX_R = 1.917; OX_R = 4.917
 OY_F = -32.48;  IY_F = -29.48;  IY_B = 94.12;  OY_B = 97.12
+
+# ---------------------------------------------------------------------------
+# Wall cutout features (coordinates from probed original shell)
+# ---------------------------------------------------------------------------
+BOTTOM_FEATURES = {
+    "ACCESS": {  # General access / venting
+        "wall": "right", "y1": 47.0, "y2": 88.5, "z1": 7, "z2": 24,
+    },
+    "VENT": {  # Air vent slot
+        "wall": "back", "x1": -89.5, "x2": -3.5, "z1": 14, "z2": 17,
+    },
+    "ANTENNA": {  # ESP32 antenna clearance
+        "wall": "back", "x1": -50.0, "x2": -35.0, "z1": 6, "z2": 13,
+    },
+}
 THICK = 0.5; CLR = 0.10
 NX_L = OX_L - THICK; NX_R = OX_R + THICK
 NY_F = OY_F - THICK; NY_B = OY_B + THICK
