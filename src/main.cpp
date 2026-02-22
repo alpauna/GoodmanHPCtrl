@@ -183,8 +183,7 @@ ProjectInfo proj = {
   50 * 1024 * 1024,  // maxLogSize: 50MB default
   10,                 // maxOldLogCount: 10 files default
   0,                  // heatRuntimeAccumulatedMs: restored from config
-  -21600,             // gmtOffsetSec: UTC-6 (US Central)
-  3600,               // daylightOffsetSec: 1hr DST
+  "CST6CDT,M3.2.0,M11.1.0",  // timezone: US Central with auto DST
   20.0f,              // lowTempThreshold: 20°F default
   true,               // lowTempEnableW: W relay on in LOW_TEMP
   true,               // lowTempEnableAux: AUX signal on in LOW_TEMP
@@ -208,7 +207,8 @@ ProjectInfo proj = {
   true,               // max6675Enabled: on by default
   false,              // forceSafeMode: not forced
   "Goodman HP",       // systemName: default system name
-  "goodman"           // mqttPrefix: default MQTT topic prefix
+  "goodman",          // mqttPrefix: default MQTT topic prefix
+  0                   // sessionTimeoutMinutes: disabled by default
 };
 
 
@@ -725,7 +725,7 @@ void setup() {
   webHandler.setConfig(&config);
   webHandler.setRebootRateLimited(&_rebootRateLimited);
   webHandler.setSafeMode(&_safeMode, &_crashBootCount);
-  webHandler.setTimezone(proj.gmtOffsetSec, proj.daylightOffsetSec);
+  webHandler.setTimezone(proj.timezone);
   tempHistory.begin();
   webHandler.setTempHistory(&tempHistory);
   webHandler.setTempHistoryIntervalCallback([](uint32_t intervalSec) {

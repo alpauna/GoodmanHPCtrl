@@ -1,0 +1,51 @@
+<html><head><title>Login</title>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<link rel='stylesheet' href='/theme.css'>
+<script>document.documentElement.dataset.theme=localStorage.getItem('hp-theme')||'dark'</script>
+<style>
+body{font-family:Arial,sans-serif;margin:0;padding:0;background:var(--bg);}
+nav{background:var(--nav-bg);padding:10px 20px;display:flex;align-items:center;gap:18px;}
+nav a{color:#fff;text-decoration:none;font-size:14px;padding:6px 12px;border-radius:4px;}
+nav a:hover{background:#4CAF50;}
+nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
+.container{max-width:400px;margin:60px auto;padding:0 20px;}
+h1{color:var(--text);text-align:center;}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:20px;margin-bottom:15px;}
+label{display:block;margin:12px 0 3px;color:var(--text-secondary);font-size:14px;}
+input[type=password]{width:100%;padding:10px;border:1px solid var(--input-border);border-radius:4px;box-sizing:border-box;background:var(--input-bg);color:var(--text);font-size:16px;}
+button{background:#4CAF50;color:#fff;padding:10px 24px;border:none;border-radius:4px;cursor:pointer;font-size:16px;margin-top:12px;width:100%;}
+button:hover{background:#45a049;}
+#error{margin-top:10px;padding:10px;border-radius:4px;display:none;background:#f8d7da;color:#721c24;}
+#expired{margin-bottom:15px;padding:10px;border-radius:4px;display:none;background:#fff3cd;color:#856404;text-align:center;}
+</style></head><body>
+<nav><span class='brand'>Goodman HP</span></nav>
+<div class='container'>
+<h1>Login</h1>
+<div id='expired'>Session expired. Please log in again.</div>
+<div class='card'>
+<form onsubmit='return doLogin(event)'>
+<label>Password</label>
+<input type='password' id='password' autofocus required>
+<button type='submit'>Login</button>
+<div id='error'></div>
+</form>
+</div>
+</div>
+<script>
+var params=new URLSearchParams(location.search);
+var redirect=params.get('redirect')||'/dashboard';
+if(params.get('expired'))document.getElementById('expired').style.display='block';
+function doLogin(e){
+e.preventDefault();
+var err=document.getElementById('error');
+err.style.display='none';
+fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
+body:JSON.stringify({password:document.getElementById('password').value})
+}).then(function(r){return r.json()}).then(function(d){
+if(d.error){err.textContent=d.error;err.style.display='block';return;}
+location.href=redirect;
+}).catch(function(e){err.textContent='Connection error';err.style.display='block';});
+return false;
+}
+fetch('/theme').then(function(r){return r.json()}).then(function(d){var t=d.theme||'light';document.documentElement.dataset.theme=t;localStorage.setItem('hp-theme',t);if(d.systemName){var b=document.querySelector('.brand');if(b)b.textContent=d.systemName;document.title=document.title.replace('Goodman HP',d.systemName);}}).catch(function(){});
+</script></body></html>

@@ -24,8 +24,7 @@ struct ProjectInfo {
     uint32_t maxLogSize;      // Max log file size in bytes before rotation
     uint8_t maxOldLogCount;   // Number of rotated log files to keep
     uint32_t heatRuntimeAccumulatedMs;  // Accumulated HEAT mode CNT runtime in ms
-    int32_t gmtOffsetSec;        // GMT offset in seconds (default -21600 = UTC-6)
-    int32_t daylightOffsetSec;   // DST offset in seconds (default 3600 = 1hr)
+    String timezone;             // POSIX TZ string (default "CST6CDT,M3.2.0,M11.1.0" = US Central with auto DST)
     // Heatpump protection settings (persisted in "heatpump" JSON section)
     float lowTempThreshold;              // Ambient temp below which compressor blocked (default 20°F)
     bool lowTempEnableW;                 // Enable W relay in LOW_TEMP state (default true)
@@ -55,6 +54,7 @@ struct ProjectInfo {
     // System identity
     String systemName;               // System display name, max 20 chars alphanumeric+spaces (default "Goodman HP"), also used as AP SSID
     String mqttPrefix;               // MQTT topic prefix (default "goodman"), topics: prefix/temps, prefix/state, etc.
+    uint32_t sessionTimeoutMinutes;  // Session timeout in minutes (0=disabled/Basic Auth, default 0)
 };
 
 class Config {

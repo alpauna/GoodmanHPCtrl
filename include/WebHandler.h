@@ -15,6 +15,7 @@
 #include "Logger.h"
 #include "Config.h"
 #include "HttpsServer.h"
+#include "SessionManager.h"
 
 class TempHistory;
 
@@ -24,7 +25,7 @@ class WebHandler {
     void begin();
     bool beginSecure(const uint8_t* cert, size_t certLen, const uint8_t* key, size_t keyLen);
     void startNtpSync();
-    void setTimezone(int32_t gmtOffset, int32_t daylightOffset);
+    void setTimezone(const String& tz);
     void setConfig(Config* config) { _config = config; }
     bool shouldReboot() const { return _shouldReboot; }
     void setRebootRateLimited(bool* flag) { _rebootRateLimited = flag; }
@@ -50,6 +51,7 @@ class WebHandler {
     AsyncWebSocket _ws;
     HttpsServerHandle _httpsServer = nullptr;
     HttpsContext _httpsCtx = {};
+    SessionManager _sessionMgr;
 
     Scheduler* _ts;
     GoodmanHP* _hpController;
@@ -69,8 +71,7 @@ class WebHandler {
     // NTP config
     static constexpr const char* NTP_SERVER1 = "192.168.0.1";
     static constexpr const char* NTP_SERVER2 = "time.nist.gov";
-    int32_t _gmtOffsetSec = -21600;
-    int32_t _daylightOffsetSec = 3600;
+    String _timezone = "CST6CDT,M3.2.0,M11.1.0";
     static constexpr const char* NOT_AVAILABLE = "NA";
     String _wifiIPStr;
 
@@ -106,6 +107,7 @@ class WebHandler {
 
     bool isRebootBlocked() const { return _rebootRateLimited && *_rebootRateLimited; }
     bool checkAuth(AsyncWebServerRequest* request);
+    void redirectToLogin(AsyncWebServerRequest* request, bool expired);
     void syncNtpTime();
     void setupRoutes();
     void serveFile(AsyncWebServerRequest* request, const String& path);

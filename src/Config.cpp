@@ -420,11 +420,15 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     proj.heatRuntimeAccumulatedMs = runtime["heatAccumulatedMs"] | 0;
     Serial.printf("Read heat runtime: %u ms\n", proj.heatRuntimeAccumulatedMs);
 
-    // Load timezone settings
+    // Load timezone settings (POSIX TZ string with migration from old numeric format)
     JsonObject timezone = doc["timezone"];
-    proj.gmtOffsetSec = timezone["gmtOffset"] | (-21600);
-    proj.daylightOffsetSec = timezone["daylightOffset"] | 3600;
-    Serial.printf("Read timezone: gmtOffset=%d daylightOffset=%d\n", proj.gmtOffsetSec, proj.daylightOffsetSec);
+    if (timezone["posix"].is<const char*>()) {
+        proj.timezone = timezone["posix"].as<String>();
+    } else {
+        // Migration: old numeric gmtOffset/daylightOffset → default POSIX string
+        proj.timezone = "CST6CDT,M3.2.0,M11.1.0";
+    }
+    Serial.printf("Read timezone: %s\n", proj.timezone.c_str());
 
     // Load heatpump protection settings (with migration from old "lowTemp" root key)
     JsonObject heatpump = doc["heatpump"];
@@ -497,6 +501,10 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     const char* mqttPfx = systemObj["mqttPrefix"];
     proj.mqttPrefix = (mqttPfx != nullptr && strlen(mqttPfx) > 0) ? String(mqttPfx) : "goodman";
     Serial.printf("Read system: name=%s mqttPrefix=%s\n", proj.systemName.c_str(), proj.mqttPrefix.c_str());
+
+    // Load session timeout
+    proj.sessionTimeoutMinutes = doc["auth"]["sessionTimeoutMinutes"] | 0;
+    Serial.printf("Read session timeout: %u min\n", proj.sessionTimeoutMinutes);
 
     // Load admin password (encrypted same as WiFi/MQTT passwords)
     const char* adminPw = doc["admin"]["password"];
@@ -596,8 +604,7 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     runtime["heatAccumulatedMs"] = proj.heatRuntimeAccumulatedMs;
 
     JsonObject timezone = doc["timezone"].to<JsonObject>();
-    timezone["gmtOffset"] = proj.gmtOffsetSec;
-    timezone["daylightOffset"] = proj.daylightOffsetSec;
+    timezone["posix"] = proj.timezone.length() > 0 ? proj.timezone : "CST6CDT,M3.2.0,M11.1.0";
 
     JsonObject heatpump = doc["heatpump"].to<JsonObject>();
     JsonObject hpLowTemp = heatpump["lowTemp"].to<JsonObject>();
@@ -632,6 +639,9 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     JsonObject systemObj = doc["system"].to<JsonObject>();
     systemObj["name"] = proj.systemName.length() > 0 ? proj.systemName : "Goodman HP";
     systemObj["mqttPrefix"] = proj.mqttPrefix.length() > 0 ? proj.mqttPrefix : "goodman";
+
+    JsonObject auth = doc["auth"].to<JsonObject>();
+    auth["sessionTimeoutMinutes"] = proj.sessionTimeoutMinutes;
 
     JsonObject admin = doc["admin"].to<JsonObject>();
     admin["password"] = "";
@@ -722,8 +732,9 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     runtime["heatAccumulatedMs"] = proj.heatRuntimeAccumulatedMs;
 
     JsonObject timezone = doc["timezone"].to<JsonObject>();
-    timezone["gmtOffset"] = proj.gmtOffsetSec;
-    timezone["daylightOffset"] = proj.daylightOffsetSec;
+    timezone["posix"] = proj.timezone.length() > 0 ? proj.timezone : "CST6CDT,M3.2.0,M11.1.0";
+    timezone.remove("gmtOffset");
+    timezone.remove("daylightOffset");
 
     // Remove old root-level lowTemp key (migration cleanup)
     doc.remove("lowTemp");
@@ -761,6 +772,9 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     JsonObject systemObj = doc["system"].to<JsonObject>();
     systemObj["name"] = proj.systemName.length() > 0 ? proj.systemName : "Goodman HP";
     systemObj["mqttPrefix"] = proj.mqttPrefix.length() > 0 ? proj.mqttPrefix : "goodman";
+
+    JsonObject auth = doc["auth"].to<JsonObject>();
+    auth["sessionTimeoutMinutes"] = proj.sessionTimeoutMinutes;
 
     JsonObject admin = doc["admin"].to<JsonObject>();
     admin["password"] = encryptPassword(_adminPasswordHash);

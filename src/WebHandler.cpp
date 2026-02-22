@@ -36,6 +36,24 @@ void WebHandler::setAPCallbacks(APStartCallback startCb, APStopCallback stopCb) 
 bool WebHandler::checkAuth(AsyncWebServerRequest* request) {
     if (!_config || !_config->hasAdminPassword()) return true;
 
+    // Session mode: check cookie first
+    if (_sessionMgr.isEnabled()) {
+        if (request->hasHeader("Cookie")) {
+            String token = SessionManager::extractSessionToken(request->header("Cookie"));
+            if (token.length() > 0) {
+                if (_sessionMgr.validateSession(token))
+                    return true;
+                // Expired session
+                redirectToLogin(request, true);
+                return false;
+            }
+        }
+        // No session cookie
+        redirectToLogin(request, false);
+        return false;
+    }
+
+    // Legacy mode: Basic Auth
     String authHeader = request->header("Authorization");
     if (!authHeader.startsWith("Basic ")) {
         request->requestAuthentication(nullptr, false);
@@ -69,6 +87,12 @@ bool WebHandler::checkAuth(AsyncWebServerRequest* request) {
     return false;
 }
 
+void WebHandler::redirectToLogin(AsyncWebServerRequest* request, bool expired) {
+    String url = "/login?redirect=" + request->url();
+    if (expired) url += "&expired=1";
+    request->redirect(url);
+}
+
 void WebHandler::begin() {
     // NTP sync task - enabled on WiFi connect, then repeats every 2 hours
     _tNtpSync = new Task(2 * TASK_HOUR, TASK_FOREVER, [this]() {
@@ -91,6 +115,11 @@ void WebHandler::begin() {
 
     Log.setWebSocket(&_ws);
     Log.enableWebSocket(true);
+
+    // Initialize session manager from config
+    if (_config && _config->getProjectInfo()) {
+        _sessionMgr.setTimeoutMinutes(_config->getProjectInfo()->sessionTimeoutMinutes);
+    }
 
     setupRoutes();
 
@@ -116,7 +145,7 @@ void WebHandler::syncNtpTime() {
     }
 
     Log.info("NTP", "Syncing time from NTP servers...");
-    configTime(_gmtOffsetSec, _daylightOffsetSec, NTP_SERVER1, NTP_SERVER2);
+    configTzTime(_timezone.c_str(), NTP_SERVER1, NTP_SERVER2);
 
     struct tm timeinfo;
     int retry = 0;
@@ -157,9 +186,8 @@ void WebHandler::onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
     }
 }
 
-void WebHandler::setTimezone(int32_t gmtOffset, int32_t daylightOffset) {
-    _gmtOffsetSec = gmtOffset;
-    _daylightOffsetSec = daylightOffset;
+void WebHandler::setTimezone(const String& tz) {
+    _timezone = tz;
 }
 
 const char* WebHandler::getContentType(const String& path) {
@@ -430,6 +458,49 @@ void WebHandler::setupRoutes() {
         }
         request->send(200, "application/json",
             "{\"theme\":\"" + theme + "\",\"systemName\":\"" + sysName + "\"}");
+    });
+
+    // Login page — no auth required
+    _server.on("/login", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        serveFile(request, "/login.html");
+    });
+
+    // Login API — no auth required (validates password, creates session)
+    auto* loginHandler = new AsyncCallbackJsonWebHandler("/api/login", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+        if (!_config || !_config->hasAdminPassword()) {
+            request->send(400, "application/json", "{\"error\":\"No admin password set\"}");
+            return;
+        }
+        JsonObject data = json.as<JsonObject>();
+        String pw = data["password"] | String("");
+        if (!_config->verifyAdminPassword(pw)) {
+            request->send(403, "application/json", "{\"error\":\"Invalid password\"}");
+            return;
+        }
+        String clientIP = request->client()->remoteIP().toString();
+        String token = _sessionMgr.createSession(clientIP);
+        uint32_t maxAge = _sessionMgr.getTimeoutMinutes() * 60;
+        String cookie = "session=" + token + "; Path=/; HttpOnly; SameSite=Strict";
+        if (maxAge > 0) cookie += "; Max-Age=" + String(maxAge);
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json",
+            "{\"ok\":true,\"timeout\":" + String(_sessionMgr.getTimeoutMinutes()) + "}");
+        response->addHeader("Set-Cookie", cookie);
+        request->send(response);
+        Log.info("AUTH", "Session created for %s", clientIP.c_str());
+    });
+    _server.addHandler(loginHandler);
+
+    // Logout API — extracts session from cookie, invalidates it
+    _server.on("/api/logout", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (request->hasHeader("Cookie")) {
+            String token = SessionManager::extractSessionToken(request->header("Cookie"));
+            if (token.length() > 0) {
+                _sessionMgr.invalidateSession(token);
+            }
+        }
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"ok\":true}");
+        response->addHeader("Set-Cookie", "session=; Path=/; HttpOnly; Max-Age=0");
+        request->send(response);
     });
 
     _server.on("/state", HTTP_GET, [this](AsyncWebServerRequest *request) {
@@ -922,8 +993,7 @@ void WebHandler::setupRoutes() {
                 doc["mqttPort"] = _config->getMqttPort();
                 doc["mqttUser"] = _config->getMqttUser();
                 doc["mqttPassword"] = "******";
-                doc["gmtOffsetHrs"] = proj->gmtOffsetSec / 3600.0f;
-                doc["daylightOffsetHrs"] = proj->daylightOffsetSec / 3600.0f;
+                doc["timezone"] = proj->timezone;
                 doc["lowTempThreshold"] = proj->lowTempThreshold;
                 doc["lowTempEnableW"] = proj->lowTempEnableW;
                 doc["lowTempEnableAux"] = proj->lowTempEnableAux;
@@ -951,6 +1021,7 @@ void WebHandler::setupRoutes() {
                 doc["mqttPrefix"] = proj->mqttPrefix.length() > 0 ? proj->mqttPrefix : "goodman";
                 doc["forceSafeMode"] = proj->forceSafeMode;
                 doc["safeMode"] = _safeMode ? *_safeMode : false;
+                doc["sessionTimeoutMinutes"] = proj->sessionTimeoutMinutes;
                 String json;
                 serializeJson(doc, json);
                 request->send(200, "application/json", json);
@@ -1646,15 +1717,18 @@ void WebHandler::setupRoutes() {
             }
         }
 
-        float gmtHrs = data["gmtOffsetHrs"] | (proj->gmtOffsetSec / 3600.0f);
-        float dstHrs = data["daylightOffsetHrs"] | (proj->daylightOffsetSec / 3600.0f);
-        int32_t gmtOffset = (int32_t)(gmtHrs * 3600);
-        int32_t dstOffset = (int32_t)(dstHrs * 3600);
-        if (gmtOffset != proj->gmtOffsetSec || dstOffset != proj->daylightOffsetSec) {
-            proj->gmtOffsetSec = gmtOffset;
-            proj->daylightOffsetSec = dstOffset;
-            setTimezone(gmtOffset, dstOffset);
-            configTime(gmtOffset, dstOffset, "192.168.0.1", "time.nist.gov");
+        // Session timeout (live — no reboot needed)
+        if (data["sessionTimeoutMinutes"].is<int>()) {
+            uint32_t stm = data["sessionTimeoutMinutes"] | 0;
+            proj->sessionTimeoutMinutes = stm;
+            _sessionMgr.setTimeoutMinutes(stm);
+        }
+
+        String tz = data["timezone"] | proj->timezone;
+        if (tz != proj->timezone) {
+            proj->timezone = tz;
+            _timezone = tz;
+            configTzTime(tz.c_str(), "192.168.0.1", "time.nist.gov");
         }
 
         float threshold = data["lowTempThreshold"] | proj->lowTempThreshold;
@@ -1841,8 +1915,7 @@ bool WebHandler::beginSecure(const uint8_t* cert, size_t certLen, const uint8_t*
     _httpsCtx.delayedReboot = &_tDelayedReboot;
     _httpsCtx.rebootRateLimited = _rebootRateLimited;
     _httpsCtx.safeMode = _safeMode;
-    _httpsCtx.gmtOffsetSec = &_gmtOffsetSec;
-    _httpsCtx.daylightOffsetSec = &_daylightOffsetSec;
+    _httpsCtx.timezone = &_timezone;
     _httpsCtx.ftpEnableCb = _ftpEnableCb;
     _httpsCtx.ftpDisableCb = _ftpDisableCb;
     _httpsCtx.ftpActive = _ftpActivePtr;
@@ -1861,6 +1934,7 @@ bool WebHandler::beginSecure(const uint8_t* cert, size_t certLen, const uint8_t*
     _httpsCtx.apStartCb = _apStartCb;
     _httpsCtx.apStopCb = _apStopCb;
     _httpsCtx.systemName = (_config && _config->getProjectInfo()) ? _config->getProjectInfo()->systemName : "Goodman HP";
+    _httpsCtx.sessionMgr = &_sessionMgr;
 
     _httpsServer = httpsStart(cert, certLen, key, keyLen, &_httpsCtx);
     return _httpsServer != nullptr;

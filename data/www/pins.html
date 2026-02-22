@@ -361,7 +361,7 @@ function renderSPIPins(){
   wrap.style.display='block';
 }
 function loadSPIConfig(){
-  fetch('/config?format=json').then(function(r){return r.json();}).then(function(d){
+  fetch('/config?format=json').then(function(r){if(r.redirected&&r.url.indexOf('/login')>=0){location.href=r.url;return;}return r.json();}).then(function(d){if(!d)return;
     _spiCfg=d;
     renderSPIPins();
   }).catch(function(){});
@@ -470,7 +470,7 @@ function renderFlags(d){
 function refresh(){
   var hdrs={};
   if(authHeader) hdrs['Authorization']=authHeader;
-  fetch('/pins?format=json',{headers:hdrs,credentials:'include'}).then(function(r){return r.json();}).then(function(d){
+  fetch('/pins?format=json',{headers:hdrs,credentials:'include'}).then(function(r){if(r.redirected&&r.url.indexOf('/login')>=0){location.href=r.url;return;}return r.json();}).then(function(d){if(!d)return;
     // State badge
     var badge=document.getElementById('stateBadge');
     badge.textContent=d.state||'--';

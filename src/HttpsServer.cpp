@@ -18,6 +18,7 @@
 #include "GoodmanHP.h"
 #include "TempHistory.h"
 #include "Logger.h"
+#include "SessionManager.h"
 #include <lwip/sockets.h>
 
 extern uint8_t getCpuLoadCore0();
@@ -51,7 +52,7 @@ static String getUserAgent(httpd_req_t* req) {
     return ua;
 }
 
-// --- HTTPS Basic Auth helper ---
+// --- HTTPS Auth helpers ---
 
 static void sendUnauthorized(httpd_req_t* req, HttpsContext* ctx) {
     String realm = "Basic realm=\"" + (ctx->systemName.length() > 0 ? ctx->systemName : String("Goodman HP")) + "\"";
@@ -60,10 +61,44 @@ static void sendUnauthorized(httpd_req_t* req, HttpsContext* ctx) {
     httpd_resp_send(req, "Unauthorized", HTTPD_RESP_USE_STRLEN);
 }
 
+static void redirectToLoginHttps(httpd_req_t* req, bool expired) {
+    // Build redirect URL from the request URI
+    size_t uriLen = strlen(req->uri);
+    String url = "/login?redirect=" + String(req->uri);
+    if (expired) url += "&expired=1";
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", url.c_str());
+    httpd_resp_send(req, NULL, 0);
+}
+
 static bool checkHttpsAuth(httpd_req_t* req) {
     HttpsContext* ctx = (HttpsContext*)req->user_ctx;
     if (!ctx->config || !ctx->config->hasAdminPassword()) return true;
 
+    // Session mode: check cookie first
+    if (ctx->sessionMgr && ctx->sessionMgr->isEnabled()) {
+        size_t cookieLen = httpd_req_get_hdr_value_len(req, "Cookie");
+        if (cookieLen > 0) {
+            char* cookieBuf = (char*)malloc(cookieLen + 1);
+            if (cookieBuf) {
+                httpd_req_get_hdr_value_str(req, "Cookie", cookieBuf, cookieLen + 1);
+                String token = SessionManager::extractSessionToken(String(cookieBuf));
+                free(cookieBuf);
+                if (token.length() > 0) {
+                    if (ctx->sessionMgr->validateSession(token))
+                        return true;
+                    // Expired session
+                    redirectToLoginHttps(req, true);
+                    return false;
+                }
+            }
+        }
+        // No session cookie
+        redirectToLoginHttps(req, false);
+        return false;
+    }
+
+    // Legacy mode: Basic Auth
     size_t authLen = httpd_req_get_hdr_value_len(req, "Authorization");
     if (authLen == 0) {
         sendUnauthorized(req, ctx);
@@ -185,8 +220,7 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["mqttPort"] = ctx->config->getMqttPort();
         doc["mqttUser"] = ctx->config->getMqttUser();
         doc["mqttPassword"] = "******";
-        doc["gmtOffsetHrs"] = proj->gmtOffsetSec / 3600.0f;
-        doc["daylightOffsetHrs"] = proj->daylightOffsetSec / 3600.0f;
+        doc["timezone"] = proj->timezone;
         doc["lowTempThreshold"] = proj->lowTempThreshold;
         doc["lowTempEnableW"] = proj->lowTempEnableW;
         doc["lowTempEnableAux"] = proj->lowTempEnableAux;
@@ -214,6 +248,7 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["mqttPrefix"] = proj->mqttPrefix.length() > 0 ? proj->mqttPrefix : "goodman";
         doc["forceSafeMode"] = proj->forceSafeMode;
         doc["safeMode"] = ctx->safeMode ? *(ctx->safeMode) : false;
+        doc["sessionTimeoutMinutes"] = proj->sessionTimeoutMinutes;
         String json;
         serializeJson(doc, json);
         httpd_resp_set_type(req, "application/json");
@@ -344,17 +379,19 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         }
     }
 
+    // Session timeout (live)
+    if (data["sessionTimeoutMinutes"].is<int>()) {
+        uint32_t stm = data["sessionTimeoutMinutes"] | 0;
+        proj->sessionTimeoutMinutes = stm;
+        if (ctx->sessionMgr) ctx->sessionMgr->setTimeoutMinutes(stm);
+    }
+
     // Timezone (live)
-    float gmtHrs = data["gmtOffsetHrs"] | (proj->gmtOffsetSec / 3600.0f);
-    float dstHrs = data["daylightOffsetHrs"] | (proj->daylightOffsetSec / 3600.0f);
-    int32_t gmtOffset = (int32_t)(gmtHrs * 3600);
-    int32_t dstOffset = (int32_t)(dstHrs * 3600);
-    if (gmtOffset != proj->gmtOffsetSec || dstOffset != proj->daylightOffsetSec) {
-        proj->gmtOffsetSec = gmtOffset;
-        proj->daylightOffsetSec = dstOffset;
-        *(ctx->gmtOffsetSec) = gmtOffset;
-        *(ctx->daylightOffsetSec) = dstOffset;
-        configTime(gmtOffset, dstOffset, "192.168.0.1", "time.nist.gov");
+    String tz = data["timezone"] | proj->timezone;
+    if (tz != proj->timezone) {
+        proj->timezone = tz;
+        *(ctx->timezone) = tz;
+        configTzTime(tz.c_str(), "192.168.0.1", "time.nist.gov");
     }
 
     // Low temp threshold (live)
@@ -2509,6 +2546,103 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &sensorAssignPost);
+
+    // Login page (no auth)
+    httpd_uri_t loginGet = {
+        .uri = "/login",
+        .method = HTTP_GET,
+        .handler = [](httpd_req_t* req) -> esp_err_t {
+            return serveFileHttps(req, "/www/login.html");
+        },
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &loginGet);
+
+    // Login API (no auth — validates password, creates session)
+    httpd_uri_t loginPost = {
+        .uri = "/api/login",
+        .method = HTTP_POST,
+        .handler = [](httpd_req_t* req) -> esp_err_t {
+            HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+            if (!ctx->config || !ctx->config->hasAdminPassword()) {
+                httpd_resp_set_type(req, "application/json");
+                httpd_resp_send(req, "{\"error\":\"No admin password set\"}", HTTPD_RESP_USE_STRLEN);
+                return ESP_OK;
+            }
+            int remaining = req->content_len;
+            if (remaining <= 0 || remaining > 1024) {
+                httpd_resp_set_type(req, "application/json");
+                httpd_resp_send(req, "{\"error\":\"Invalid body\"}", HTTPD_RESP_USE_STRLEN);
+                return ESP_OK;
+            }
+            char* body = (char*)malloc(remaining + 1);
+            if (!body) {
+                httpd_resp_set_type(req, "application/json");
+                httpd_resp_send(req, "{\"error\":\"Out of memory\"}", HTTPD_RESP_USE_STRLEN);
+                return ESP_OK;
+            }
+            int received = 0;
+            while (received < remaining) {
+                int ret = httpd_req_recv(req, body + received, remaining - received);
+                if (ret <= 0) { free(body); return ESP_OK; }
+                received += ret;
+            }
+            body[received] = '\0';
+
+            JsonDocument data;
+            if (deserializeJson(data, body)) { free(body); return ESP_OK; }
+            free(body);
+
+            String pw = data["password"] | String("");
+            if (!ctx->config->verifyAdminPassword(pw)) {
+                httpd_resp_set_status(req, "403 Forbidden");
+                httpd_resp_set_type(req, "application/json");
+                httpd_resp_send(req, "{\"error\":\"Invalid password\"}", HTTPD_RESP_USE_STRLEN);
+                return ESP_OK;
+            }
+
+            String clientIP = getClientIP(req);
+            String token = ctx->sessionMgr->createSession(clientIP);
+            uint32_t maxAge = ctx->sessionMgr->getTimeoutMinutes() * 60;
+            String cookie = "session=" + token + "; Path=/; HttpOnly; SameSite=Strict; Secure";
+            if (maxAge > 0) cookie += "; Max-Age=" + String(maxAge);
+            httpd_resp_set_hdr(req, "Set-Cookie", cookie.c_str());
+            httpd_resp_set_type(req, "application/json");
+            String resp = "{\"ok\":true,\"timeout\":" + String(ctx->sessionMgr->getTimeoutMinutes()) + "}";
+            httpd_resp_send(req, resp.c_str(), resp.length());
+            Log.info("AUTH", "HTTPS session created for %s", clientIP.c_str());
+            return ESP_OK;
+        },
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &loginPost);
+
+    // Logout API
+    httpd_uri_t logoutPost = {
+        .uri = "/api/logout",
+        .method = HTTP_POST,
+        .handler = [](httpd_req_t* req) -> esp_err_t {
+            HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+            size_t cookieLen = httpd_req_get_hdr_value_len(req, "Cookie");
+            if (cookieLen > 0) {
+                char* cookieBuf = (char*)malloc(cookieLen + 1);
+                if (cookieBuf) {
+                    httpd_req_get_hdr_value_str(req, "Cookie", cookieBuf, cookieLen + 1);
+                    String token = SessionManager::extractSessionToken(String(cookieBuf));
+                    free(cookieBuf);
+                    if (token.length() > 0 && ctx->sessionMgr) {
+                        ctx->sessionMgr->invalidateSession(token);
+                    }
+                }
+            }
+            httpd_resp_set_hdr(req, "Set-Cookie", "session=; Path=/; HttpOnly; Max-Age=0");
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
+            return ESP_OK;
+        },
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &logoutPost);
 
     Log.info("HTTPS", "HTTPS server started on port 443");
     return (HttpsServerHandle)server;

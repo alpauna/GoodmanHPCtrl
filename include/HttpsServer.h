@@ -12,6 +12,7 @@ class GoodmanHP;
 class TempHistory;
 class Scheduler;
 class Task;
+class SessionManager;
 
 struct HttpsContext {
     Config* config;
@@ -19,8 +20,7 @@ struct HttpsContext {
     Scheduler* scheduler;
     bool* shouldReboot;
     Task** delayedReboot;
-    int32_t* gmtOffsetSec;
-    int32_t* daylightOffsetSec;
+    String* timezone;
     std::function<void(int)> ftpEnableCb;
     std::function<void()> ftpDisableCb;
     bool* ftpActive;
@@ -42,6 +42,7 @@ struct HttpsContext {
     String systemName;
     bool* rebootRateLimited;
     bool* safeMode;
+    SessionManager* sessionMgr;
 };
 
 // Opaque handle

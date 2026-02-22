@@ -56,7 +56,7 @@ button:hover{background:#45a049;}
 <a href='#' class='reboot' onclick="if(confirm('Reboot device?')){var x=new XMLHttpRequest();x.open('POST','/reboot');x.onload=function(){alert(x.status===200?'Rebooting...':'Failed')};x.send()};return false">Reboot</a>
 </div></nav>
 <div class='sec-nav'><button class='sec-burger' onclick='this.nextElementSibling.classList.toggle("open")'>&#9776;</button><div class='sec-drop'>
-<a href='#s-sys'>System</a><a href='#s-look'>Appearance</a><a href='#s-auth'>Password</a><a href='#s-wifi'>WiFi</a><a href='#s-mqtt'>MQTT</a><a href='#s-tz'>Timezone</a><a href='#s-hp'>Heatpump</a><a href='#s-df'>Defrost</a><a href='#s-disp'>Display</a><a href='#s-tc'>MAX6675</a><a href='#s-log'>Logging</a><a href='#s-ftp'>FTP</a><a href='#s-sd'>SD Card</a>
+<a href='#s-sys'>System</a><a href='#s-look'>Appearance</a><a href='#s-auth'>Password</a><a href='#s-session'>Session</a><a href='#s-wifi'>WiFi</a><a href='#s-mqtt'>MQTT</a><a href='#s-tz'>Timezone</a><a href='#s-hp'>Heatpump</a><a href='#s-df'>Defrost</a><a href='#s-disp'>Display</a><a href='#s-tc'>MAX6675</a><a href='#s-log'>Logging</a><a href='#s-ftp'>FTP</a><a href='#s-sd'>SD Card</a>
 </div></div>
 <div class='container'>
 <h1>Configuration</h1>
@@ -82,6 +82,17 @@ button:hover{background:#45a049;}
 <label>Current Password (required to change)</label><input type='password' id='curAdminPw'>
 </div>
 </fieldset>
+<fieldset id='s-session'><legend>Session <span class='tag tag-live'>live</span></legend>
+<label>Session Timeout</label>
+<select id='sessionTimeoutMinutes'>
+<option value='0'>Disabled (Basic Auth only)</option>
+<option value='15'>15 minutes</option>
+<option value='30'>30 minutes</option>
+<option value='60'>1 hour</option>
+<option value='120'>2 hours</option>
+</select>
+<button type='button' class='btn-sm btn-red' onclick='doLogout()' style='margin-top:8px'>Logout</button>
+</fieldset>
 <fieldset id='s-wifi'><legend>WiFi <span class='tag tag-reboot'>reboot</span></legend>
 <label>SSID</label><input type='text' id='wifiSSID'>
 <label>Password</label><input type='password' id='wifiPassword'>
@@ -103,8 +114,9 @@ button:hover{background:#45a049;}
 <label>Current Password or Admin Password (required to change)</label><input type='password' id='curMqttPw'>
 </fieldset>
 <fieldset id='s-tz'><legend>Timezone <span class='tag tag-live'>live</span></legend>
-<label>GMT Offset (hours)</label><input type='number' step='0.5' id='gmtOffsetHrs'>
-<label>Daylight Offset (hours)</label><input type='number' step='0.5' id='daylightOffsetHrs'>
+<label>Region</label><select id='tzRegion' onchange='updateTzCities()'></select>
+<label>City</label><select id='tzCity' onchange='updateTzValue()'></select>
+<input type='hidden' id='timezone'>
 </fieldset>
 <fieldset id='s-hp'><legend>Heatpump Protection <span class='tag tag-live'>live</span></legend>
 <label>Low Temp Threshold (&deg;F)</label><input type='number' step='0.1' id='lowTempThreshold'>
@@ -156,10 +168,23 @@ button:hover{background:#45a049;}
 <div id='status'></div>
 </div>
 <script>
-var fields=['systemName','mqttPrefix','wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','apPassword','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do'];
+var fields=['systemName','mqttPrefix','wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','timezone','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','apPassword','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes'];
+var tzData={
+'America':{'New York':'EST5EDT,M3.2.0,M11.1.0','Chicago':'CST6CDT,M3.2.0,M11.1.0','Denver':'MST7MDT,M3.2.0,M11.1.0','Los Angeles':'PST8PDT,M3.2.0,M11.1.0','Phoenix':'MST7','Anchorage':'AKST9AKDT,M3.2.0,M11.1.0','Honolulu':'HST10','Halifax':'AST4ADT,M3.2.0,M11.1.0','St Johns':'NST3:30NDT,M3.2.0,M11.1.0','Mexico City':'CST6CDT,M4.1.0,M10.5.0','Sao Paulo':'<-03>3','Buenos Aires':'<-03>3','Santiago':'<-04>4<-03>,M9.1.6/24,M4.1.6/24'},
+'Europe':{'London':'GMT0BST,M3.5.0/1,M10.5.0','Paris':'CET-1CEST,M3.5.0,M10.5.0','Berlin':'CET-1CEST,M3.5.0,M10.5.0','Moscow':'MSK-3','Istanbul':'<+03>-3','Athens':'EET-2EEST,M3.5.0/3,M10.5.0'},
+'Asia':{'Tokyo':'JST-9','Shanghai':'CST-8','Kolkata':'IST-5:30','Dubai':'<+04>-4','Singapore':'<+08>-8','Seoul':'KST-9','Bangkok':'<+07>-7'},
+'Australia':{'Sydney':'AEST-10AEDT,M10.1.0,M4.1.0/3','Perth':'AWST-8','Adelaide':'ACST-9:30ACDT,M10.1.0,M4.1.0/3','Brisbane':'AEST-10'},
+'Pacific':{'Auckland':'NZST-12NZDT,M9.5.0,M4.1.0/3','Fiji':'<+12>-12','Samoa':'SST11'},
+'Africa':{'Cairo':'EET-2EEST,M4.5.5/0,M10.5.4/24','Lagos':'WAT-1','Johannesburg':'SAST-2','Nairobi':'EAT-3'}
+};
+(function(){var sel=document.getElementById('tzRegion');Object.keys(tzData).forEach(function(r){var o=document.createElement('option');o.value=r;o.textContent=r;sel.appendChild(o);});updateTzCities();})();
+function updateTzCities(){var r=document.getElementById('tzRegion').value;var cs=document.getElementById('tzCity');cs.innerHTML='';if(tzData[r]){Object.keys(tzData[r]).forEach(function(c){var o=document.createElement('option');o.value=tzData[r][c];o.textContent=c;cs.appendChild(o);});}updateTzValue();}
+function updateTzValue(){document.getElementById('timezone').value=document.getElementById('tzCity').value;}
+function setTzFromPosix(posix){for(var r in tzData){for(var c in tzData[r]){if(tzData[r][c]===posix){document.getElementById('tzRegion').value=r;updateTzCities();document.getElementById('tzCity').value=posix;document.getElementById('timezone').value=posix;return;}}}document.getElementById('tzRegion').value='America';updateTzCities();}
 var adminPwSet=false;
-fetch('/config?format=json').then(r=>r.json()).then(d=>{
-fields.forEach(f=>{var e=document.getElementById(f);if(e)e.value=d[f]!=null?d[f]:'';});
+fetch('/config?format=json').then(r=>{if(r.redirected&&r.url.indexOf('/login')>=0){location.href=r.url;return;}if(r.status===401){location.href='/login?redirect=/config&expired=1';return;}return r.json();}).then(d=>{if(!d)return;
+fields.forEach(f=>{var e=document.getElementById(f);if(e&&f!=='timezone')e.value=d[f]!=null?d[f]:'';});
+setTzFromPosix(d.timezone||'CST6CDT,M3.2.0,M11.1.0');
 document.getElementById('maxLogSizeMB').value=d.maxLogSize!=null?Math.round(d.maxLogSize/(1024*1024)):'';
 document.getElementById('displayEnabled').checked=d.displayEnabled!==false;
 document.getElementById('max6675Enabled').checked=d.max6675Enabled!==false;
@@ -192,7 +217,7 @@ alert('RV Fail cleared');
 }
 function save(e){
 e.preventDefault();
-var d={};var numFields=['mqttPort','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do'];
+var d={};var numFields=['mqttPort','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes'];
 fields.forEach(f=>{var e=document.getElementById(f);var v=e?e.value:'';d[f]=numFields.indexOf(f)>=0&&v!==''?Number(v):v;});
 var mbVal=document.getElementById('maxLogSizeMB').value;
 d.maxLogSize=mbVal?parseInt(mbVal)*1024*1024:'';
@@ -324,6 +349,9 @@ document.getElementById('btnStopAP').style.display='inline-block';
 document.getElementById('apTestStatus').textContent='AP Mode active';
 }
 }).catch(()=>{});
+function doLogout(){
+fetch('/api/logout',{method:'POST'}).then(function(){location.href='/login';}).catch(function(){location.href='/login';});
+}
 // Section nav: highlight on scroll, close dropdown on click, smooth scroll with offset
 (function(){
 var links=document.querySelectorAll('.sec-drop a');
