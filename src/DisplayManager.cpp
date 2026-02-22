@@ -8,6 +8,7 @@
 
 extern uint8_t getCpuLoadCore0();
 extern uint8_t getCpuLoadCore1();
+extern bool _safeMode;
 extern bool _apModeActive;
 extern String _apPassword;
 
@@ -51,7 +52,11 @@ bool DisplayManager::begin(uint8_t addr) {
     _display->setTextSize(2);
     _display->println(proj.systemName.length() > 0 ? proj.systemName.c_str() : "Goodman HP");
     _display->setTextSize(1);
-    _display->println(F("Starting..."));
+    if (_safeMode) {
+        _display->println(F("** SAFE MODE **"));
+    } else {
+        _display->println(F("Starting..."));
+    }
     _display->display();
 
     _tFlipPage = new Task(_pageIntervalSec * TASK_SECOND, TASK_FOREVER, [this]() {
@@ -272,6 +277,9 @@ void DisplayManager::drawPageProtections() {
     int y = 12;
     bool any = false;
 
+    if (_safeMode) {
+        _display->setCursor(0, y); _display->print(F("** SAFE MODE **")); y += 10; any = true;
+    }
     if (_hp->isLPSFaultActive()) {
         _display->setCursor(0, y); _display->print(F("* LPS Fault")); y += 10; any = true;
     }

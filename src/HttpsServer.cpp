@@ -18,11 +18,38 @@
 #include "GoodmanHP.h"
 #include "TempHistory.h"
 #include "Logger.h"
+#include <lwip/sockets.h>
 
 extern uint8_t getCpuLoadCore0();
 extern uint8_t getCpuLoadCore1();
 extern bool _apModeActive;
 extern const char compile_date[];
+
+// Get client IP from esp_http_server request via socket fd
+static String getClientIP(httpd_req_t* req) {
+    int sockfd = httpd_req_to_sockfd(req);
+    if (sockfd < 0) return "unknown";
+    struct sockaddr_in addr;
+    socklen_t addrLen = sizeof(addr);
+    if (getpeername(sockfd, (struct sockaddr*)&addr, &addrLen) != 0) return "unknown";
+    char ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &addr.sin_addr, ip, sizeof(ip));
+    return String(ip);
+}
+
+// Get User-Agent header from esp_http_server request
+static String getUserAgent(httpd_req_t* req) {
+    size_t len = httpd_req_get_hdr_value_len(req, "User-Agent");
+    if (len == 0) return "unknown";
+    char* buf = new char[len + 1];
+    if (httpd_req_get_hdr_value_str(req, "User-Agent", buf, len + 1) != ESP_OK) {
+        delete[] buf;
+        return "unknown";
+    }
+    String ua(buf);
+    delete[] buf;
+    return ua;
+}
 
 // --- HTTPS Basic Auth helper ---
 
@@ -182,6 +209,8 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["max6675Cs"] = proj->max6675Cs;
         doc["max6675Do"] = proj->max6675Do;
         doc["max6675Enabled"] = proj->max6675Enabled;
+        doc["forceSafeMode"] = proj->forceSafeMode;
+        doc["safeMode"] = ctx->safeMode ? *(ctx->safeMode) : false;
         String json;
         serializeJson(doc, json);
         httpd_resp_set_type(req, "application/json");
@@ -443,6 +472,12 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         needsReboot = true;
     }
 
+    // Force safe mode on next boot (one-shot)
+    if (data["forceSafeMode"].is<bool>()) {
+        proj->forceSafeMode = data["forceSafeMode"] | false;
+        if (proj->forceSafeMode) needsReboot = true;
+    }
+
     // Save to SD card
     TempSensorMap& tempSensors = ctx->hpController->getTempSensorMap();
     bool saved = ctx->config->updateConfig("/config.txt", tempSensors, *proj);
@@ -543,7 +578,7 @@ static esp_err_t applyPostHandler(httpd_req_t* req) {
         return ESP_OK;
     }
 
-    if (applyFirmwareFromSD()) {
+    if (applyFirmwareFromSD("/firmware.new", compile_date)) {
         httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
         if (!*(ctx->delayedReboot)) {
             *(ctx->delayedReboot) = new Task(2 * TASK_SECOND, TASK_ONCE, [ctx]() {
@@ -1442,8 +1477,19 @@ static esp_err_t rebootPostHandler(httpd_req_t* req) {
     if (!checkHttpsAuth(req)) return ESP_OK;
     HttpsContext* ctx = (HttpsContext*)req->user_ctx;
 
+    if (ctx->rebootRateLimited && *(ctx->rebootRateLimited)) {
+        String clientIP = getClientIP(req);
+        String ua = getUserAgent(req);
+        Log.error("SEC", "REBOOT BLOCKED (rate limited) from %s UA='%s'",
+            clientIP.c_str(), ua.c_str());
+        httpd_resp_set_status(req, "429 Too Many Requests");
+        httpd_resp_send(req, "Reboot rate limited — too many rapid reboots", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    String clientIP = getClientIP(req);
     httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
-    Log.info("HTTPS", "Reboot requested, rebooting in 2s...");
+    Log.info("HTTPS", "Reboot requested from %s, rebooting in 2s...", clientIP.c_str());
     if (!*(ctx->delayedReboot)) {
         *(ctx->delayedReboot) = new Task(2 * TASK_SECOND, TASK_ONCE, [ctx]() {
             *(ctx->shouldReboot) = true;
@@ -1454,6 +1500,50 @@ static esp_err_t rebootPostHandler(httpd_req_t* req) {
 }
 
 // --- Admin setup handlers ---
+
+static esp_err_t safeModeClearHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+
+    if (ctx->config && ctx->config->getProjectInfo()) {
+        ctx->config->getProjectInfo()->forceSafeMode = false;
+        GoodmanHP* hp = ctx->hpController;
+        TempSensorMap& tempSensors = hp->getTempSensorMap();
+        ctx->config->updateConfig("/config.txt", tempSensors, *ctx->config->getProjectInfo());
+    }
+    Log.info("HTTPS", "Safe mode cleared, rebooting...");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"status\":\"ok\",\"message\":\"Safe mode cleared, rebooting...\"}", HTTPD_RESP_USE_STRLEN);
+    if (!*(ctx->delayedReboot)) {
+        *(ctx->delayedReboot) = new Task(2 * TASK_SECOND, TASK_ONCE, [ctx]() {
+            *(ctx->shouldReboot) = true;
+        }, ctx->scheduler, false);
+    }
+    (*(ctx->delayedReboot))->restartDelayed(2 * TASK_SECOND);
+    return ESP_OK;
+}
+
+static esp_err_t safeModeForceHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+
+    if (ctx->config && ctx->config->getProjectInfo()) {
+        ctx->config->getProjectInfo()->forceSafeMode = true;
+        GoodmanHP* hp = ctx->hpController;
+        TempSensorMap& tempSensors = hp->getTempSensorMap();
+        ctx->config->updateConfig("/config.txt", tempSensors, *ctx->config->getProjectInfo());
+    }
+    Log.warn("HTTPS", "Force safe mode set, rebooting...");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"status\":\"ok\",\"message\":\"Rebooting into safe mode...\"}", HTTPD_RESP_USE_STRLEN);
+    if (!*(ctx->delayedReboot)) {
+        *(ctx->delayedReboot) = new Task(2 * TASK_SECOND, TASK_ONCE, [ctx]() {
+            *(ctx->shouldReboot) = true;
+        }, ctx->scheduler, false);
+    }
+    (*(ctx->delayedReboot))->restartDelayed(2 * TASK_SECOND);
+    return ESP_OK;
+}
 
 static esp_err_t adminSetupGetHandler(httpd_req_t* req) {
     return serveFileHttps(req, "/www/admin.html");
@@ -2099,6 +2189,22 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &rebootPost);
+
+    httpd_uri_t smClear = {
+        .uri = "/safemode/clear",
+        .method = HTTP_POST,
+        .handler = safeModeClearHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &smClear);
+
+    httpd_uri_t smForce = {
+        .uri = "/safemode/force",
+        .method = HTTP_POST,
+        .handler = safeModeForceHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &smForce);
 
     httpd_uri_t ftpGet = {
         .uri = "/ftp",

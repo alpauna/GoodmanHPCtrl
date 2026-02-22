@@ -21,6 +21,7 @@
 #include "MQTTHandler.h"
 #include "TempHistory.h"
 #include "DisplayManager.h"
+#include "OtaUtils.h"
 #include <max6675.h>
 
 extern const char compile_date[] = __DATE__ " " __TIME__;
@@ -100,6 +101,18 @@ u_int32_t _wifiStartMillis = 0;
 static uint32_t _wifiDisconnectCount = 0;
 bool _apModeActive = false;
 String _apPassword;
+
+// Rapid reboot detection — RTC memory survives software resets
+RTC_NOINIT_ATTR static uint32_t _rapidRebootCount;
+static const uint32_t RAPID_REBOOT_THRESHOLD = 3;
+static const uint32_t REBOOT_STABLE_MS = 5UL * 60 * 1000; // 5 min
+static bool _rebootRateLimited = false;
+
+// Boot watchdog — crash detection via RTC memory
+RTC_NOINIT_ATTR static uint32_t _crashBootCount;
+static const uint32_t CRASH_BOOT_THRESHOLD = 3;
+static const uint32_t BOOT_STABLE_MS = 30UL * 1000; // 30s
+bool _safeMode = false;
 
 u_long runTimeStart;
 u_long currentRuntime;  
@@ -193,6 +206,7 @@ ProjectInfo proj = {
   40,                 // max6675Cs: GPIO 40
   41,                 // max6675Do: GPIO 41
   true,               // max6675Enabled: on by default
+  false,              // forceSafeMode: not forced
   "Goodman HP",       // systemName: default system name
   "goodman"           // mqttPrefix: default MQTT topic prefix
 };
@@ -243,6 +257,19 @@ static char _tempsCsvDate[12] = "";
 // CPU load calculation every 1 second
 void onCalcCpuLoad();
 Task tCpuLoad(TASK_SECOND, TASK_FOREVER, &onCalcCpuLoad, &ts, false);
+
+// Clear crash boot counter after 30s stable uptime (boot watchdog)
+Task tBootStable(BOOT_STABLE_MS, TASK_ONCE, []() {
+    _crashBootCount = 0;
+    Log.info("MAIN", "Boot stable (30s), crash counter reset to 0");
+}, &ts, true);  // enabled immediately on boot
+
+// Clear rapid reboot counter after 5 min stable uptime (DoS protection)
+Task tRebootStable(REBOOT_STABLE_MS, TASK_ONCE, []() {
+    _rapidRebootCount = 0;
+    _rebootRateLimited = false;
+    Log.info("MAIN", "Stable uptime (5 min), reboot rate limit cleared");
+}, &ts, true);  // enabled immediately on boot
 
 // Backfill temp history from SD after NTP sync
 void onBackfillTempHistory();
@@ -478,6 +505,34 @@ unsigned char * acc_data_all;
 void setup() {
   Serial.begin(115200);
 
+  // Boot watchdog: track reset reasons via RTC memory
+  esp_reset_reason_t resetReason = esp_reset_reason();
+  if (resetReason == ESP_RST_POWERON || resetReason == ESP_RST_BROWNOUT) {
+    _rapidRebootCount = 0;
+    _crashBootCount = 0;
+  } else if (resetReason == ESP_RST_SW) {
+    _rapidRebootCount++;
+    // SW reset is neutral for crash counter (intentional reboots)
+  } else if (resetReason == ESP_RST_PANIC || resetReason == ESP_RST_INT_WDT ||
+             resetReason == ESP_RST_TASK_WDT || resetReason == ESP_RST_WDT) {
+    _crashBootCount++;
+  }
+
+  // Rapid SW reboot rate limiting (DoS protection)
+  if (_rapidRebootCount >= RAPID_REBOOT_THRESHOLD) {
+    _rebootRateLimited = true;
+    Serial.printf("WARNING: Rapid reboot detected (%u consecutive SW resets). "
+                   "API reboot locked out until %lu min stable uptime.\n",
+                   _rapidRebootCount, REBOOT_STABLE_MS / 60000);
+  }
+
+  // Crash boot safe mode (boot loop protection)
+  if (_crashBootCount >= CRASH_BOOT_THRESHOLD) {
+    _safeMode = true;
+    Serial.printf("SAFE MODE: %u consecutive crash boots detected (PANIC/WDT). "
+                   "HP controller disabled. Fix config and reboot.\n", _crashBootCount);
+  }
+
   Wire.begin(_sdaPin, _sclPin);
   Wire.setTimeOut(1000);  // 1s I2C bus timeout — prevents MCP9600 from hanging boot
 
@@ -618,11 +673,58 @@ void setup() {
     }
   }
   Serial.println("SD Card is read.");
+
+  // Check forceSafeMode from config (one-shot flag)
+  if (proj.forceSafeMode) {
+    _safeMode = true;
+    // Clear the flag so next boot is normal
+    proj.forceSafeMode = false;
+    TempSensorMap& tempSensorsForSave = hpController.getTempSensorMap();
+    config.updateConfig(_filename, tempSensorsForSave, proj);
+    Serial.println("SAFE MODE: forced via config flag (cleared for next boot)");
+  }
+
+  // Auto-revert firmware on crash boot loop.
+  // NOTE: This safety net only works with OTA updates (POST /update → POST /apply),
+  // which create /firmware.bak on SD before flashing. USB uploads (pio run -t upload)
+  // bypass this entirely — no backup is created, so auto-revert is not possible.
+  // Always prefer OTA for production deployments.
+  if (_safeMode && _crashBootCount >= CRASH_BOOT_THRESHOLD && firmwareBackupExists()) {
+    // Compare build dates — if backup is the same build as running firmware,
+    // reverting would just re-flash the same broken firmware. Skip in that case.
+    String backupBuild = getBackupBuildDate();
+    if (backupBuild.length() > 0 && backupBuild == compile_date) {
+      Serial.printf("AUTO-REVERT: Backup build date (%s) matches running firmware — "
+                    "same build, skipping revert. Continuing in safe mode.\n",
+                    backupBuild.c_str());
+    } else {
+      if (backupBuild.length() == 0) {
+        Serial.printf("AUTO-REVERT: %u crash boots detected, no build date on backup — "
+                      "attempting revert from /firmware.bak...\n", _crashBootCount);
+      } else {
+        Serial.printf("AUTO-REVERT: %u crash boots detected, backup build: %s, "
+                      "running build: %s — reverting...\n",
+                      _crashBootCount, backupBuild.c_str(), compile_date);
+      }
+      if (revertFirmwareFromSD()) {
+        Serial.println("AUTO-REVERT: Firmware reverted successfully. Rebooting...");
+        _crashBootCount = 0;  // Reset so the reverted firmware boots clean
+        delay(500);
+        ESP.restart();
+        // Does not return
+      } else {
+        Serial.println("AUTO-REVERT: Firmware revert FAILED. Continuing in safe mode.");
+      }
+    }
+  }
+
   WiFi.onEvent(onWiFiEvent);
   connectToWifi();
 
   config.setProjectInfo(&proj);
   webHandler.setConfig(&config);
+  webHandler.setRebootRateLimited(&_rebootRateLimited);
+  webHandler.setSafeMode(&_safeMode, &_crashBootCount);
   webHandler.setTimezone(proj.gmtOffsetSec, proj.daylightOffsetSec);
   tempHistory.begin();
   webHandler.setTempHistory(&tempHistory);
@@ -699,74 +801,107 @@ void setup() {
   Log.setLogFile("/log.txt", proj.maxLogSize, proj.maxOldLogCount);
   Log.info("MAIN", "Logger initialized");
 
-  // Add input pins to GoodmanHP controller
-  hpController.addInput("LPS", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _lpsPin, "LPS", "LPS", onInput));
-  hpController.addInput("DFT", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _dftPin, "DFT", "DFT", onInput));
-  hpController.addInput("Y", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _yPin, "Y", "OT-NO", onInput));
-  hpController.addInput("O", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _oPin, "O", "OT-NC", onInput));
-
-  // Add output pins to GoodmanHP controller
-  hpController.addOutput("FAN", new OutPin(&ts, 0, _fanPin, "FAN", "FAN", onOutpin));
-  hpController.addOutput("CNT", new OutPin(&ts, 3000, _CNTPin, "CNT", "CNT", onOutpin));
-  hpController.addOutput("W", new OutPin(&ts, 0, _WPin, "W", "W", onOutpin));
-  hpController.addOutput("RV", new OutPin(&ts, 0, _RVPin, "RV", "RV", onOutpin));
-  hpController.addOutput("AUX", new OutPin(&ts, 0, _auxPin, "AUX", "AUX", onOutpin));
-
-
-  // Start GoodmanHP controller
-  hpController.setDallasTemperature(&sensors);
-
-  // Add LIQUID_TEMP sensor: MAX6675 SPI > MAX31850K OneWire > MCP9600 I2C
-  // MAX6675 is preferred when detected — replaces any OneWire LIQUID_TEMP
-  TempSensorMap& postDiscoveryMap = hpController.getTempSensorMap();
-  if (max6675Ptr != nullptr) {
-    // Remove OneWire LIQUID_TEMP if it was auto-discovered (MAX6675 takes priority)
-    if (postDiscoveryMap.count("LIQUID_TEMP") > 0) {
-      Log.info("MAIN", "LIQUID_TEMP: replacing OneWire with MAX6675 SPI (higher priority)");
-      delete postDiscoveryMap["LIQUID_TEMP"];
-      postDiscoveryMap.erase("LIQUID_TEMP");
+  // Log boot watchdog status now that Logger is available
+  {
+    esp_reset_reason_t reason = esp_reset_reason();
+    const char* reasonStr = "UNKNOWN";
+    switch (reason) {
+      case ESP_RST_POWERON:  reasonStr = "POWERON"; break;
+      case ESP_RST_SW:       reasonStr = "SW_RESET"; break;
+      case ESP_RST_PANIC:    reasonStr = "PANIC"; break;
+      case ESP_RST_INT_WDT:  reasonStr = "INT_WDT"; break;
+      case ESP_RST_TASK_WDT: reasonStr = "TASK_WDT"; break;
+      case ESP_RST_WDT:      reasonStr = "WDT"; break;
+      case ESP_RST_BROWNOUT: reasonStr = "BROWNOUT"; break;
+      case ESP_RST_DEEPSLEEP: reasonStr = "DEEPSLEEP"; break;
+      default: break;
     }
-    TempSensor* liquidSensor = new TempSensor("LIQUID_TEMP");
-    liquidSensor->setMAX6675(max6675Ptr);
-    liquidSensor->setUpdateCallback(tempSensorUpdateCallback);
-    liquidSensor->setChangeCallback(tempSensorChangeCallback);
-    hpController.addTempSensor("LIQUID_TEMP", liquidSensor);
-    Log.info("MAIN", "LIQUID_TEMP sensor added (MAX6675 SPI)");
-  } else if (postDiscoveryMap.count("LIQUID_TEMP") > 0) {
-    Log.info("MAIN", "LIQUID_TEMP found on OneWire bus (MAX31850K)");
-  } else if (mcp9600Ready) {
-    TempSensor* liquidSensor = new TempSensor("LIQUID_TEMP");
-    liquidSensor->setMCP9600(&mcp9600);
-    liquidSensor->setI2CAddress(0x67);
-    liquidSensor->setUpdateCallback(tempSensorUpdateCallback);
-    liquidSensor->setChangeCallback(tempSensorChangeCallback);
-    hpController.addTempSensor("LIQUID_TEMP", liquidSensor);
-    Log.info("MAIN", "LIQUID_TEMP sensor added (MCP9600 I2C fallback)");
-  } else {
-    Log.warn("MAIN", "No LIQUID_TEMP sensor found (no MAX6675, MAX31850K, or MCP9600)");
+    Log.info("MAIN", "Reset reason: %s, crash boots: %u/%u, rapid reboots: %u/%u",
+      reasonStr, _crashBootCount, CRASH_BOOT_THRESHOLD,
+      _rapidRebootCount, RAPID_REBOOT_THRESHOLD);
+    if (_safeMode) {
+      Log.error("SEC", "SAFE MODE ACTIVE: HP controller disabled. "
+        "Crash boots: %u, force flag: %s. Fix config and reboot via web UI.",
+        _crashBootCount, proj.forceSafeMode ? "was set" : "not set");
+    }
+    if (_rebootRateLimited) {
+      Log.error("SEC", "REBOOT RATE LIMITED: %u consecutive SW resets. "
+        "API /reboot locked out for %lu min stable uptime.",
+        _rapidRebootCount, REBOOT_STABLE_MS / 60000);
+    }
   }
 
-  hpController.setStateChangeCallback([](GoodmanHP::State, GoodmanHP::State) {
-    mqttHandler.publishState();
-  });
-  hpController.setLPSFaultCallback([](bool active) {
-    mqttHandler.publishFault("LPS",
-        active ? "Low refrigerant pressure" : "Low refrigerant pressure cleared",
-        active);
-  });
-  hpController.begin();
+  if (!_safeMode) {
+    // Add input pins to GoodmanHP controller
+    hpController.addInput("LPS", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _lpsPin, "LPS", "LPS", onInput));
+    hpController.addInput("DFT", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _dftPin, "DFT", "DFT", onInput));
+    hpController.addInput("Y", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _yPin, "Y", "OT-NO", onInput));
+    hpController.addInput("O", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _oPin, "O", "OT-NC", onInput));
 
-  tRuntime.enable();
-  _tGetInputs.enable();
-  tSaveRuntime.enable();
-  tLogTempsCSV.enable();
-  tBackfillTempHistory.enableDelayed();
+    // Add output pins to GoodmanHP controller
+    hpController.addOutput("FAN", new OutPin(&ts, 0, _fanPin, "FAN", "FAN", onOutpin));
+    hpController.addOutput("CNT", new OutPin(&ts, 3000, _CNTPin, "CNT", "CNT", onOutpin));
+    hpController.addOutput("W", new OutPin(&ts, 0, _WPin, "W", "W", onOutpin));
+    hpController.addOutput("RV", new OutPin(&ts, 0, _RVPin, "RV", "RV", onOutpin));
+    hpController.addOutput("AUX", new OutPin(&ts, 0, _auxPin, "AUX", "AUX", onOutpin));
+
+    // Start GoodmanHP controller
+    hpController.setDallasTemperature(&sensors);
+
+    // Add LIQUID_TEMP sensor: MAX6675 SPI > MAX31850K OneWire > MCP9600 I2C
+    // MAX6675 is preferred when detected — replaces any OneWire LIQUID_TEMP
+    TempSensorMap& postDiscoveryMap = hpController.getTempSensorMap();
+    if (max6675Ptr != nullptr) {
+      // Remove OneWire LIQUID_TEMP if it was auto-discovered (MAX6675 takes priority)
+      if (postDiscoveryMap.count("LIQUID_TEMP") > 0) {
+        Log.info("MAIN", "LIQUID_TEMP: replacing OneWire with MAX6675 SPI (higher priority)");
+        delete postDiscoveryMap["LIQUID_TEMP"];
+        postDiscoveryMap.erase("LIQUID_TEMP");
+      }
+      TempSensor* liquidSensor = new TempSensor("LIQUID_TEMP");
+      liquidSensor->setMAX6675(max6675Ptr);
+      liquidSensor->setUpdateCallback(tempSensorUpdateCallback);
+      liquidSensor->setChangeCallback(tempSensorChangeCallback);
+      hpController.addTempSensor("LIQUID_TEMP", liquidSensor);
+      Log.info("MAIN", "LIQUID_TEMP sensor added (MAX6675 SPI)");
+    } else if (postDiscoveryMap.count("LIQUID_TEMP") > 0) {
+      Log.info("MAIN", "LIQUID_TEMP found on OneWire bus (MAX31850K)");
+    } else if (mcp9600Ready) {
+      TempSensor* liquidSensor = new TempSensor("LIQUID_TEMP");
+      liquidSensor->setMCP9600(&mcp9600);
+      liquidSensor->setI2CAddress(0x67);
+      liquidSensor->setUpdateCallback(tempSensorUpdateCallback);
+      liquidSensor->setChangeCallback(tempSensorChangeCallback);
+      hpController.addTempSensor("LIQUID_TEMP", liquidSensor);
+      Log.info("MAIN", "LIQUID_TEMP sensor added (MCP9600 I2C fallback)");
+    } else {
+      Log.warn("MAIN", "No LIQUID_TEMP sensor found (no MAX6675, MAX31850K, or MCP9600)");
+    }
+
+    hpController.setStateChangeCallback([](GoodmanHP::State, GoodmanHP::State) {
+      mqttHandler.publishState();
+    });
+    hpController.setLPSFaultCallback([](bool active) {
+      mqttHandler.publishFault("LPS",
+          active ? "Low refrigerant pressure" : "Low refrigerant pressure cleared",
+          active);
+    });
+    hpController.begin();
+
+    tRuntime.enable();
+    _tGetInputs.enable();
+    tSaveRuntime.enable();
+    tLogTempsCSV.enable();
+    tBackfillTempHistory.enableDelayed();
+  } else {
+    Log.warn("MAIN", "SAFE MODE: HP controller, inputs, outputs, and MQTT publishing skipped");
+  }
 
   esp_register_freertos_idle_hook_for_cpu(idleHookCore0, 0);
   esp_register_freertos_idle_hook_for_cpu(idleHookCore1, 1);
   tCpuLoad.enable();
 
-  Log.info("MAIN", "Starting Main Loop");
+  Log.info("MAIN", "Starting Main Loop%s", _safeMode ? " (SAFE MODE)" : "");
 }
 
 void tempSensorUpdateCallback(TempSensor *sensor){

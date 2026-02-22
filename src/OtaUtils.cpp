@@ -8,7 +8,7 @@
 static constexpr size_t OTA_BUF_SIZE = 4096;
 static constexpr size_t MIN_FIRMWARE_SIZE = 100 * 1024;  // 100KB sanity check
 
-bool backupFirmwareToSD(const char* path) {
+bool backupFirmwareToSD(const char* path, const char* buildDate) {
     const esp_partition_t* running = esp_ota_get_running_partition();
     if (!running) {
         Log.error("OTA", "Could not get running partition");
@@ -52,6 +52,18 @@ bool backupFirmwareToSD(const char* path) {
 
     backup.close();
     Log.info("OTA", "Firmware backup complete (%u bytes)", sketchSize);
+
+    // Save build date metadata alongside backup for version comparison
+    if (buildDate && buildDate[0]) {
+        String metaPath = String(path) + ".meta";
+        File meta = SD.open(metaPath.c_str(), FILE_WRITE);
+        if (meta) {
+            meta.print(buildDate);
+            meta.close();
+            Log.info("OTA", "Saved backup build date: %s", buildDate);
+        }
+    }
+
     return true;
 }
 
@@ -111,8 +123,8 @@ bool revertFirmwareFromSD(const char* path) {
     }
 }
 
-bool applyFirmwareFromSD(const char* path) {
-    backupFirmwareToSD();
+bool applyFirmwareFromSD(const char* path, const char* buildDate) {
+    backupFirmwareToSD("/firmware.bak", buildDate);
     bool ok = revertFirmwareFromSD(path);
     if (ok) {
         SD.remove(path);
@@ -131,4 +143,14 @@ size_t firmwareBackupSize(const char* path) {
     size_t s = f.size();
     f.close();
     return s;
+}
+
+String getBackupBuildDate(const char* path) {
+    String metaPath = String(path) + ".meta";
+    File meta = SD.open(metaPath.c_str(), FILE_READ);
+    if (!meta) return "";
+    String date = meta.readString();
+    meta.close();
+    date.trim();
+    return date;
 }

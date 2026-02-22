@@ -477,6 +477,24 @@ void WebHandler::setupRoutes() {
         doc["wifiRSSI"] = WiFi.RSSI();
         doc["wifiIP"] = WiFi.localIP().toString();
         doc["apMode"] = _apModeActive;
+        doc["rebootRateLimited"] = isRebootBlocked();
+        doc["safeMode"] = _safeMode ? *_safeMode : false;
+        doc["crashBootCount"] = _crashBootCount ? *_crashBootCount : 0;
+        {
+            esp_reset_reason_t reason = esp_reset_reason();
+            const char* rr = "UNKNOWN";
+            switch (reason) {
+                case ESP_RST_POWERON:  rr = "POWERON"; break;
+                case ESP_RST_SW:       rr = "SW_RESET"; break;
+                case ESP_RST_PANIC:    rr = "PANIC"; break;
+                case ESP_RST_INT_WDT:  rr = "INT_WDT"; break;
+                case ESP_RST_TASK_WDT: rr = "TASK_WDT"; break;
+                case ESP_RST_WDT:      rr = "WDT"; break;
+                case ESP_RST_BROWNOUT: rr = "BROWNOUT"; break;
+                default: break;
+            }
+            doc["resetReason"] = rr;
+        }
         doc["buildDate"] = compile_date;
         struct tm ti;
         if (getLocalTime(&ti, 0)) {
@@ -931,6 +949,8 @@ void WebHandler::setupRoutes() {
                 doc["max6675Enabled"] = proj->max6675Enabled;
                 doc["systemName"] = proj->systemName.length() > 0 ? proj->systemName : "Goodman HP";
                 doc["mqttPrefix"] = proj->mqttPrefix.length() > 0 ? proj->mqttPrefix : "goodman";
+                doc["forceSafeMode"] = proj->forceSafeMode;
+                doc["safeMode"] = _safeMode ? *_safeMode : false;
                 String json;
                 serializeJson(doc, json);
                 request->send(200, "application/json", json);
@@ -987,7 +1007,7 @@ void WebHandler::setupRoutes() {
                 request->send(400, "text/plain", "FAIL: no firmware uploaded");
                 return;
             }
-            bool ok = applyFirmwareFromSD();
+            bool ok = applyFirmwareFromSD("/firmware.new", compile_date);
             request->send(200, "text/plain", ok ? "OK" : "FAIL");
             if (ok) {
                 if (!_tDelayedReboot) {
@@ -1029,8 +1049,53 @@ void WebHandler::setupRoutes() {
         // Reboot endpoint
         _server.on("/reboot", HTTP_POST, [this](AsyncWebServerRequest *request) {
             if (!checkAuth(request)) return;
+            if (isRebootBlocked()) {
+                String clientIP = request->client()->remoteIP().toString();
+                String userAgent = request->hasHeader("User-Agent") ? request->header("User-Agent") : "unknown";
+                Log.error("SEC", "REBOOT BLOCKED (rate limited) from %s UA='%s'",
+                    clientIP.c_str(), userAgent.c_str());
+                request->send(429, "text/plain", "Reboot rate limited — too many rapid reboots");
+                return;
+            }
+            String clientIP = request->client()->remoteIP().toString();
             request->send(200, "text/plain", "OK");
-            Log.info("WEB", "Reboot requested, rebooting in 2s...");
+            Log.info("WEB", "Reboot requested from %s, rebooting in 2s...", clientIP.c_str());
+            if (!_tDelayedReboot) {
+                _tDelayedReboot = new Task(2 * TASK_SECOND, TASK_ONCE, [this]() {
+                    _shouldReboot = true;
+                }, _ts, false);
+            }
+            _tDelayedReboot->restartDelayed(2 * TASK_SECOND);
+        });
+
+        // Safe mode clear: clear forceSafeMode flag and reboot
+        _server.on("/safemode/clear", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            if (_config && _config->getProjectInfo()) {
+                _config->getProjectInfo()->forceSafeMode = false;
+                TempSensorMap& tempSensors = _hpController->getTempSensorMap();
+                _config->updateConfig("/config.txt", tempSensors, *_config->getProjectInfo());
+            }
+            Log.info("WEB", "Safe mode cleared, rebooting...");
+            request->send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Safe mode cleared, rebooting...\"}");
+            if (!_tDelayedReboot) {
+                _tDelayedReboot = new Task(2 * TASK_SECOND, TASK_ONCE, [this]() {
+                    _shouldReboot = true;
+                }, _ts, false);
+            }
+            _tDelayedReboot->restartDelayed(2 * TASK_SECOND);
+        });
+
+        // Force safe mode: set flag and reboot into safe mode
+        _server.on("/safemode/force", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            if (_config && _config->getProjectInfo()) {
+                _config->getProjectInfo()->forceSafeMode = true;
+                TempSensorMap& tempSensors = _hpController->getTempSensorMap();
+                _config->updateConfig("/config.txt", tempSensors, *_config->getProjectInfo());
+            }
+            Log.warn("WEB", "Force safe mode set, rebooting...");
+            request->send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Rebooting into safe mode...\"}");
             if (!_tDelayedReboot) {
                 _tDelayedReboot = new Task(2 * TASK_SECOND, TASK_ONCE, [this]() {
                     _shouldReboot = true;
@@ -1705,6 +1770,12 @@ void WebHandler::setupRoutes() {
             needsReboot = true;
         }
 
+        // Force safe mode on next boot (one-shot)
+        if (data["forceSafeMode"].is<bool>()) {
+            proj->forceSafeMode = data["forceSafeMode"] | false;
+            if (proj->forceSafeMode) needsReboot = true;
+        }
+
         // System identity (requires reboot)
         if (data["systemName"].is<const char*>()) {
             String newName = data["systemName"] | proj->systemName;
@@ -1768,6 +1839,8 @@ bool WebHandler::beginSecure(const uint8_t* cert, size_t certLen, const uint8_t*
     _httpsCtx.scheduler = _ts;
     _httpsCtx.shouldReboot = &_shouldReboot;
     _httpsCtx.delayedReboot = &_tDelayedReboot;
+    _httpsCtx.rebootRateLimited = _rebootRateLimited;
+    _httpsCtx.safeMode = _safeMode;
     _httpsCtx.gmtOffsetSec = &_gmtOffsetSec;
     _httpsCtx.daylightOffsetSec = &_daylightOffsetSec;
     _httpsCtx.ftpEnableCb = _ftpEnableCb;

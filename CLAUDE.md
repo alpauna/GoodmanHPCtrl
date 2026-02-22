@@ -15,7 +15,7 @@ pio run -e freenove_esp32_s3_wroom
 # Build for alternative target (ESP32 DevKit)
 pio run -e esp32dev
 
-# Upload firmware (USB on /dev/ttyUSB0)
+# Upload firmware (USB on /dev/ttyUSB0) — no auto-revert safety net
 pio run -t upload -e freenove_esp32_s3_wroom
 
 # Serial monitor (115200 baud)
@@ -24,6 +24,8 @@ pio run -t monitor -e freenove_esp32_s3_wroom
 # Run tests
 pio test -e freenove_esp32_s3_wroom
 ```
+
+**OTA vs USB firmware updates**: OTA updates (`POST /update` + `POST /apply`) are preferred for production deployments. Before flashing new firmware, OTA automatically backs up the running firmware to `/firmware.bak` on SD card along with its build date (`/firmware.bak.meta`). If the new firmware causes a crash boot loop (3+ consecutive PANIC/WDT resets), the boot watchdog automatically reverts to the backup and reboots — but only if the backup's build date differs from the running firmware (same build = same bug, no point reverting). USB flashing (`pio run -t upload`) bypasses this entirely: no backup is created, so auto-revert is not possible.
 
 ## Architecture
 

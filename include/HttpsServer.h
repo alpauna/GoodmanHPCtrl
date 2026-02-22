@@ -40,6 +40,8 @@ struct HttpsContext {
     std::function<String()> apStartCb;
     std::function<void()> apStopCb;
     String systemName;
+    bool* rebootRateLimited;
+    bool* safeMode;
 };
 
 // Opaque handle

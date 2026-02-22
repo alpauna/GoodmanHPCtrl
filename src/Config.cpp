@@ -487,6 +487,9 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     Serial.printf("Read MAX6675: clk=%d cs=%d do=%d enabled=%d\n",
                   proj.max6675Clk, proj.max6675Cs, proj.max6675Do, proj.max6675Enabled);
 
+    // Load safe mode flag
+    proj.forceSafeMode = doc["safeMode"]["force"] | false;
+
     // Load system identity
     JsonObject systemObj = doc["system"];
     const char* sysName = systemObj["name"];
@@ -623,6 +626,9 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     displayObj["pageIntervalSec"] = proj.displayPageIntervalSec;
     displayObj["enabled"] = proj.displayEnabled;
 
+    JsonObject safeModeObj = doc["safeMode"].to<JsonObject>();
+    safeModeObj["force"] = proj.forceSafeMode;
+
     JsonObject systemObj = doc["system"].to<JsonObject>();
     systemObj["name"] = proj.systemName.length() > 0 ? proj.systemName : "Goodman HP";
     systemObj["mqttPrefix"] = proj.mqttPrefix.length() > 0 ? proj.mqttPrefix : "goodman";
@@ -748,6 +754,9 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     JsonObject displayObj = doc["display"].to<JsonObject>();
     displayObj["pageIntervalSec"] = proj.displayPageIntervalSec;
     displayObj["enabled"] = proj.displayEnabled;
+
+    JsonObject safeModeUpd = doc["safeMode"].to<JsonObject>();
+    safeModeUpd["force"] = proj.forceSafeMode;
 
     JsonObject systemObj = doc["system"].to<JsonObject>();
     systemObj["name"] = proj.systemName.length() > 0 ? proj.systemName : "Goodman HP";

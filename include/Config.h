@@ -50,6 +50,8 @@ struct ProjectInfo {
     uint8_t max6675Cs;               // SPI CS pin (default GPIO 40)
     uint8_t max6675Do;               // SPI DO/MISO pin (default GPIO 41)
     bool max6675Enabled;             // Enable MAX6675 sensor (default true)
+    // Safe mode
+    bool forceSafeMode;              // One-shot flag: force safe mode on next boot (cleared after entering)
     // System identity
     String systemName;               // System display name, max 20 chars alphanumeric+spaces (default "Goodman HP"), also used as AP SSID
     String mqttPrefix;               // MQTT topic prefix (default "goodman"), topics: prefix/temps, prefix/state, etc.

@@ -27,6 +27,8 @@ class WebHandler {
     void setTimezone(int32_t gmtOffset, int32_t daylightOffset);
     void setConfig(Config* config) { _config = config; }
     bool shouldReboot() const { return _shouldReboot; }
+    void setRebootRateLimited(bool* flag) { _rebootRateLimited = flag; }
+    void setSafeMode(bool* flag, uint32_t* crashCount) { _safeMode = flag; _crashBootCount = crashCount; }
     const char * getWiFiIP();
 
     typedef std::function<void(int)> FtpEnableCallback;
@@ -55,6 +57,9 @@ class WebHandler {
     TempHistory* _tempHistory = nullptr;
 
     bool _shouldReboot;
+    bool* _rebootRateLimited = nullptr;
+    bool* _safeMode = nullptr;
+    uint32_t* _crashBootCount = nullptr;
     Task* _tDelayedReboot;
     bool _ntpSynced;
     Task* _tNtpSync;
@@ -99,6 +104,7 @@ class WebHandler {
     Task* _tWifiTest = nullptr;
     uint8_t _wifiTestCountdown = 0;
 
+    bool isRebootBlocked() const { return _rebootRateLimited && *_rebootRateLimited; }
     bool checkAuth(AsyncWebServerRequest* request);
     void syncNtpTime();
     void setupRoutes();

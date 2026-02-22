@@ -30,7 +30,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **Temperature history** — Configurable CSV logging interval (30s-5min, default 2min) per sensor to SD card (`/temps/<sensor>/YYYY-MM-DD.csv`), rolling Canvas line charts on dashboard with 1h/6h/24h/7d timeframe selector, auto-purge after 31 days
 - **Web-based configuration** — HTML pages served from `/www/` on SD card for configuration, OTA updates, and monitoring
 - **FTP server** — SimpleFTPServer with timed enable/disable (10/30/60 min) from config page. Defaults to OFF; auto-disables after timeout
-- **OTA updates** — Firmware upload saves to SD card (`/firmware.new`), then apply to flash. Supports revert to previous firmware from SD backup
+- **OTA updates** — Firmware upload saves to SD card (`/firmware.new`), then apply to flash. Automatically backs up running firmware with build date metadata before flashing. Supports manual revert and automatic crash recovery (see [Crash Recovery](#crash-recovery))
 - **SD card configuration** — WiFi, MQTT, and sensor settings stored as JSON on SD card
 - **Multi-output logging** — Serial, MQTT, SD card with tar.gz compressed log rotation, and WebSocket streaming
 - **In-memory log buffer** — 500-entry ring buffer in PSRAM, accessible via `/log` API endpoint
@@ -652,6 +652,57 @@ If the device cannot connect to WiFi for a configurable timeout (default 10 minu
 4. Or upload new firmware via `http://192.168.4.1/update`
 5. The device will reconnect to WiFi automatically when credentials are corrected, or reboot to force reconnection
 
+### Crash Recovery
+
+The device has multiple layers of crash recovery to prevent unrecoverable states in the field.
+
+#### Boot Watchdog / Safe Mode
+
+An `RTC_NOINIT_ATTR` crash counter persists across software resets (cleared only on power-on). Each PANIC, INT_WDT, TASK_WDT, or WDT reset increments the counter. If it reaches 3 consecutive crash boots, the device enters **safe mode** automatically.
+
+**Safe mode behavior:**
+- Heat pump controller is fully disabled (no I/O pins, no state machine, no relay control)
+- WiFi, web server, configuration, FTP, logging, CPU monitoring, and OLED display remain operational
+- The OLED display shows `** SAFE MODE **` on the boot screen and protections page
+- `/state` JSON includes `safeMode: true`, `crashBootCount`, and `resetReason`
+- A 30-second stable boot timer resets the crash counter, so a single successful boot clears the history
+
+**Forcing safe mode:** `POST /safemode/force` sets a one-shot config flag (`safeMode.force` in config JSON) that triggers safe mode on the next boot. The flag is automatically cleared after entering safe mode so subsequent boots are normal. Useful for maintenance or debugging.
+
+**Clearing safe mode:** `POST /safemode/clear` clears the force flag and reboots.
+
+#### Automatic Firmware Revert
+
+When the device enters safe mode due to a crash boot loop (3+ consecutive crash resets) and a firmware backup exists on SD card (`/firmware.bak`), the boot watchdog automatically attempts to revert to the previous firmware.
+
+**Build date verification:** Each OTA apply operation saves the running firmware's build date to `/firmware.bak.meta` alongside the binary backup. Before reverting, the watchdog compares the backup's build date against the currently running firmware. If they match, the backup is the same build as the crashing firmware — reverting would just re-flash the same broken code. In this case, the revert is skipped and the device continues in safe mode.
+
+| Scenario | Backup exists | Build dates | Action |
+|----------|:---:|:---:|--------|
+| OTA update caused crash loop | Yes | Different | Auto-reverts to backup, reboots |
+| Same firmware crashing | Yes | Same | Skips revert, stays in safe mode |
+| No metadata file (legacy backup) | Yes | Unknown | Attempts revert (benefit of the doubt) |
+| USB upload caused crash loop | No | N/A | No backup available, stays in safe mode |
+
+**Why OTA is preferred over USB:** OTA updates (`POST /update` + `POST /apply`) automatically back up the running firmware to `/firmware.bak` with build date metadata before flashing. If the new firmware causes a crash loop, the boot watchdog can revert automatically. USB flashing (`pio run -t upload`) bypasses this entirely — no backup is created, so auto-revert is not possible. Always prefer OTA for production deployments.
+
+#### Reboot Rate Limiting
+
+To prevent denial-of-service via the `/reboot` endpoint, the device tracks rapid software reboots using an `RTC_NOINIT_ATTR` counter (separate from the crash counter). After 3 rapid reboots within 5 minutes, further `/reboot` API calls return `429 Too Many Requests`. The rate limit clears after 5 minutes of stable uptime.
+
+Rate-limited reboot attempts are logged at `[ERROR] [SEC]` level with the client IP address and User-Agent header for forensic analysis.
+
+#### Recovery Options Summary
+
+| Problem | Recovery |
+|---------|----------|
+| Bad OTA firmware (crash loop) | Automatic: boot watchdog reverts to `/firmware.bak` |
+| Bad USB firmware (crash loop) | Manual: enter safe mode (auto after 3 crashes), upload fixed firmware via web UI or OTA |
+| Bad configuration | Manual: force safe mode (`POST /safemode/force`), fix config via web UI |
+| WiFi credentials wrong | Automatic: AP fallback after 10 min, fix via `http://192.168.4.1/config` |
+| Device unreachable | Manual: power cycle, connect via AP mode, or USB serial |
+| `/reboot` DoS attack | Automatic: rate limited after 3 rapid reboots |
+
 ## Scripts
 
 All scripts prompt interactively for required parameters (device IP, admin password, etc.). Each script has both a Linux/macOS (`.sh`) and Windows PowerShell (`.ps1`) version with identical functionality.
@@ -800,7 +851,9 @@ Burn a hardware encryption key to ESP32-S3 eFuse for password encryption at rest
 | POST | `/apply` | Yes | Flash firmware from `/firmware.new`, reboots on success |
 | GET | `/revert` | Yes | Check if firmware backup exists (`{"exists":bool,"size":N}`) |
 | POST | `/revert` | Yes | Revert to previous firmware from SD backup, reboots on success |
-| POST | `/reboot` | Yes | Reboot the device (2s delay) |
+| POST | `/reboot` | Yes | Reboot the device (2s delay). Rate limited: returns 429 after 3 rapid reboots |
+| POST | `/safemode/force` | Yes | Force safe mode on next boot (one-shot flag, cleared after entering safe mode) |
+| POST | `/safemode/clear` | Yes | Clear forced safe mode flag and reboot |
 | GET | `/ftp` | Yes | FTP server status (`{"active":bool,"remainingMinutes":N}`) |
 | POST | `/ftp` | Yes | Enable/disable FTP (`{"duration":N}` minutes, 0=off) |
 | WS | `/ws` | | WebSocket for real-time data and log streaming |
@@ -868,6 +921,10 @@ Returns the full controller state as JSON. Used by the dashboard for real-time p
 | `wifiIP` | string | Device IP address |
 | `apMode` | bool | Whether the device is in AP fallback mode |
 | `buildDate` | string | Firmware build date and time (compile timestamp) |
+| `safeMode` | bool | Whether the device is in safe mode (crash recovery or forced) |
+| `crashBootCount` | number | Number of consecutive crash boots (resets after 30s stable uptime) |
+| `resetReason` | string | ESP32 reset reason (e.g., `POWERON`, `SW_RESET`, `PANIC`, `INT_WDT`) |
+| `rebootRateLimited` | bool | Whether reboot API calls are rate-limited (clears after 5 min stable) |
 
 ### `GET /temps/history`
 
@@ -893,8 +950,10 @@ Valid sensor names: `ambient`, `compressor`, `suction`, `condenser`, `liquid`
 
 1. `POST /update` — Upload firmware binary (saved to SD card as `/firmware.new`)
 2. `GET /apply` — Verify uploaded firmware exists and check size
-3. `POST /apply` — Flash firmware from SD to ESP32, reboots automatically
-4. `POST /revert` — Roll back to previous firmware (backup created during apply)
+3. `POST /apply` — Backs up running firmware to `/firmware.bak` with build date metadata (`/firmware.bak.meta`), then flashes new firmware from SD and reboots
+4. `POST /revert` — Roll back to previous firmware from SD backup
+
+If the new firmware causes a crash boot loop, the boot watchdog automatically reverts to the backup (see [Crash Recovery](#crash-recovery)).
 
 ## MQTT Topics
 
@@ -1038,6 +1097,7 @@ If the MCP9600 stops responding after flashing firmware that performed bare I2C 
 | # | Description | Severity | Fixed In |
 |---|-------------|----------|----------|
 | [1](bugs/1.md) | Defrost exit turns on CNT+FAN with Y inactive — compressor runs without indoor airflow. `_defrostStartTick=0` causes false 15-min timeout when Y drops during Phase 1/2, triggering exit sequence that turns on compressor without checking Y. Suction temp peaked at 148°F. | Critical | `028e568` |
+| [2](bugs/2.md) | Manual override bypasses startup lockout — CNT can be turned ON 69 seconds after reboot during 180s lockout period. `setManualOverride()` and `setManualOutput()` did not check `_startupLockout`. Short cycle condition had redundant AND making it ineffective after 30s. | High | `6f0871c` |
 
 ## Dependencies
 
