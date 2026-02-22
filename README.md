@@ -22,14 +22,14 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **HTTPS/SSL** — Self-signed ECC P-256 certificate on port 443 for secure `/config`, `/update`, and `/ftp` endpoints. Graceful fallback to HTTP-only if no certs found on SD card
 - **Dark/light theme** — Configurable dark/light theme with shared `theme.css` stylesheet. Persisted to SD card config, cached in localStorage for flash-free page loads. Instant preview on config page
 - **Admin password protection** — HTTP Basic Auth on sensitive endpoints (`/config`, `/update`, `/ftp`). No password = open access
-- **Password encryption** — All passwords (WiFi, MQTT, admin) encrypted at rest on SD card
+- **Password encryption** — All passwords (WiFi, MQTT, admin, FTP) encrypted at rest on SD card
 - **Live dashboard** — Real-time dashboard at `/dashboard` with state banner, protection status pills with dynamic labels (LPS No Fault/Fault, Temp Ok/Low Temp, Comp Ok/OT, Suct LT Ok/LT, Suct Temp/High Suct with live temp reading, RV Pass/Fail with inline clear button), input/output grid, temperatures, and reboot button. Output indicators include inline status pills:
   - ![SC](docs/screenshots/pill-sc.png) **SC** (Short Cycle) — Shown on CNT output. Green when inactive, red when CNT short cycle protection delay is active (CNT was off < 5 min, waiting 30s before reactivation)
   - ![DFH](docs/screenshots/pill-dfh.png) **DFH** (Defrost Hold) — Shown on CNT, W, and RV outputs during the 3-phase defrost entry and exit transitions. On RV and W: red during entry Phase 1 or exit Phase 1 (pressure equalization). On CNT: red during entry Phase 2 or exit Phase 2 (waiting for CNT short cycle before compressor starts)
 - **Pin table with manual override** — Auth-protected `/pins` page showing all GPIO inputs, outputs, and temperatures in a table. "Normal Mode Lockout" checkbox enables manual output control, bypassing the state machine for up to 30 minutes (auto-timeout). CNT enforces short cycle protection even in manual mode. Single auth prompt covers the entire lockout session. "Force Defrost" button triggers a software defrost cycle from HEAT mode (requires no active faults or manual override)
 - **Temperature history** — Configurable CSV logging interval (30s-5min, default 2min) per sensor to SD card (`/temps/<sensor>/YYYY-MM-DD.csv`), rolling Canvas line charts on dashboard with 1h/6h/24h/7d timeframe selector, auto-purge after 31 days
 - **Web-based configuration** — HTML pages served from `/www/` on SD card for configuration, OTA updates, and monitoring
-- **FTP server** — SimpleFTPServer with timed enable/disable (10/30/60 min) from config page. Defaults to OFF; auto-disables after timeout
+- **FTP server** — SimpleFTPServer with timed enable/disable (10/30/60 min) from config page. Configurable password (encrypted on SD card); defaults to `admin`/`admin` when not set. Defaults to OFF; auto-disables after timeout
 - **OTA updates** — Firmware upload saves to SD card (`/firmware.new`), then apply to flash. Automatically backs up running firmware with build date metadata before flashing. Supports manual revert and automatic crash recovery (see [Crash Recovery](#crash-recovery))
 - **SD card configuration** — WiFi, MQTT, and sensor settings stored as JSON on SD card
 - **Multi-output logging** — Serial, MQTT, SD card with tar.gz compressed log rotation, and WebSocket streaming
@@ -501,7 +501,8 @@ This prompts for system name, MQTT prefix, WiFi, and MQTT credentials, then writ
     "theme": "dark"
   },
   "admin": {
-    "password": ""
+    "password": "",
+    "ftpPassword": ""
   },
   "sensors": {
     "temp": {
@@ -593,7 +594,7 @@ Sensitive endpoints (`/config`, `/update`, `/ftp`) are protected by HTTP Basic A
 
 ### Password Encryption
 
-All passwords (WiFi, MQTT, admin) are encrypted at rest on the SD card using **AES-256-GCM** when a hardware HMAC key is provisioned, or XOR obfuscation as a fallback. Plaintext passwords are automatically encrypted on the next config save.
+All passwords (WiFi, MQTT, admin, FTP) are encrypted at rest on the SD card using **AES-256-GCM** when a hardware HMAC key is provisioned, or XOR obfuscation as a fallback. Plaintext passwords are automatically encrypted on the next config save.
 
 **Encryption tiers:**
 
@@ -647,7 +648,9 @@ FTP (SimpleFTPServer on port 21) is used for uploading HTML files to the SD card
 - **FTP defaults to OFF** at boot
 - Enabling/disabling FTP requires admin authentication (via `/ftp` API endpoint)
 - Enable from the config page with timed durations (10/30/60 min), auto-disables after timeout
-- FTP login credentials are `admin`/`admin` (separate from admin password)
+- **FTP password** is configurable from the config page. Stored encrypted (`$AES$`/`$ENC$`) in `admin.ftpPassword` in config JSON. When not set, defaults to `admin`. Username is always `admin`
+- The `/ftp` GET status endpoint includes the active password in its response, allowing scripts to auto-detect the configured password
+- **Max password length: 16 characters** (SimpleFTPServer `FTP_CRED_SIZE` limit)
 
 **Upload web pages via HTTPS:**
 
@@ -746,6 +749,7 @@ All scripts prompt interactively for required parameters (device IP, admin passw
 | `ota-update.sh [--revert]` | `ota-update.ps1 [-Revert]` | OTA firmware upload, verify, flash, reboot, or rollback |
 | `update-www.sh [file] [--usb]` | `update-www.ps1 [-File name] [-USB] [-Port COM3]` | Upload web pages to device via HTTPS or USB serial |
 | `backup-config.sh` | `backup-config.ps1` | Download config.txt from device for local backup |
+| `restore-config.sh [file]` | `restore-config.ps1 [-File path]` | Restore config.txt to device from a local backup |
 | `generate-cert.sh [name]` | `generate-cert.ps1 [-Name "name"]` | Generate self-signed ECC P-256 cert for HTTPS |
 | `burn-efuse-key.sh [port]` | `burn-efuse-key.ps1 [-Port COM3]` | Burn hardware encryption key to ESP32-S3 eFuse |
 
@@ -807,7 +811,7 @@ Upload HTML files from `data/www/` to the device LittleFS `/www/` directory via 
 
 ### `scripts/backup-config.sh` / `backup-config.ps1`
 
-Download `config.txt` from the device SD card for local backup via FTP. Saves timestamped copies to `backups/<YYYYMMDD-HHMMSS>/config.txt` and a latest copy at `backups/config-latest.txt`.
+Download `config.txt` from the device SD card for local backup via FTP. Saves timestamped copies to `backups/<YYYYMMDD-HHMMSS>/config.txt` and a latest copy at `backups/config-latest.txt`. Automatically detects the configured FTP password from the device's `/ftp` status endpoint.
 
 ```bash
 # Linux/macOS
@@ -820,6 +824,22 @@ Download `config.txt` from the device SD card for local backup via FTP. Saves ti
 **Prompts:** Device IP, Admin password
 
 **Note:** The `backups/` directory is gitignored since config files contain credentials.
+
+### `scripts/restore-config.sh` / `restore-config.ps1`
+
+Restore a previously backed-up `config.txt` to the device SD card via FTP. Lists available backups for selection, validates JSON before uploading, verifies the upload size matches, and optionally reboots to load the new config. Automatically detects the configured FTP password from the device's `/ftp` status endpoint.
+
+```bash
+# Linux/macOS
+./scripts/restore-config.sh                              # Pick from available backups
+./scripts/restore-config.sh backups/config-latest.txt    # Restore a specific file
+
+# Windows (PowerShell)
+.\scripts\restore-config.ps1                              # Pick from available backups
+.\scripts\restore-config.ps1 -File backups\config-latest.txt
+```
+
+**Prompts:** Backup selection (if no file specified), Device IP, Admin password, Reboot confirmation
 
 ### `scripts/generate-cert.sh` / `generate-cert.ps1`
 
@@ -887,7 +907,7 @@ Burn a hardware encryption key to ESP32-S3 eFuse for password encryption at rest
 | POST | `/reboot` | Yes | Reboot the device (2s delay). Rate limited: returns 429 after 3 rapid reboots |
 | POST | `/safemode/force` | Yes | Force safe mode on next boot (one-shot flag, cleared after entering safe mode) |
 | POST | `/safemode/clear` | Yes | Clear forced safe mode flag and reboot |
-| GET | `/ftp` | Yes | FTP server status (`{"active":bool,"remainingMinutes":N}`) |
+| GET | `/ftp` | Yes | FTP server status (`{"active":bool,"remainingMinutes":N,"password":"..."}`) |
 | POST | `/ftp` | Yes | Enable/disable FTP (`{"duration":N}` minutes, 0=off) |
 | WS | `/ws` | | WebSocket for real-time data and log streaming |
 
