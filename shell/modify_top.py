@@ -113,6 +113,10 @@ lcd_cut = Part.makeBox(LCD_X2 - LCD_X1, LCD_NEW_Y2 - LCD_NEW_Y1,
                        Z_TOP - Z_BOT,
                        Vector(LCD_X1, LCD_NEW_Y1, Z_BOT))
 result = result.cut(lcd_cut)
+# Trim plug flush with ceiling outer surface (remove 0.2mm protrusion)
+trim = Part.makeBox(LCD_X2 - LCD_X1 + 4, LCD_OLD_Y2 - LCD_OLD_Y1 + 4, 1,
+                    Vector(LCD_X1 - 2, LCD_OLD_Y1 - 2, CEIL_Z))
+result = result.cut(trim)
 print(f"LCD repositioned: volume={result.Volume:.0f}")
 
 step_f = shell_dir + "3DShell_GoodmanHPv3_T_3.5mm_TC_flipped.step"
