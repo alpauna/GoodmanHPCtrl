@@ -48,6 +48,8 @@ pio test -e freenove_esp32_s3_wroom
 | `include/WebHandler.h` | WebHandler class declaration |
 | `src/MQTTHandler.cpp` | MQTT client, callbacks, and reconnect logic |
 | `include/MQTTHandler.h` | MQTTHandler class declaration |
+| `src/DisplayManager.cpp` | OLED display pages (status, temps, I/O, system, protections) |
+| `include/DisplayManager.h` | DisplayManager class declaration |
 | `src/PSRAMAllocator.cpp` | Global operator new/delete PSRAM overrides |
 
 ### Execution Model
@@ -63,6 +65,7 @@ Task-based cooperative scheduling using TaskScheduler with two scheduler instanc
 | `tWaitOnWiFi` | 1s x60 | WiFi connection wait |
 | `tNtpSync` | 2h | NTP time sync (enabled on WiFi connect) |
 | `tSaveRuntime` | 5min | Persist heat runtime, defrost state, and rvFail to SD card |
+| `tAPReconnect` | `apFallbackSeconds` | WiFi reconnect attempts while in AP mode (disabled by default) |
 
 ### Memory Management
 
@@ -123,8 +126,9 @@ I2C: SDA=GPIO8, SCL=GPIO9 — MCP9600 thermocouple amplifier at 0x67 (LIQUID_TEM
 
 ### Networking
 
-- **AsyncWebServer** on port 80 with REST endpoints (`/temps`, `/heap`, `/scan`, `/log`, `/log/level`, `/log/config`, `/update` for OTA)
+- **AsyncWebServer** on port 80 with REST endpoints (`/temps`, `/heap`, `/scan`, `/log`, `/log/level`, `/log/config`, `/update` for OTA, `/ap/test`, `/ap/stop`)
 - **WebSocket** at `/ws`
+- **WiFi AP Mode**: Dual-mode `WIFI_AP_STA` with automatic WiFi reconnection. See [WiFi AP Mode](#wifi-ap-mode) section below.
 - **MQTT** (`MQTTHandler` wrapping AsyncMqttClient) to configurable broker, default `192.168.0.46:1883`
   - `goodman/log` — log messages (Logger output)
   - `goodman/temps` — all valid temp sensor values as JSON, published on any sensor change. Format: `{"COMPRESSOR_TEMP":72.5,"SUCTION_TEMP":65.2,"LIQUID_TEMP":185.3,...}`
@@ -158,6 +162,7 @@ struct ProjectInfo {
     uint32_t heatRuntimeThresholdMs; // Heat runtime threshold to trigger defrost in ms (default 5400000 = 90 min)
     bool softwareDefrost;        // Persisted software defrost state (survives reboot)
     uint32_t apFallbackSeconds;  // WiFi disconnect time before AP fallback (default 600 = 10 min)
+    String apPassword;           // AP mode password override (empty = auto-generate at runtime)
     uint32_t tempHistoryIntervalSec; // Temp history capture interval in seconds (30-300, default 120)
     String theme;                // UI theme: "light" or "dark" (default "light")
 };
@@ -170,6 +175,7 @@ struct ProjectInfo {
 - `saveConfiguration(filename, config, proj)` — Write config to SD card
 - `updateRuntime(filename, heatRuntimeMs, softwareDefrost)` — Update runtime and defrost active fields in config JSON
 - `clearConfig(config)` — Free memory and clear TempSensorMap
+- `generateRandomPassword(length)` — Static method generating random password using `esp_fill_random()` hardware RNG with ambiguity-free charset (no 0/O/o, 1/l/I)
 
 **Config Getters/Setters:**
 - WiFi: `getWifiSSID()`, `getWifiPassword()`, `setWifiSSID()`, `setWifiPassword()`
@@ -200,7 +206,7 @@ JSON config stored on SD card at `/config.txt` (Arduino SD library, SPI interfac
   "project": "...",
   "created": "...",
   "description": "...",
-  "wifi": { "ssid": "...", "password": "...", "apFallbackSeconds": 600 },
+  "wifi": { "ssid": "...", "password": "...", "apFallbackSeconds": 600, "apPassword": "..." },
   "mqtt": { "user": "...", "password": "...", "host": "...", "port": 1883 },
   "logging": { "maxLogSize": 52428800, "maxOldLogCount": 10 },
   "runtime": { "heatAccumulatedMs": 0 },
@@ -240,6 +246,40 @@ Multi-output logging (Serial, MQTT topic, SD card with file rotation, WebSocket)
 ### NTP Time Sync
 
 RTC time is synchronized from NTP servers (`192.168.0.1`, `time.nist.gov`) using the ESP32's built-in SNTP client. The `tNtpSync` task is enabled when WiFi connects, syncs immediately, then repeats every 2 hours. Timezone is configurable via `gmtOffsetSec` and `daylightOffsetSec` in `ProjectInfo`, persisted to SD card in the `timezone` JSON section. Default: US Central (UTC-6, DST +1hr). Values are passed to `WebHandler::setTimezone()` before `begin()` and used in `configTime()` calls.
+
+### WiFi AP Mode
+
+When WiFi connection fails for `apFallbackSeconds` (default 600 = 10 min), the system enters AP mode as a fallback. AP mode can also be triggered manually via `POST /ap/test` from the config page.
+
+**Password generation**: Uses `Config::generateRandomPassword()` (8-char, hardware RNG, ambiguity-free charset). Password priority: configured `apPassword` (if >= 8 chars) > previously generated password (reused across AP sessions) > new random password. Password is never regenerated if one already exists for the session.
+
+**Dual-mode operation**: Uses `WIFI_AP_STA` mode (not pure `WIFI_AP`), keeping the STA interface active for background WiFi reconnection. SSID: `GoodmanHP`, IP: `192.168.4.1`.
+
+**Automatic WiFi reconnection**: The `tAPReconnect` task runs at `apFallbackSeconds` interval while in AP mode. Each tick checks if WiFi has reconnected — if so, exits AP mode automatically (disables soft AP, switches to `WIFI_STA`). If not connected, retries `WiFi.begin()`. The `SYSTEM_EVENT_STA_GOT_IP` event handler also exits AP mode immediately when WiFi reconnects.
+
+**AP mode endpoints**:
+- `POST /ap/test` — Starts AP alongside existing WiFi (no disconnect), returns JSON `{"ssid":"GoodmanHP","password":"...","ip":"192.168.4.1"}`. Requires auth.
+- `POST /ap/stop` — Stops soft AP, returns to `WIFI_STA`, reconnects WiFi. Requires auth.
+
+**LCD display**: When `_apModeActive` is true, the status page (page 0) shows AP credentials: "AP MODE" header, SSID, password, and IP. Page rotation holds the AP screen 3x longer than other pages so the password is readable. Other pages remain unchanged.
+
+**Config page**: WiFi fieldset includes AP Password input (leave blank for auto-generate) and Test AP Mode / Stop AP Mode buttons. `apPassword` encrypted with same `$AES$`/`$ENC$` scheme as other passwords. Persisted to `wifi.apPassword` in config JSON.
+
+**Globals**: `bool _apModeActive`, `String _apPassword` — accessible by DisplayManager via `extern`.
+
+### OLED Display
+
+128x64 SSD1306 OLED managed by `DisplayManager` class. 5 rotating pages with configurable interval (3–60 sec, default 10):
+
+| Page | Content |
+|------|---------|
+| 0 - Status | State banner, WiFi IP, uptime, heat runtime. Shows AP credentials when `_apModeActive` (held 3x longer) |
+| 1 - Temps | All 5 temperature sensors (COMP, SUCT, AMB, COND, LIQ) |
+| 2 - I/O | Input states (LPS, DFT, Y, O) and output states (FAN, CNT, W, RV) |
+| 3 - System | Free heap, CPU load (both cores), PSRAM, WiFi RSSI |
+| 4 - Protections | Active protections: LPS fault, low temp, RV fail, defrost, SC protect, comp over temp, suction low, startup lockout |
+
+Page indicator dots at bottom-right. Display can be enabled/disabled (powers off OLED when disabled).
 
 ### State Machine
 
