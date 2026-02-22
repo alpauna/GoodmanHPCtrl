@@ -400,11 +400,12 @@ Create `secrets.ini` in the project root (gitignored — never committed):
 ```ini
 [secrets]
 build_flags =
-	-D AP_PASSWORD=\"your-ap-password\"
 	-D XOR_KEY=\"your-random-base64-key\"
 ```
 
-`AP_PASSWORD` is used for WiFi AP fallback mode. `XOR_KEY` is used for password encryption on the SD card (see [Password Encryption](#password-encryption)). Generate a random key with: `openssl rand -base64 32`
+`XOR_KEY` is used as a fallback key for password encryption on the SD card when no eFuse HMAC key is provisioned (see [Password Encryption](#password-encryption)). Generate a random key with: `openssl rand -base64 32`
+
+**AP mode password** is configured from the config page (`wifi.apPassword` in config JSON) or auto-generated randomly at runtime if not set. It is no longer a build-time constant.
 
 ### Build and Upload
 
