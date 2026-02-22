@@ -337,10 +337,22 @@ void startAPMode() {
 }
 
 String startAPModeTest() {
-  // Disconnect WiFi to simulate fallback, then start AP
-  WiFi.disconnect(true);
-  _apModeActive = false;  // allow startAPMode() to initialize
-  startAPMode();
+  const char* apSSID = "GoodmanHP";
+  // Password: configured > previously generated > new random
+  if (proj.apPassword.length() >= 8) {
+    _apPassword = proj.apPassword;
+  } else if (_apPassword.length() == 0) {
+    _apPassword = Config::generateRandomPassword();
+  }
+  // Keep existing WiFi — add AP alongside (AP_STA)
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.softAP(apSSID, _apPassword.c_str());
+  _apModeActive = true;
+  Log.info("WiFi", "AP test mode started - SSID: %s Pass: %s IP: %s",
+           apSSID, _apPassword.c_str(), WiFi.softAPIP().toString().c_str());
+  // Auto-exit after fallback interval when WiFi is still connected
+  tAPReconnect.setInterval(proj.apFallbackSeconds * (unsigned long)TASK_SECOND);
+  tAPReconnect.enableDelayed();
   return _apPassword;
 }
 
