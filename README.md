@@ -38,6 +38,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **I2C bus** — Initialized on GPIO8 (SDA) / GPIO9 (SCL) with automatic device scan at startup and `/i2c/scan` API endpoint
 - **PSRAM support** — All heap allocations routed through PSRAM when available
 - **WiFi AP fallback** — Configurable timeout (default 10 minutes) before switching to Access Point mode for OTA recovery and reconfiguration
+- **Multi-unit support** — Configurable system name (max 20 chars, alphanumeric + spaces) and MQTT topic prefix. System name is used as the web UI brand, AP SSID, OLED display name, HTTPS auth realm, and SSL certificate CN. Multiple controllers can publish to the same MQTT broker with unique prefixes (e.g., `unit1/temps`, `unit2/temps`)
 - **FreeRTOS compatible** — Uses `vTaskDelay()` instead of `delay()` for proper RTOS task yielding
 
 ## Architecture
@@ -388,6 +389,10 @@ for z in [key_z_values]:
 - [PlatformIO](https://platformio.org/) (CLI or IDE extension)
 - USB cable connected to ESP32 board
 
+**Linux/macOS:** Shell scripts in `scripts/` (`.sh`) require `bash` and `curl`.
+
+**Windows:** PowerShell scripts in `scripts/` (`.ps1`) require PowerShell 5.1+ (included with Windows 10/11) and `curl.exe` (included with Windows 10+). Some scripts also require `openssl` (included with [Git for Windows](https://gitforwindows.org/)). Run with: `powershell -ExecutionPolicy Bypass -File .\scripts\<script>.ps1`
+
 ### Secrets Setup
 
 Create `secrets.ini` in the project root (gitignored — never committed):
@@ -403,6 +408,8 @@ build_flags =
 
 ### Build and Upload
 
+PlatformIO commands work the same on all platforms:
+
 ```bash
 # Build
 pio run -e freenove_esp32_s3_wroom
@@ -413,6 +420,8 @@ pio run -t upload -e freenove_esp32_s3_wroom
 # Serial monitor
 pio run -t monitor -e freenove_esp32_s3_wroom
 ```
+
+On Linux, if `pio` is not on PATH, use `~/.platformio/penv/bin/pio`. On Windows, use `%USERPROFILE%\.platformio\penv\Scripts\pio.exe`.
 
 ### SD Card Setup
 
@@ -437,10 +446,14 @@ The SD card should contain:
 **Generate config.txt interactively:**
 
 ```bash
+# Linux/macOS
 ./scripts/configure.sh --local
+
+# Windows (PowerShell)
+.\scripts\configure.ps1 -Local
 ```
 
-This prompts for WiFi and MQTT credentials and writes `data/config.txt`. Copy it to the SD card root. Passwords are stored in plaintext and encrypted automatically on first boot.
+This prompts for system name, MQTT prefix, WiFi, and MQTT credentials, then writes `data/config.txt`. Copy it to the SD card root. Passwords are stored in plaintext and encrypted automatically on first boot.
 
 **Manual config.txt format:**
 
@@ -449,6 +462,10 @@ This prompts for WiFi and MQTT credentials and writes `data/config.txt`. Copy it
   "project": "Goodman",
   "created": "Feb 06 2026",
   "description": "Goodman heatpump controller",
+  "system": {
+    "name": "Goodman HP",
+    "mqttPrefix": "goodman"
+  },
   "wifi": {
     "ssid": "your-ssid",
     "password": "your-password"
@@ -498,6 +515,8 @@ This prompts for WiFi and MQTT credentials and writes `data/config.txt`. Copy it
 ```
 
 **Configuration options:**
+- `system.name` — System display name, max 20 characters, alphanumeric + spaces (default: "Goodman HP"). Used as web UI brand, AP SSID, OLED display name, HTTPS auth realm, and SSL certificate CN. Requires reboot
+- `system.mqttPrefix` — MQTT topic prefix (default: "goodman"). Topics become `<prefix>/temps`, `<prefix>/state`, `<prefix>/fault`, `<prefix>/log`. Requires reboot
 - `logging.maxLogSize` — Maximum log file size in bytes before rotation (default: 52428800 = 50MB)
 - `logging.maxOldLogCount` — Number of rotated log files to keep (default: 10)
 - `tempHistory.intervalSec` — Temperature history capture interval in seconds, 30-300 (default: 120)
@@ -551,10 +570,16 @@ The device runs a secondary HTTPS server (ESP-IDF `esp_https_server`) on port 44
 **Generate a self-signed certificate:**
 
 ```bash
-./scripts/generate-cert.sh
+# Linux/macOS
+./scripts/generate-cert.sh                    # CN=ESP32 (default)
+./scripts/generate-cert.sh "My Heatpump"      # CN=My Heatpump
+
+# Windows (PowerShell)
+.\scripts\generate-cert.ps1                    # CN=ESP32 (default)
+.\scripts\generate-cert.ps1 -Name "My Heatpump"
 ```
 
-This creates `cert.pem` and `key.pem` (ECC P-256, 10-year validity). Copy both to the SD card root. If no certificates are found, all endpoints fall back to HTTP.
+This creates `cert.pem` and `key.pem` (ECC P-256, 10-year validity). The CN (Common Name) defaults to "ESP32" but can be set to match the system name. Copy both files to the SD card root. If no certificates are found, all endpoints fall back to HTTP. The device also auto-generates a self-signed certificate on boot if none are found on the SD card, using the configured system name as the CN.
 
 ### Admin Password
 
@@ -572,7 +597,11 @@ All passwords (WiFi, MQTT, admin) are encrypted at rest on the SD card. Plaintex
 Optionally, an eFuse HMAC key can be provisioned for hardware-backed encryption:
 
 ```bash
+# Linux/macOS
 ./scripts/burn-efuse-key.sh [/dev/ttyUSB0]
+
+# Windows (PowerShell)
+.\scripts\burn-efuse-key.ps1 [-Port COM3]
 ```
 
 This permanently burns a random 256-bit HMAC key to eFuse BLOCK_KEY0. Without an eFuse key, passwords are encrypted using a stable key from `secrets.ini`.
@@ -586,117 +615,156 @@ FTP (SimpleFTPServer on port 21) is used for uploading HTML files to the SD card
 - Enable from the config page with timed durations (10/30/60 min), auto-disables after timeout
 - FTP login credentials are `admin`/`admin` (separate from admin password)
 
-**Upload web pages via FTP:**
+**Upload web pages via HTTPS:**
 
 ```bash
-./scripts/update-www.sh
+# Linux/macOS
+./scripts/update-www.sh                          # Upload all files
+./scripts/update-www.sh dashboard.html           # Upload a single file
+./scripts/update-www.sh --usb [port]             # Flash via USB serial
+
+# Windows (PowerShell)
+.\scripts\update-www.ps1                          # Upload all files
+.\scripts\update-www.ps1 -File dashboard.html     # Upload a single file
+.\scripts\update-www.ps1 -USB [-Port COM3]        # Flash via USB serial
 ```
 
-This script prompts for the device IP and admin password, enables FTP for 10 minutes, and uploads all files from `data/www/` to the device's `/www/` directory.
+This script prompts for the device IP and admin password, then uploads files from `data/www/` to the device's LittleFS `/www/` directory via HTTPS.
 
 ### WiFi AP Fallback
 
-If the device cannot connect to WiFi for 20 minutes, it automatically switches to Access Point (AP) mode for emergency OTA updates and configuration changes.
+If the device cannot connect to WiFi for a configurable timeout (default 10 minutes), it automatically switches to Access Point (AP) mode for emergency OTA updates and configuration changes.
 
-- **SSID:** `GoodmanHP`
-- **Password:** Defined at build time via `AP_PASSWORD` in `secrets.ini` (gitignored)
+- **SSID:** Configured system name (default: `Goodman HP`). Set via config page or `system.name` in config JSON
+- **Password:** Random 8-character alphanumeric, generated fresh on each AP activation. Displayed on the OLED screen and logged to serial
 - **IP:** `192.168.4.1`
 - All web endpoints work in AP mode (dashboard, config, OTA update, log, heap)
 - HTTPS is not available in AP mode — use HTTP (`http://192.168.4.1`)
-- AP credentials are logged overtly at WARN level to both serial and log file
-- AP mode persists until reboot
-
-**Setup:** The AP password is defined in `secrets.ini` (see [Secrets Setup](#secrets-setup)). The build will fail with a clear `#error` if `secrets.ini` is missing or `AP_PASSWORD` is not defined.
+- OLED display shows AP credentials (SSID, password, IP) and holds the screen 3x longer for readability
+- The device automatically attempts to reconnect to the configured WiFi every 60 seconds while in AP mode
+- AP mode ends automatically when WiFi reconnects, or persists until reboot
 
 **Recovery workflow:**
-1. Connect to `GoodmanHP` WiFi network with the AP password
-2. Browse to `http://192.168.4.1/config` to fix WiFi credentials
-3. Or upload new firmware via `http://192.168.4.1/update`
-4. Reboot the device to reconnect to the configured WiFi network
+1. Check the OLED display or serial log for the AP SSID and password
+2. Connect to the AP WiFi network
+3. Browse to `http://192.168.4.1/config` to fix WiFi credentials
+4. Or upload new firmware via `http://192.168.4.1/update`
+5. The device will reconnect to WiFi automatically when credentials are corrected, or reboot to force reconnection
 
 ## Scripts
 
-All scripts prompt interactively for required parameters (device IP, admin password, etc.).
+All scripts prompt interactively for required parameters (device IP, admin password, etc.). Each script has both a Linux/macOS (`.sh`) and Windows PowerShell (`.ps1`) version with identical functionality.
 
-| Script | Description | Parameters |
-|--------|-------------|------------|
-| `configure.sh` | Configure WiFi/MQTT credentials on device or generate local config | `--local` (optional): generate `data/config.txt` instead of pushing to device |
-| `configure.sh --local` | Generate `data/config.txt` for SD card provisioning | None (interactive prompts only) |
-| `ota-update.sh` | OTA firmware upload, verify, flash, and reboot via HTTPS | `--revert` (optional): roll back to previous firmware backup |
-| `update-www.sh` | Upload HTML files from `data/www/` to device SD card via FTP | None (interactive prompts only) |
-| `backup-config.sh` | Download `config.txt` from device SD card for local backup | None (interactive prompts only) |
-| `generate-cert.sh` | Generate self-signed ECC P-256 cert for HTTPS | None (no prompts, requires `openssl`) |
-| `burn-efuse-key.sh` | Burn hardware encryption key to ESP32-S3 eFuse | `[PORT]` (optional, default: `/dev/ttyUSB0`) |
+| Linux/macOS | Windows (PowerShell) | Description |
+|-------------|---------------------|-------------|
+| `configure.sh [--local]` | `configure.ps1 [-Local]` | Configure device credentials or generate local config.txt |
+| `ota-update.sh [--revert]` | `ota-update.ps1 [-Revert]` | OTA firmware upload, verify, flash, reboot, or rollback |
+| `update-www.sh [file] [--usb]` | `update-www.ps1 [-File name] [-USB] [-Port COM3]` | Upload web pages to device via HTTPS or USB serial |
+| `backup-config.sh` | `backup-config.ps1` | Download config.txt from device for local backup |
+| `generate-cert.sh [name]` | `generate-cert.ps1 [-Name "name"]` | Generate self-signed ECC P-256 cert for HTTPS |
+| `burn-efuse-key.sh [port]` | `burn-efuse-key.ps1 [-Port COM3]` | Burn hardware encryption key to ESP32-S3 eFuse |
 
-**Interactive prompts** (where applicable): Device IP, Admin password, WiFi/MQTT credentials, confirmation prompts.
+**Interactive prompts** (where applicable): Device IP, Admin password, System name, MQTT prefix, WiFi/MQTT credentials, confirmation prompts. PowerShell scripts use masked input (`Read-Host -AsSecureString`) for all password prompts.
 
-### `scripts/configure.sh`
+### `scripts/configure.sh` / `configure.ps1`
 
-Configure WiFi and MQTT credentials on the device or generate a local config file for SD card provisioning.
+Configure WiFi and MQTT credentials on the device or generate a local config file for SD card provisioning. System name is validated: alphanumeric + spaces only, max 20 characters, sanitized automatically if invalid characters are entered.
 
-```
+```bash
+# Linux/macOS
 ./scripts/configure.sh           # Push config to device via HTTPS API
 ./scripts/configure.sh --local   # Generate data/config.txt for SD card
+
+# Windows (PowerShell)
+.\scripts\configure.ps1           # Push config to device via HTTPS API
+.\scripts\configure.ps1 -Local    # Generate data\config.txt for SD card
 ```
 
-**Prompts (network mode):** Device IP, Admin password, WiFi SSID, WiFi password, Current WiFi password (if changing), MQTT host/port/user, MQTT password, Current MQTT password (if changing)
+**Prompts (network mode):** Device IP, Admin password, System Name, MQTT Topic Prefix, WiFi SSID, WiFi password, Current WiFi password (if changing), MQTT host/port/user, MQTT password, Current MQTT password (if changing)
 
-**Prompts (local mode):** WiFi SSID, WiFi password, MQTT host/port/user, MQTT password
+**Prompts (local mode):** System Name, MQTT Topic Prefix, WiFi SSID, WiFi password, MQTT host/port/user, MQTT password
 
-### `scripts/ota-update.sh`
+### `scripts/ota-update.sh` / `ota-update.ps1`
 
 OTA firmware update via HTTPS. Uploads the PlatformIO build output to the device SD card, verifies the upload size, applies (backs up current firmware + flashes new), and waits for reboot.
 
-```
+```bash
+# Linux/macOS
 ./scripts/ota-update.sh           # Upload and flash firmware
 ./scripts/ota-update.sh --revert  # Roll back to previous firmware backup
+
+# Windows (PowerShell)
+.\scripts\ota-update.ps1           # Upload and flash firmware
+.\scripts\ota-update.ps1 -Revert   # Roll back to previous firmware backup
 ```
 
 **Prompts:** Device IP, Admin password
 
 **Requires:** Built firmware at `.pio/build/freenove_esp32_s3_wroom/firmware.bin`
 
-### `scripts/update-www.sh`
+### `scripts/update-www.sh` / `update-www.ps1`
 
-Upload all HTML files from `data/www/` to the device SD card `/www/` directory via FTP. Automatically enables FTP for 10 minutes.
+Upload HTML files from `data/www/` to the device LittleFS `/www/` directory via HTTPS, or flash the entire LittleFS image via USB serial.
 
+```bash
+# Linux/macOS
+./scripts/update-www.sh                    # Upload all files over HTTPS
+./scripts/update-www.sh dashboard.html     # Upload a single file
+./scripts/update-www.sh --usb [port]       # Flash via USB serial
+
+# Windows (PowerShell)
+.\scripts\update-www.ps1                    # Upload all files over HTTPS
+.\scripts\update-www.ps1 -File dashboard.html
+.\scripts\update-www.ps1 -USB [-Port COM3]  # Flash via USB serial
 ```
-./scripts/update-www.sh
-```
 
-**Prompts:** Device IP, Admin password
+**Prompts (HTTPS mode):** Device IP, Admin password
 
-### `scripts/backup-config.sh`
+### `scripts/backup-config.sh` / `backup-config.ps1`
 
 Download `config.txt` from the device SD card for local backup via FTP. Saves timestamped copies to `backups/<YYYYMMDD-HHMMSS>/config.txt` and a latest copy at `backups/config-latest.txt`.
 
-```
+```bash
+# Linux/macOS
 ./scripts/backup-config.sh
+
+# Windows (PowerShell)
+.\scripts\backup-config.ps1
 ```
 
 **Prompts:** Device IP, Admin password
 
 **Note:** The `backups/` directory is gitignored since config files contain credentials.
 
-### `scripts/generate-cert.sh`
+### `scripts/generate-cert.sh` / `generate-cert.ps1`
 
-Generate a self-signed ECC P-256 certificate (10-year validity) for the ESP32 HTTPS server. Outputs `cert.pem` and `key.pem` to the project root.
+Generate a self-signed ECC P-256 certificate (10-year validity) for the ESP32 HTTPS server. Outputs `cert.pem` and `key.pem` to the project root. An optional system name parameter sets the certificate CN (Common Name).
 
+```bash
+# Linux/macOS
+./scripts/generate-cert.sh                    # CN=ESP32 (default)
+./scripts/generate-cert.sh "Goodman HP"       # CN=Goodman HP
+
+# Windows (PowerShell)
+.\scripts\generate-cert.ps1                    # CN=ESP32 (default)
+.\scripts\generate-cert.ps1 -Name "Goodman HP"
 ```
-./scripts/generate-cert.sh
-```
 
-**No prompts.** Requires `openssl`. Copy output files to SD card root.
+**No interactive prompts.** Requires `openssl` (included with Git for Windows). Copy output files to SD card root.
 
-### `scripts/burn-efuse-key.sh`
+### `scripts/burn-efuse-key.sh` / `burn-efuse-key.ps1`
 
 Burn a hardware encryption key to ESP32-S3 eFuse for password encryption at rest. The key is read-protected — only the hardware HMAC peripheral can access it.
 
-```
-./scripts/burn-efuse-key.sh [PORT]
+```bash
+# Linux/macOS
+./scripts/burn-efuse-key.sh [/dev/ttyUSB0]
+
+# Windows (PowerShell)
+.\scripts\burn-efuse-key.ps1 [-Port COM3]
 ```
 
-**Parameters:** `PORT` — serial port (default: `/dev/ttyUSB0`)
+**Parameters:** Serial port (default: `/dev/ttyUSB0` on Linux, `COM3` on Windows)
 
 **Prompts:** Two confirmation prompts (type `yes`, then `BURN`)
 
@@ -720,7 +788,7 @@ Burn a hardware encryption key to ESP32-S3 eFuse for password encryption at rest
 | POST | `/log/level` | | Set log level |
 | GET | `/log/config` | | Logger output configuration |
 | POST | `/log/config` | | Configure logger outputs (serial, mqtt, sdcard, websocket) |
-| GET | `/theme` | | Current theme setting (`{"theme":"dark"}`) |
+| GET | `/theme` | | Current theme and system name (`{"theme":"dark","systemName":"Goodman HP"}`) |
 | GET | `/theme.css` | | Shared dark/light theme CSS stylesheet |
 | GET | `/i2c/scan` | | Scan I2C bus for connected devices |
 | GET | `/config` | Yes | Configuration page / JSON (`?format=json`) |
@@ -829,7 +897,9 @@ Valid sensor names: `ambient`, `compressor`, `suction`, `condenser`, `liquid`
 
 ## MQTT Topics
 
-The controller publishes to a configurable MQTT broker (default `192.168.0.46:1883`). Subscribe with `mosquitto_sub -t "goodman/#"` to receive all topics.
+The controller publishes to a configurable MQTT broker (default `192.168.0.46:1883`). The topic prefix defaults to `goodman` but is configurable via `system.mqttPrefix` in config JSON or the config page, allowing multiple units on the same broker (e.g., `unit1/temps`, `unit2/temps`).
+
+Subscribe with `mosquitto_sub -t "goodman/#"` to receive all topics (replace `goodman` with your configured prefix).
 
 ### `goodman/log`
 
