@@ -1437,6 +1437,86 @@ static esp_err_t logGetHandler(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// --- Log level/config handlers ---
+
+static esp_err_t logLevelGetHandler(httpd_req_t* req) {
+    String json = "{\"level\":" + String(Log.getLevel()) +
+                  ",\"levelName\":\"" + String(Log.getLevelName(Log.getLevel())) + "\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
+static esp_err_t logLevelPostHandler(httpd_req_t* req) {
+    size_t qLen = httpd_req_get_url_query_len(req);
+    if (qLen == 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "missing level param");
+        return ESP_OK;
+    }
+    char* qBuf = (char*)malloc(qLen + 1);
+    if (!qBuf) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "alloc failed");
+        return ESP_OK;
+    }
+    httpd_req_get_url_query_str(req, qBuf, qLen + 1);
+    char val[16] = {};
+    if (httpd_query_key_value(qBuf, "level", val, sizeof(val)) == ESP_OK) {
+        int level = atoi(val);
+        if (level >= 0 && level <= 3) {
+            Log.setLevel((Logger::Level)level);
+            Log.info("HTTPS", "Log level changed to %d", level);
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_send(req, "{\"status\":\"ok\"}", HTTPD_RESP_USE_STRLEN);
+        } else {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "level must be 0-3");
+        }
+    } else {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "missing level param");
+    }
+    free(qBuf);
+    return ESP_OK;
+}
+
+static esp_err_t logConfigGetHandler(httpd_req_t* req) {
+    String json = "{\"level\":" + String(Log.getLevel()) +
+                  ",\"levelName\":\"" + String(Log.getLevelName(Log.getLevel())) +
+                  "\",\"serial\":" + String(Log.isSerialEnabled() ? "true" : "false") +
+                  ",\"mqtt\":" + String(Log.isMqttEnabled() ? "true" : "false") +
+                  ",\"sdcard\":" + String(Log.isSdCardEnabled() ? "true" : "false") +
+                  ",\"websocket\":" + String(Log.isWebSocketEnabled() ? "true" : "false") + "}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
+static esp_err_t logConfigPostHandler(httpd_req_t* req) {
+    size_t qLen = httpd_req_get_url_query_len(req);
+    if (qLen == 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "no params");
+        return ESP_OK;
+    }
+    char* qBuf = (char*)malloc(qLen + 1);
+    if (!qBuf) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "alloc failed");
+        return ESP_OK;
+    }
+    httpd_req_get_url_query_str(req, qBuf, qLen + 1);
+    char val[16] = {};
+    if (httpd_query_key_value(qBuf, "serial", val, sizeof(val)) == ESP_OK)
+        Log.enableSerial(strcmp(val, "true") == 0);
+    if (httpd_query_key_value(qBuf, "mqtt", val, sizeof(val)) == ESP_OK)
+        Log.enableMqtt(strcmp(val, "true") == 0);
+    if (httpd_query_key_value(qBuf, "sdcard", val, sizeof(val)) == ESP_OK)
+        Log.enableSdCard(strcmp(val, "true") == 0);
+    if (httpd_query_key_value(qBuf, "websocket", val, sizeof(val)) == ESP_OK)
+        Log.enableWebSocket(strcmp(val, "true") == 0);
+    free(qBuf);
+    Log.info("HTTPS", "Log config updated");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"status\":\"ok\"}", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
 // --- Revert handlers ---
 
 static esp_err_t revertGetHandler(httpd_req_t* req) {
@@ -1996,7 +2076,7 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
     cfg.prvtkey_pem = key;
     cfg.prvtkey_len = keyLen + 1;
     cfg.port_secure = 443;
-    cfg.httpd.max_uri_handlers = 40;
+    cfg.httpd.max_uri_handlers = 50;
 
     httpd_handle_t server = nullptr;
     esp_err_t err = httpd_ssl_start(&server, &cfg);
@@ -2261,6 +2341,38 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &logGet);
+
+    httpd_uri_t logLevelGet = {
+        .uri = "/log/level",
+        .method = HTTP_GET,
+        .handler = logLevelGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &logLevelGet);
+
+    httpd_uri_t logLevelPost = {
+        .uri = "/log/level",
+        .method = HTTP_POST,
+        .handler = logLevelPostHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &logLevelPost);
+
+    httpd_uri_t logConfigGet = {
+        .uri = "/log/config",
+        .method = HTTP_GET,
+        .handler = logConfigGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &logConfigGet);
+
+    httpd_uri_t logConfigPost = {
+        .uri = "/log/config",
+        .method = HTTP_POST,
+        .handler = logConfigPostHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &logConfigPost);
 
     httpd_uri_t tempsGet = {
         .uri = "/temps",
