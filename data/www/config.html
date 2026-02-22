@@ -31,6 +31,17 @@ button:hover{background:#45a049;}
 .pw-unset{background:#fff3cd;color:#856404;}
 .pw-set{background:#d4edda;color:#155724;}
 #ftpStatus{margin:8px 0;font-size:13px;padding:6px 10px;border-radius:4px;background:var(--code-bg);color:var(--text);}
+.sec-nav{background:var(--surface);border-bottom:1px solid var(--border);padding:6px 20px;position:sticky;top:0;z-index:90;display:flex;align-items:center;gap:0;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch;}
+.sec-nav a{color:var(--text-secondary);text-decoration:none;font-size:12px;padding:5px 10px;border-radius:3px;flex-shrink:0;}
+.sec-nav a:hover,.sec-nav a.active{background:#4CAF50;color:#fff;}
+.sec-burger{display:none;background:none;border:1px solid var(--border);border-radius:4px;padding:4px 8px;cursor:pointer;color:var(--text);font-size:16px;line-height:1;flex-shrink:0;}
+.sec-drop{display:flex;gap:0;overflow-x:auto;flex:1;}
+@media(max-width:700px){
+.sec-burger{display:block;}
+.sec-drop{display:none;flex-direction:column;position:absolute;top:100%;left:0;right:0;background:var(--surface);border-bottom:1px solid var(--border);padding:6px 12px;gap:2px;box-shadow:0 4px 12px rgba(0,0,0,0.15);overflow-x:visible;white-space:normal;}
+.sec-drop.open{display:flex;}
+.sec-drop a{padding:8px 12px;font-size:14px;}
+}
 </style></head><body>
 <nav><span class='brand'>Goodman HP</span>
 <button class='hamburger' onclick='this.nextElementSibling.classList.toggle("open")'><span></span><span></span><span></span></button>
@@ -44,23 +55,26 @@ button:hover{background:#45a049;}
 <a href='/heap/view'>Heap</a>
 <a href='#' class='reboot' onclick="if(confirm('Reboot device?')){var x=new XMLHttpRequest();x.open('POST','/reboot');x.onload=function(){alert(x.status===200?'Rebooting...':'Failed')};x.send()};return false">Reboot</a>
 </div></nav>
+<div class='sec-nav'><button class='sec-burger' onclick='this.nextElementSibling.classList.toggle("open")'>&#9776;</button><div class='sec-drop'>
+<a href='#s-sys'>System</a><a href='#s-look'>Appearance</a><a href='#s-auth'>Password</a><a href='#s-wifi'>WiFi</a><a href='#s-mqtt'>MQTT</a><a href='#s-tz'>Timezone</a><a href='#s-hp'>Heatpump</a><a href='#s-df'>Defrost</a><a href='#s-disp'>Display</a><a href='#s-tc'>MAX6675</a><a href='#s-log'>Logging</a><a href='#s-ftp'>FTP</a><a href='#s-sd'>SD Card</a>
+</div></div>
 <div class='container'>
 <h1>Configuration</h1>
 <form id='cf' onsubmit='return save(event)'>
-<fieldset><legend>System <span class='tag tag-reboot'>reboot</span></legend>
+<fieldset id='s-sys'><legend>System <span class='tag tag-reboot'>reboot</span></legend>
 <label>System Name (also used as AP SSID, max 20 chars)</label>
 <input type='text' id='systemName' maxlength='20' pattern='[A-Za-z0-9 ]+'>
 <label>MQTT Topic Prefix</label>
 <input type='text' id='mqttPrefix' maxlength='20'>
 </fieldset>
-<fieldset><legend>Appearance <span class='tag tag-live'>live</span></legend>
+<fieldset id='s-look'><legend>Appearance <span class='tag tag-live'>live</span></legend>
 <label>Theme</label>
 <select id='theme' onchange="document.documentElement.dataset.theme=this.value;localStorage.setItem('hp-theme',this.value);">
 <option value='light'>Light</option>
 <option value='dark'>Dark</option>
 </select>
 </fieldset>
-<fieldset><legend>Admin Password</legend>
+<fieldset id='s-auth'><legend>Admin Password</legend>
 <div id='adminPwStatus'></div>
 <label>New Password</label><input type='password' id='adminPassword'>
 <label>Confirm Password</label><input type='password' id='adminPasswordConfirm'>
@@ -68,7 +82,7 @@ button:hover{background:#45a049;}
 <label>Current Password (required to change)</label><input type='password' id='curAdminPw'>
 </div>
 </fieldset>
-<fieldset><legend>WiFi <span class='tag tag-reboot'>reboot</span></legend>
+<fieldset id='s-wifi'><legend>WiFi <span class='tag tag-reboot'>reboot</span></legend>
 <label>SSID</label><input type='text' id='wifiSSID'>
 <label>Password</label><input type='password' id='wifiPassword'>
 <label>Current Password or Admin Password (required to change)</label><input type='password' id='curWifiPw'>
@@ -81,18 +95,18 @@ button:hover{background:#45a049;}
 <span id='apTestStatus' style='margin-left:8px;font-size:13px;'></span>
 </div>
 </fieldset>
-<fieldset><legend>MQTT <span class='tag tag-reboot'>reboot</span></legend>
+<fieldset id='s-mqtt'><legend>MQTT <span class='tag tag-reboot'>reboot</span></legend>
 <label>Host</label><input type='text' id='mqttHost'>
 <label>Port</label><input type='number' id='mqttPort'>
 <label>User</label><input type='text' id='mqttUser'>
 <label>Password</label><input type='password' id='mqttPassword'>
 <label>Current Password or Admin Password (required to change)</label><input type='password' id='curMqttPw'>
 </fieldset>
-<fieldset><legend>Timezone <span class='tag tag-live'>live</span></legend>
+<fieldset id='s-tz'><legend>Timezone <span class='tag tag-live'>live</span></legend>
 <label>GMT Offset (hours)</label><input type='number' step='0.5' id='gmtOffsetHrs'>
 <label>Daylight Offset (hours)</label><input type='number' step='0.5' id='daylightOffsetHrs'>
 </fieldset>
-<fieldset><legend>Heatpump Protection <span class='tag tag-live'>live</span></legend>
+<fieldset id='s-hp'><legend>Heatpump Protection <span class='tag tag-live'>live</span></legend>
 <label>Low Temp Threshold (&deg;F)</label><input type='number' step='0.1' id='lowTempThreshold'>
 <label><input type='checkbox' id='lowTempEnableW' checked style='width:auto;margin-right:6px;'>Enable W (aux heat) in LOW_TEMP</label>
 <label><input type='checkbox' id='lowTempEnableAux' checked style='width:auto;margin-right:6px;'>Enable AUX signal in LOW_TEMP</label>
@@ -102,36 +116,36 @@ button:hover{background:#45a049;}
 <div id='rvFailStatus' style='margin:8px 0;font-size:13px;padding:6px 10px;border-radius:4px;display:none'></div>
 <button type='button' class='btn-sm btn-red' id='clearRvFailBtn' style='display:none' onclick='clearRvFail()'>Clear RV Fail</button>
 </fieldset>
-<fieldset><legend>Defrost Controls <span class='tag tag-live'>live</span></legend>
+<fieldset id='s-df'><legend>Defrost Controls <span class='tag tag-live'>live</span></legend>
 <label>Heat Runtime Threshold (minutes, 30-90)</label><input type='number' min='30' max='90' step='1' id='heatRuntimeThresholdMin'>
 <label>Minimum Defrost Time (seconds)</label><input type='number' step='1' id='defrostMinRuntimeSec'>
 <label>Condenser Temp Cutoff (&deg;F)</label><input type='number' step='0.1' id='defrostExitTempF'>
 </fieldset>
-<fieldset><legend>Display <span class='tag tag-live'>live</span></legend>
+<fieldset id='s-disp'><legend>Display <span class='tag tag-live'>live</span></legend>
 <label>Page Flip Interval (seconds, 3-60)</label><input type='number' min='3' max='60' step='1' id='displayPageIntervalSec'>
 <label><input type='checkbox' id='displayEnabled' style='width:auto;margin-right:6px;'>Display Enabled</label>
 </fieldset>
-<fieldset><legend>MAX6675 Thermocouple <span class='tag tag-reboot'>reboot</span></legend>
+<fieldset id='s-tc'><legend>MAX6675 Thermocouple <span class='tag tag-reboot'>reboot</span></legend>
 <label><input type='checkbox' id='max6675Enabled' style='width:auto;margin-right:6px;'>Enabled</label>
 <label>CLK Pin</label><select id='max6675Clk' onchange='syncMaxPins()'></select>
 <label>CS Pin</label><select id='max6675Cs' onchange='syncMaxPins()'></select>
 <label>DO Pin</label><select id='max6675Do' onchange='syncMaxPins()'></select>
 </fieldset>
-<fieldset><legend>Logging <span class='tag tag-live'>live</span></legend>
+<fieldset id='s-log'><legend>Logging <span class='tag tag-live'>live</span></legend>
 <label>Max Log Size (MB)</label><input type='number' step='1' id='maxLogSizeMB'>
 <label>Max Old Log Count</label><input type='number' id='maxOldLogCount'>
 <label>Temp History Interval (seconds, 30-300)</label><input type='number' min='30' max='300' step='1' id='tempHistoryIntervalSec'>
 </fieldset>
 <button type='submit'>Save</button>
 </form>
-<fieldset><legend>FTP Server</legend>
+<fieldset id='s-ftp'><legend>FTP Server</legend>
 <div id='ftpStatus'>Loading...</div>
 <button class='btn-sm' onclick='ftpControl(10)'>10 min</button>
 <button class='btn-sm' onclick='ftpControl(30)'>30 min</button>
 <button class='btn-sm' onclick='ftpControl(60)'>1 hour</button>
 <button class='btn-sm btn-red' onclick='ftpControl(0)'>Off</button>
 </fieldset>
-<fieldset><legend>SD Card</legend>
+<fieldset id='s-sd'><legend>SD Card</legend>
 <div id='sdInfo' style='font-size:13px;padding:6px 10px;border-radius:4px;background:var(--code-bg);color:var(--text);margin-bottom:8px;'>Loading...</div>
 <p style='color:#e74c3c;font-size:13px;margin:8px 0;'><strong>Warning:</strong> Formatting will erase logs and temperature history from the SD card. WiFi, MQTT, and admin credentials will be preserved. Certificates will be auto-generated if missing. Web pages are stored in flash and are not affected.</p>
 <label>Type FORMAT to confirm</label>
@@ -310,4 +324,14 @@ document.getElementById('btnStopAP').style.display='inline-block';
 document.getElementById('apTestStatus').textContent='AP Mode active';
 }
 }).catch(()=>{});
+// Section nav: highlight on scroll, close dropdown on click, smooth scroll with offset
+(function(){
+var links=document.querySelectorAll('.sec-drop a');
+var drop=document.querySelector('.sec-drop');
+var ids=[];links.forEach(function(a){ids.push(a.getAttribute('href').slice(1));
+a.addEventListener('click',function(e){e.preventDefault();var t=document.getElementById(this.getAttribute('href').slice(1));if(t){var y=t.getBoundingClientRect().top+window.pageYOffset-50;window.scrollTo({top:y,behavior:'smooth'});}drop.classList.remove('open');});});
+function hl(){var scrollY=window.scrollY+80;var cur='';for(var i=0;i<ids.length;i++){var el=document.getElementById(ids[i]);if(el&&el.offsetTop<=scrollY)cur=ids[i];}
+links.forEach(function(a){a.classList.toggle('active',a.getAttribute('href')==='#'+cur);});}
+window.addEventListener('scroll',hl);hl();
+})();
 </script></body></html>
