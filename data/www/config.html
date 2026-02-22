@@ -47,6 +47,12 @@ button:hover{background:#45a049;}
 <div class='container'>
 <h1>Configuration</h1>
 <form id='cf' onsubmit='return save(event)'>
+<fieldset><legend>System <span class='tag tag-reboot'>reboot</span></legend>
+<label>System Name (also used as AP SSID, max 20 chars)</label>
+<input type='text' id='systemName' maxlength='20' pattern='[A-Za-z0-9 ]+'>
+<label>MQTT Topic Prefix</label>
+<input type='text' id='mqttPrefix' maxlength='20'>
+</fieldset>
 <fieldset><legend>Appearance <span class='tag tag-live'>live</span></legend>
 <label>Theme</label>
 <select id='theme' onchange="document.documentElement.dataset.theme=this.value;localStorage.setItem('hp-theme',this.value);">
@@ -136,7 +142,7 @@ button:hover{background:#45a049;}
 <div id='status'></div>
 </div>
 <script>
-var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','apPassword','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do'];
+var fields=['systemName','mqttPrefix','wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','apPassword','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do'];
 var adminPwSet=false;
 fetch('/config?format=json').then(r=>r.json()).then(d=>{
 fields.forEach(f=>{var e=document.getElementById(f);if(e)e.value=d[f]!=null?d[f]:'';});
@@ -159,6 +165,7 @@ st.className='pw-unset';st.textContent='No password set \u2014 set one to secure
 }
 // Apply loaded theme immediately
 if(d.theme){document.documentElement.dataset.theme=d.theme;localStorage.setItem('hp-theme',d.theme);}
+if(d.systemName){var b=document.querySelector('.brand');if(b)b.textContent=d.systemName;document.title=document.title.replace('Goodman HP',d.systemName);}
 // RV Fail status
 if(d.rvFail){var el=document.getElementById('rvFailStatus');el.textContent='RV Fail is ACTIVE \u2014 compressor blocked.';el.style.display='block';el.style.background='#f8d7da';el.style.color='#721c24';document.getElementById('clearRvFailBtn').style.display='inline-block';}
 });

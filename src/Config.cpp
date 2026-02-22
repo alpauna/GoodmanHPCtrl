@@ -487,6 +487,14 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     Serial.printf("Read MAX6675: clk=%d cs=%d do=%d enabled=%d\n",
                   proj.max6675Clk, proj.max6675Cs, proj.max6675Do, proj.max6675Enabled);
 
+    // Load system identity
+    JsonObject systemObj = doc["system"];
+    const char* sysName = systemObj["name"];
+    proj.systemName = (sysName != nullptr && strlen(sysName) > 0) ? String(sysName) : "Goodman HP";
+    const char* mqttPfx = systemObj["mqttPrefix"];
+    proj.mqttPrefix = (mqttPfx != nullptr && strlen(mqttPfx) > 0) ? String(mqttPfx) : "goodman";
+    Serial.printf("Read system: name=%s mqttPrefix=%s\n", proj.systemName.c_str(), proj.mqttPrefix.c_str());
+
     // Load admin password (encrypted same as WiFi/MQTT passwords)
     const char* adminPw = doc["admin"]["password"];
     String adminPwStr = (adminPw != nullptr && strlen(adminPw) > 0) ? String(adminPw) : "";
@@ -615,6 +623,10 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     displayObj["pageIntervalSec"] = proj.displayPageIntervalSec;
     displayObj["enabled"] = proj.displayEnabled;
 
+    JsonObject systemObj = doc["system"].to<JsonObject>();
+    systemObj["name"] = proj.systemName.length() > 0 ? proj.systemName : "Goodman HP";
+    systemObj["mqttPrefix"] = proj.mqttPrefix.length() > 0 ? proj.mqttPrefix : "goodman";
+
     JsonObject admin = doc["admin"].to<JsonObject>();
     admin["password"] = "";
 
@@ -737,6 +749,10 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     displayObj["pageIntervalSec"] = proj.displayPageIntervalSec;
     displayObj["enabled"] = proj.displayEnabled;
 
+    JsonObject systemObj = doc["system"].to<JsonObject>();
+    systemObj["name"] = proj.systemName.length() > 0 ? proj.systemName : "Goodman HP";
+    systemObj["mqttPrefix"] = proj.mqttPrefix.length() > 0 ? proj.mqttPrefix : "goodman";
+
     JsonObject admin = doc["admin"].to<JsonObject>();
     admin["password"] = encryptPassword(_adminPasswordHash);
 
@@ -846,10 +862,14 @@ bool Config::generateSelfSignedCert() {
     mbedtls_x509write_crt_set_subject_key(&crt, &key);
     mbedtls_x509write_crt_set_issuer_key(&crt, &key);
 
-    ret = mbedtls_x509write_crt_set_subject_name(&crt, "CN=ESP32");
-    if (ret != 0) goto cleanup;
-    ret = mbedtls_x509write_crt_set_issuer_name(&crt, "CN=ESP32");
-    if (ret != 0) goto cleanup;
+    {
+        String cn = "CN=";
+        cn += (_proj && _proj->systemName.length() > 0) ? _proj->systemName : "ESP32";
+        ret = mbedtls_x509write_crt_set_subject_name(&crt, cn.c_str());
+        if (ret != 0) goto cleanup;
+        ret = mbedtls_x509write_crt_set_issuer_name(&crt, cn.c_str());
+        if (ret != 0) goto cleanup;
+    }
 
     // Random serial number
     ret = mbedtls_mpi_lset(&serial, (int)esp_random());

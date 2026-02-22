@@ -196,7 +196,9 @@ ProjectInfo proj = {
   39,                 // max6675Clk: GPIO 39
   40,                 // max6675Cs: GPIO 40
   41,                 // max6675Do: GPIO 41
-  true                // max6675Enabled: on by default
+  true,               // max6675Enabled: on by default
+  "Goodman HP",       // systemName: default system name
+  "goodman"           // mqttPrefix: default MQTT topic prefix
 };
 
 
@@ -295,7 +297,7 @@ void onAPReconnect();
 Task tAPReconnect(TASK_MINUTE, TASK_FOREVER, &onAPReconnect, &ts, false);
 
 void startAPMode() {
-  const char* apSSID = "GoodmanHP";
+  String apSSID = proj.systemName.length() > 0 ? proj.systemName : "Goodman HP";
 
   // Password: configured > previously generated > new random
   if (proj.apPassword.length() >= 8) {
@@ -308,20 +310,20 @@ void startAPMode() {
   if (!_apModeActive) {
     WiFi.disconnect(true);
     WiFi.mode(WIFI_AP_STA);
-    WiFi.softAP(apSSID, _apPassword.c_str());
+    WiFi.softAP(apSSID.c_str(), _apPassword.c_str());
     _apModeActive = true;
   }
 
   IPAddress apIP = WiFi.softAPIP();
   Log.warn("WiFi", "========================================");
   Log.warn("WiFi", "AP MODE ACTIVE");
-  Log.warn("WiFi", "SSID: %s", apSSID);
+  Log.warn("WiFi", "SSID: %s", apSSID.c_str());
   Log.warn("WiFi", "Password: %s", _apPassword.c_str());
   Log.warn("WiFi", "IP: %s", apIP.toString().c_str());
   Log.warn("WiFi", "========================================");
   Serial.println();
   Serial.println("*** AP MODE ***");
-  Serial.printf("SSID: %s\n", apSSID);
+  Serial.printf("SSID: %s\n", apSSID.c_str());
   Serial.printf("Pass: %s\n", _apPassword.c_str());
   Serial.printf("IP:   %s\n", apIP.toString().c_str());
   Serial.println("***************");
@@ -337,7 +339,7 @@ void startAPMode() {
 }
 
 String startAPModeTest() {
-  const char* apSSID = "GoodmanHP";
+  String apSSID = proj.systemName.length() > 0 ? proj.systemName : "Goodman HP";
   // Password: configured > previously generated > new random
   if (proj.apPassword.length() >= 8) {
     _apPassword = proj.apPassword;
@@ -346,10 +348,10 @@ String startAPModeTest() {
   }
   // Keep existing WiFi — add AP alongside (AP_STA)
   WiFi.mode(WIFI_AP_STA);
-  WiFi.softAP(apSSID, _apPassword.c_str());
+  WiFi.softAP(apSSID.c_str(), _apPassword.c_str());
   _apModeActive = true;
   Log.info("WiFi", "AP test mode started - SSID: %s Pass: %s IP: %s",
-           apSSID, _apPassword.c_str(), WiFi.softAPIP().toString().c_str());
+           apSSID.c_str(), _apPassword.c_str(), WiFi.softAPIP().toString().c_str());
   // Auto-exit after fallback interval when WiFi is still connected
   tAPReconnect.setInterval(proj.apFallbackSeconds * (unsigned long)TASK_SECOND);
   tAPReconnect.enableDelayed();
@@ -690,12 +692,14 @@ void setup() {
 
   // FTP is never auto-started at boot — enable on demand from config page.
 
+  mqttHandler.setTopicPrefix(proj.mqttPrefix);
   mqttHandler.begin(_MQTT_HOST_DEFAULT, _MQTT_PORT, _MQTT_USER, _MQTT_PASSWORD);
   mqttHandler.setController(&hpController);
 
   // Initialize Logger
   Log.setLevel(Logger::LOG_INFO);
-  Log.setMqttClient(mqttHandler.getClient(), "goodman/log");
+  String logTopic = proj.mqttPrefix + "/log";
+  Log.setMqttClient(mqttHandler.getClient(), logTopic.c_str());
   Log.setLogFile("/log.txt", proj.maxLogSize, proj.maxOldLogCount);
   Log.info("MAIN", "Logger initialized");
 

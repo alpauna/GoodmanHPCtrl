@@ -71,7 +71,8 @@ void MQTTHandler::publishTemps() {
 
     char buf[256];
     size_t len = serializeJson(doc, buf, sizeof(buf));
-    _client.publish("goodman/temps", 0, false, buf, len);
+    String topic = _topicPrefix + "/temps";
+    _client.publish(topic.c_str(), 0, false, buf, len);
 }
 
 void MQTTHandler::publishState() {
@@ -106,7 +107,8 @@ void MQTTHandler::publishState() {
 
     char buf[512];
     size_t len = serializeJson(doc, buf, sizeof(buf));
-    _client.publish("goodman/state", 0, false, buf, len);
+    String topic = _topicPrefix + "/state";
+    _client.publish(topic.c_str(), 0, false, buf, len);
 }
 
 void MQTTHandler::publishFault(const char* fault, const char* message, bool active) {
@@ -119,7 +121,8 @@ void MQTTHandler::publishFault(const char* fault, const char* message, bool acti
 
     char buf[256];
     size_t len = serializeJson(doc, buf, sizeof(buf));
-    _client.publish("goodman/fault", 0, false, buf, len);
+    String topic = _topicPrefix + "/fault";
+    _client.publish(topic.c_str(), 0, false, buf, len);
 }
 
 void MQTTHandler::onConnect(bool sessionPresent) {

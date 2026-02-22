@@ -29,12 +29,35 @@ prompt_secret() {
     eval "$var=\"$input\""
 }
 
+# Validate system name: alphanumeric + spaces only, max 20 chars, non-empty
+validate_system_name() {
+    local raw="$1"
+    # Strip characters that aren't alphanumeric or space
+    local cleaned
+    cleaned=$(echo "$raw" | sed 's/[^A-Za-z0-9 ]//g')
+    # Truncate to 20 chars
+    cleaned="${cleaned:0:20}"
+    # Trim leading/trailing spaces
+    cleaned=$(echo "$cleaned" | sed 's/^ *//;s/ *$//')
+    if [ -z "$cleaned" ]; then
+        echo "Error: System Name must contain at least one alphanumeric character" >&2
+        exit 1
+    fi
+    if [ "$cleaned" != "$raw" ]; then
+        echo "Note: System Name sanitized to: $cleaned" >&2
+    fi
+    echo "$cleaned"
+}
+
 # --- Local config.txt generation ---
 write_local_config() {
     echo "=== Generate config.txt for SD card ==="
     echo "Passwords will be stored in plaintext and encrypted on first device boot."
     echo
 
+    prompt SYS_NAME "System Name (max 20 chars, alphanumeric+spaces)" "Goodman HP"
+    SYS_NAME=$(validate_system_name "$SYS_NAME")
+    prompt MQTT_PREFIX "MQTT Topic Prefix" "goodman"
     prompt WIFI_SSID "WiFi SSID" ""
     prompt_secret WIFI_PW "WiFi Password"
     prompt MQTT_HOST "MQTT Host" "192.168.0.46"
@@ -49,6 +72,10 @@ write_local_config() {
   "project": "Goodman Heatpump Control",
   "created": "$(date '+%b %d %Y %H:%M:%S')",
   "description": "Control Goodman heatpump including defrost mode.",
+  "system": {
+    "name": "$SYS_NAME",
+    "mqttPrefix": "$MQTT_PREFIX"
+  },
   "wifi": {
     "ssid": "$WIFI_SSID",
     "password": "$WIFI_PW"
@@ -70,8 +97,10 @@ write_local_config() {
     "gmtOffset": -21600,
     "daylightOffset": 3600
   },
-  "lowTemp": {
-    "threshold": 20.0
+  "heatpump": {
+    "lowTemp": {
+      "threshold": 20.0
+    }
   },
   "admin": {
     "password": ""
@@ -118,6 +147,8 @@ if [ -z "$CURRENT" ]; then
 fi
 
 # Parse current values for defaults
+CUR_SYS_NAME=$(echo "$CURRENT" | grep -o '"systemName":"[^"]*"' | cut -d'"' -f4)
+CUR_MQTT_PREFIX=$(echo "$CURRENT" | grep -o '"mqttPrefix":"[^"]*"' | cut -d'"' -f4)
 CUR_SSID=$(echo "$CURRENT" | grep -o '"wifiSSID":"[^"]*"' | cut -d'"' -f4)
 CUR_MQTT_HOST=$(echo "$CURRENT" | grep -o '"mqttHost":"[^"]*"' | cut -d'"' -f4)
 CUR_MQTT_PORT=$(echo "$CURRENT" | grep -o '"mqttPort":[0-9]*' | cut -d: -f2)
@@ -128,6 +159,9 @@ echo "=== Configure Device ==="
 echo "Leave blank to keep current value. Passwords always required for changes."
 echo
 
+prompt SYS_NAME "System Name (max 20 chars, alphanumeric+spaces)" "${CUR_SYS_NAME:-Goodman HP}"
+SYS_NAME=$(validate_system_name "$SYS_NAME")
+prompt MQTT_PREFIX "MQTT Topic Prefix" "${CUR_MQTT_PREFIX:-goodman}"
 prompt WIFI_SSID "WiFi SSID" "$CUR_SSID"
 
 WIFI_PW=""
@@ -154,7 +188,9 @@ fi
 
 # Build JSON payload
 JSON="{"
-JSON+="\"wifiSSID\":\"$WIFI_SSID\""
+JSON+="\"systemName\":\"$SYS_NAME\""
+JSON+=",\"mqttPrefix\":\"$MQTT_PREFIX\""
+JSON+=",\"wifiSSID\":\"$WIFI_SSID\""
 if [ -n "$WIFI_PW" ]; then
     JSON+=",\"wifiPassword\":\"$WIFI_PW\""
     JSON+=",\"curWifiPw\":\"$CUR_WIFI_PW\""

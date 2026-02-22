@@ -421,11 +421,15 @@ void WebHandler::setupRoutes() {
 
     _server.on("/theme", HTTP_GET, [this](AsyncWebServerRequest *request) {
         String theme = "dark";
+        String sysName = "Goodman HP";
         if (_config && _config->getProjectInfo()) {
             theme = _config->getProjectInfo()->theme;
             if (theme.length() == 0) theme = "dark";
+            if (_config->getProjectInfo()->systemName.length() > 0)
+                sysName = _config->getProjectInfo()->systemName;
         }
-        request->send(200, "application/json", "{\"theme\":\"" + theme + "\"}");
+        request->send(200, "application/json",
+            "{\"theme\":\"" + theme + "\",\"systemName\":\"" + sysName + "\"}");
     });
 
     _server.on("/state", HTTP_GET, [this](AsyncWebServerRequest *request) {
@@ -918,6 +922,8 @@ void WebHandler::setupRoutes() {
                 doc["max6675Cs"] = proj->max6675Cs;
                 doc["max6675Do"] = proj->max6675Do;
                 doc["max6675Enabled"] = proj->max6675Enabled;
+                doc["systemName"] = proj->systemName.length() > 0 ? proj->systemName : "Goodman HP";
+                doc["mqttPrefix"] = proj->mqttPrefix.length() > 0 ? proj->mqttPrefix : "goodman";
                 String json;
                 serializeJson(doc, json);
                 request->send(200, "application/json", json);
@@ -1054,8 +1060,10 @@ void WebHandler::setupRoutes() {
             if (!checkAuth(request)) return;
             if (_apStartCb) {
                 String password = _apStartCb();
+                String ssid = (_config && _config->getProjectInfo() && _config->getProjectInfo()->systemName.length() > 0)
+                    ? _config->getProjectInfo()->systemName : "Goodman HP";
                 request->send(200, "application/json",
-                    "{\"ssid\":\"GoodmanHP\",\"password\":\"" + password + "\",\"ip\":\"192.168.4.1\"}");
+                    "{\"ssid\":\"" + ssid + "\",\"password\":\"" + password + "\",\"ip\":\"192.168.4.1\"}");
             } else {
                 request->send(500, "application/json", "{\"error\":\"AP control not available\"}");
             }
@@ -1690,6 +1698,29 @@ void WebHandler::setupRoutes() {
             needsReboot = true;
         }
 
+        // System identity (requires reboot)
+        if (data["systemName"].is<const char*>()) {
+            String newName = data["systemName"] | proj->systemName;
+            // Strip non-alphanumeric/space chars, clamp to 20
+            String cleaned;
+            for (unsigned int i = 0; i < newName.length() && cleaned.length() < 20; i++) {
+                char c = newName.charAt(i);
+                if (isalnum(c) || c == ' ') cleaned += c;
+            }
+            if (cleaned.length() > 0 && cleaned != proj->systemName) {
+                proj->systemName = cleaned;
+                needsReboot = true;
+            }
+        }
+        if (data["mqttPrefix"].is<const char*>()) {
+            String newPrefix = data["mqttPrefix"] | proj->mqttPrefix;
+            if (newPrefix.length() > 20) newPrefix = newPrefix.substring(0, 20);
+            if (newPrefix.length() > 0 && newPrefix != proj->mqttPrefix) {
+                proj->mqttPrefix = newPrefix;
+                needsReboot = true;
+            }
+        }
+
         TempSensorMap& tempSensors = _hpController->getTempSensorMap();
         bool saved = _config->updateConfig("/config.txt", tempSensors, *proj);
 
@@ -1749,6 +1780,7 @@ bool WebHandler::beginSecure(const uint8_t* cert, size_t certLen, const uint8_t*
     _httpsCtx.displayConfigCb = _displayConfigCb;
     _httpsCtx.apStartCb = _apStartCb;
     _httpsCtx.apStopCb = _apStopCb;
+    _httpsCtx.systemName = (_config && _config->getProjectInfo()) ? _config->getProjectInfo()->systemName : "Goodman HP";
 
     _httpsServer = httpsStart(cert, certLen, key, keyLen, &_httpsCtx);
     return _httpsServer != nullptr;

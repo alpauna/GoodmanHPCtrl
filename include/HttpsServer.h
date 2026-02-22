@@ -39,6 +39,7 @@ struct HttpsContext {
     std::function<void(uint32_t, bool)> displayConfigCb;
     std::function<String()> apStartCb;
     std::function<void()> apStopCb;
+    String systemName;
 };
 
 // Opaque handle

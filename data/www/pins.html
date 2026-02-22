@@ -536,7 +536,7 @@ function refresh(){
 }
 
 fetch('/theme').then(function(r){return r.json();}).then(function(d){
-  if(d.theme){document.documentElement.dataset.theme=d.theme;localStorage.setItem('hp-theme',d.theme);}
+  if(d.theme){document.documentElement.dataset.theme=d.theme;localStorage.setItem('hp-theme',d.theme);}if(d.systemName){var b=document.querySelector('.brand');if(b)b.textContent=d.systemName;document.title=document.title.replace('Goodman HP',d.systemName);}
 });
 loadTemps();
 scanI2C();

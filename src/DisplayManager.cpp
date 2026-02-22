@@ -11,6 +11,9 @@ extern uint8_t getCpuLoadCore1();
 extern bool _apModeActive;
 extern String _apPassword;
 
+#include "Config.h"
+extern ProjectInfo proj;
+
 DisplayManager::DisplayManager(Scheduler* ts)
     : _ts(ts), _hp(nullptr), _display(nullptr),
       _tFlipPage(nullptr), _tUpdateDisplay(nullptr),
@@ -46,7 +49,7 @@ bool DisplayManager::begin(uint8_t addr) {
     _display->setTextColor(SSD1306_WHITE);
     _display->setCursor(0, 0);
     _display->setTextSize(2);
-    _display->println(F("GoodmanHP"));
+    _display->println(proj.systemName.length() > 0 ? proj.systemName.c_str() : "Goodman HP");
     _display->setTextSize(1);
     _display->println(F("Starting..."));
     _display->display();
@@ -129,7 +132,8 @@ void DisplayManager::drawPageStatus() {
         _display->drawLine(0, 20, 127, 20, SSD1306_WHITE);
         _display->setTextSize(1);
         _display->setCursor(0, 26);
-        _display->print(F("SSID: GoodmanHP"));
+        _display->print(F("SSID: "));
+        _display->print(proj.systemName.length() > 0 ? proj.systemName.c_str() : "Goodman HP");
         _display->setCursor(0, 38);
         _display->print(F("Pass: "));
         _display->print(_apPassword);

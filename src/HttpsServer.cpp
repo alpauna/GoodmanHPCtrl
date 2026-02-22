@@ -26,15 +26,20 @@ extern const char compile_date[];
 
 // --- HTTPS Basic Auth helper ---
 
+static void sendUnauthorized(httpd_req_t* req, HttpsContext* ctx) {
+    String realm = "Basic realm=\"" + (ctx->systemName.length() > 0 ? ctx->systemName : String("Goodman HP")) + "\"";
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", realm.c_str());
+    httpd_resp_send(req, "Unauthorized", HTTPD_RESP_USE_STRLEN);
+}
+
 static bool checkHttpsAuth(httpd_req_t* req) {
     HttpsContext* ctx = (HttpsContext*)req->user_ctx;
     if (!ctx->config || !ctx->config->hasAdminPassword()) return true;
 
     size_t authLen = httpd_req_get_hdr_value_len(req, "Authorization");
     if (authLen == 0) {
-        httpd_resp_set_status(req, "401 Unauthorized");
-        httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"GoodmanHP\"");
-        httpd_resp_send(req, "Unauthorized", HTTPD_RESP_USE_STRLEN);
+        sendUnauthorized(req, ctx);
         return false;
     }
 
@@ -48,9 +53,7 @@ static bool checkHttpsAuth(httpd_req_t* req) {
     // Expect "Basic <base64>"
     if (strncmp(authBuf, "Basic ", 6) != 0) {
         free(authBuf);
-        httpd_resp_set_status(req, "401 Unauthorized");
-        httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"GoodmanHP\"");
-        httpd_resp_send(req, "Unauthorized", HTTPD_RESP_USE_STRLEN);
+        sendUnauthorized(req, ctx);
         return false;
     }
 
@@ -68,9 +71,7 @@ static bool checkHttpsAuth(httpd_req_t* req) {
     char* colon = strchr((char*)decoded, ':');
     if (!colon) {
         free(decoded);
-        httpd_resp_set_status(req, "401 Unauthorized");
-        httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"GoodmanHP\"");
-        httpd_resp_send(req, "Unauthorized", HTTPD_RESP_USE_STRLEN);
+        sendUnauthorized(req, ctx);
         return false;
     }
     String password = String(colon + 1);
@@ -80,9 +81,7 @@ static bool checkHttpsAuth(httpd_req_t* req) {
         return true;
     }
 
-    httpd_resp_set_status(req, "401 Unauthorized");
-    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"GoodmanHP\"");
-    httpd_resp_send(req, "Unauthorized", HTTPD_RESP_USE_STRLEN);
+    sendUnauthorized(req, ctx);
     return false;
 }
 
@@ -638,7 +637,8 @@ static esp_err_t apTestHandler(httpd_req_t* req) {
     httpd_resp_set_type(req, "application/json");
     if (ctx->apStartCb) {
         String password = ctx->apStartCb();
-        String json = "{\"ssid\":\"GoodmanHP\",\"password\":\"" + password + "\",\"ip\":\"192.168.4.1\"}";
+        String ssid = ctx->systemName.length() > 0 ? ctx->systemName : "Goodman HP";
+        String json = "{\"ssid\":\"" + ssid + "\",\"password\":\"" + password + "\",\"ip\":\"192.168.4.1\"}";
         httpd_resp_send(req, json.c_str(), json.length());
     } else {
         httpd_resp_send(req, "{\"error\":\"AP control not available\"}", HTTPD_RESP_USE_STRLEN);
