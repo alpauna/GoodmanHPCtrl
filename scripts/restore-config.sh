@@ -139,16 +139,18 @@ echo "FTP password: $FTP_PASS"
 
 sleep 2
 
-# Upload config.txt
+# Upload config.txt (use --user to avoid @ in password breaking URL parsing)
 echo "Uploading config.txt to device..."
 curl -s -T "$CONFIG_FILE" \
-    "ftp://$FTP_USER:$FTP_PASS@$DEVICE_IP/config.txt"
+    --user "$FTP_USER:$FTP_PASS" \
+    "ftp://$DEVICE_IP/config.txt"
 
 # Verify upload by downloading and comparing size
 echo "Verifying upload..."
 TMPFILE=$(mktemp)
 curl -s -o "$TMPFILE" \
-    "ftp://$FTP_USER:$FTP_PASS@$DEVICE_IP/config.txt" 2>/dev/null || true
+    --user "$FTP_USER:$FTP_PASS" \
+    "ftp://$DEVICE_IP/config.txt" 2>/dev/null || true
 
 if [ -f "$TMPFILE" ]; then
     REMOTE_SIZE=$(stat -c%s "$TMPFILE" 2>/dev/null || stat -f%z "$TMPFILE" 2>/dev/null)

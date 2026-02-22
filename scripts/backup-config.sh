@@ -71,10 +71,11 @@ TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
 DEST_DIR="$BACKUP_DIR/$TIMESTAMP"
 mkdir -p "$DEST_DIR"
 
-# Download config.txt
+# Download config.txt (use --user to avoid @ in password breaking URL parsing)
 echo "Downloading config.txt..."
 curl -s -o "$DEST_DIR/config.txt" \
-    "ftp://$FTP_USER:$FTP_PASS@$DEVICE_IP/config.txt"
+    --user "$FTP_USER:$FTP_PASS" \
+    "ftp://$DEVICE_IP/config.txt"
 
 if [ ! -s "$DEST_DIR/config.txt" ]; then
     echo "Error: Downloaded file is empty or missing"

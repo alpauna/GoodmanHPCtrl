@@ -56,7 +56,7 @@ New-Item -ItemType Directory -Path $destDir -Force | Out-Null
 # Download config.txt
 Write-Host "Downloading config.txt..."
 $destFile = Join-Path $destDir "config.txt"
-& curl -s -o $destFile "ftp://${FtpUser}:${FtpPass}@${DeviceIP}/config.txt"
+& curl -s -o $destFile --user "${FtpUser}:${FtpPass}" "ftp://${DeviceIP}/config.txt"
 
 if (!(Test-Path $destFile) -or (Get-Item $destFile).Length -eq 0) {
     Write-Error "Downloaded file is empty or missing"

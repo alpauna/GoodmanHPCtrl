@@ -69,6 +69,7 @@ Config config;
 FtpServer ftpSrv;
 bool ftpActive = false;
 unsigned long ftpStopTime = 0;
+static String _ftpActivePassword;  // Must persist — SimpleFTPServer stores pointer, not copy
 
 
 std::map<String, InputPin*> _isrEvent;
@@ -764,8 +765,8 @@ void setup() {
     // Enable callback
     [sdCardReady, &proj](int durationMin) {
       if (!sdCardReady) return;
-      String ftpPw = proj.ftpPassword.length() > 0 ? proj.ftpPassword : "admin";
-      ftpSrv.begin("admin", ftpPw.c_str());
+      _ftpActivePassword = proj.ftpPassword.length() > 0 ? proj.ftpPassword : "admin";
+      ftpSrv.begin("admin", _ftpActivePassword.c_str());
       ftpActive = true;
       ftpStopTime = millis() + ((unsigned long)durationMin * 60000UL);
       Log.info("FTP", "FTP enabled for %d minutes", durationMin);
