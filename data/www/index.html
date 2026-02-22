@@ -29,7 +29,7 @@ h1{color:var(--text);}
 <a href='#' class='reboot' onclick="if(confirm('Reboot device?')){var x=new XMLHttpRequest();x.open('POST','/reboot');x.onload=function(){alert(x.status===200?'Rebooting...':'Failed')};x.send()};return false">Reboot</a>
 </div></nav>
 <div class='content'>
-<h1>Goodman HP Control</h1>
+<h1 id="pageTitle">Goodman HP Control</h1>
 <p style='color:var(--text-secondary)'>IP: <span id="ip"></span></p>
 <a class='card' href='/dashboard'><h3>Dashboard</h3><p style='color:var(--text-secondary)'>Live system status, inputs, outputs, and temperatures.</p><span class='link'>Open Dashboard</span></a>
 <a class='card' href='/config'><h3>Configuration</h3><p style='color:var(--text-secondary)'>WiFi, MQTT, timezone, and sensor settings.</p><span class='link'>Open Config</span></a>
@@ -40,6 +40,6 @@ h1{color:var(--text);}
 </div>
 <script>
 document.getElementById('ip').textContent=location.hostname;
-fetch('/theme').then(function(r){return r.json()}).then(function(d){var t=d.theme||'light';document.documentElement.dataset.theme=t;localStorage.setItem('hp-theme',t);if(d.systemName){var b=document.querySelector('.brand');if(b)b.textContent=d.systemName;document.title=document.title.replace('Goodman HP',d.systemName);}}).catch(function(){});
+fetch('/theme').then(function(r){return r.json()}).then(function(d){var t=d.theme||'light';document.documentElement.dataset.theme=t;localStorage.setItem('hp-theme',t);if(d.systemName){var b=document.querySelector('.brand');if(b)b.textContent=d.systemName;document.title=document.title.replace('Goodman HP',d.systemName);var h=document.getElementById('pageTitle');if(h)h.textContent=d.systemName+' Control';}}).catch(function(){});
 </script>
 </body></html>

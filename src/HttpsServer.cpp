@@ -198,6 +198,7 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["defrostExitTempF"] = proj->defrostExitTempF;
         doc["heatRuntimeThresholdMin"] = proj->heatRuntimeThresholdMs / 60000;
         doc["apFallbackMinutes"] = proj->apFallbackSeconds / 60;
+        doc["apPassword"] = proj->apPassword;
         doc["maxLogSize"] = proj->maxLogSize;
         doc["maxOldLogCount"] = proj->maxOldLogCount;
         doc["tempHistoryIntervalSec"] = proj->tempHistoryIntervalSec;
@@ -209,6 +210,8 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["max6675Cs"] = proj->max6675Cs;
         doc["max6675Do"] = proj->max6675Do;
         doc["max6675Enabled"] = proj->max6675Enabled;
+        doc["systemName"] = proj->systemName.length() > 0 ? proj->systemName : "Goodman HP";
+        doc["mqttPrefix"] = proj->mqttPrefix.length() > 0 ? proj->mqttPrefix : "goodman";
         doc["forceSafeMode"] = proj->forceSafeMode;
         doc["safeMode"] = ctx->safeMode ? *(ctx->safeMode) : false;
         String json;
@@ -426,6 +429,11 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     uint32_t apMinutes = data["apFallbackMinutes"] | (proj->apFallbackSeconds / 60);
     proj->apFallbackSeconds = apMinutes * 60;
 
+    // AP password
+    if (data["apPassword"].is<const char*>()) {
+        proj->apPassword = data["apPassword"] | String("");
+    }
+
     // Logging (live)
     uint32_t maxLogSize = data["maxLogSize"] | proj->maxLogSize;
     uint8_t maxOldLogCount = data["maxOldLogCount"] | proj->maxOldLogCount;
@@ -470,6 +478,30 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         proj->max6675Do = m6Do;
         proj->max6675Enabled = m6En;
         needsReboot = true;
+    }
+
+    // System name (requires reboot)
+    if (data["systemName"].is<const char*>()) {
+        String newName = data["systemName"] | proj->systemName;
+        // Strip non-alphanumeric/space chars, clamp to 20
+        String cleaned;
+        for (size_t i = 0; i < newName.length() && cleaned.length() < 20; i++) {
+            char c = newName[i];
+            if (isalnum(c) || c == ' ') cleaned += c;
+        }
+        if (cleaned.length() > 0 && cleaned != proj->systemName) {
+            proj->systemName = cleaned;
+            needsReboot = true;
+        }
+    }
+
+    // MQTT prefix (requires reboot)
+    if (data["mqttPrefix"].is<const char*>()) {
+        String newPrefix = data["mqttPrefix"] | proj->mqttPrefix;
+        if (newPrefix.length() > 0 && newPrefix != proj->mqttPrefix) {
+            proj->mqttPrefix = newPrefix;
+            needsReboot = true;
+        }
     }
 
     // Force safe mode on next boot (one-shot)
@@ -1381,6 +1413,22 @@ static esp_err_t themeCssGetHandler(httpd_req_t* req) {
     return serveFileHttps(req, "/www/theme.css");
 }
 
+static esp_err_t themeGetHandler(httpd_req_t* req) {
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+    String theme = "dark";
+    String sysName = "Goodman HP";
+    if (ctx->config && ctx->config->getProjectInfo()) {
+        theme = ctx->config->getProjectInfo()->theme;
+        if (theme.length() == 0) theme = "dark";
+        if (ctx->config->getProjectInfo()->systemName.length() > 0)
+            sysName = ctx->config->getProjectInfo()->systemName;
+    }
+    String json = "{\"theme\":\"" + theme + "\",\"systemName\":\"" + sysName + "\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json.c_str(), json.length());
+    return ESP_OK;
+}
+
 // --- Root/index handler ---
 
 static esp_err_t rootGetHandler(httpd_req_t* req) {
@@ -2093,6 +2141,14 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &themeCssGet);
+
+    httpd_uri_t themeGet = {
+        .uri = "/theme",
+        .method = HTTP_GET,
+        .handler = themeGetHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &themeGet);
 
     httpd_uri_t rootGet = {
         .uri = "/",
