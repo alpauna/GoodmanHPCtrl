@@ -96,6 +96,25 @@ screw_hole = Part.makeCylinder(HOLE_R, NX_R - NX_L + 4,
 result = result.cut(screw_hole)
 print(f"Screw holes: volume={result.Volume:.0f}")
 
+# 8. Reposition LCD cutout: shift bottom up 2mm, top up 1mm (27x16mm)
+# Original EasyEDA cutout: X=[-38.48,-11.43] Y=[59.59,76.59] = 27.05x17.00
+LCD_X1 = -38.48; LCD_X2 = -11.43
+LCD_OLD_Y1 = 59.59; LCD_OLD_Y2 = 76.59
+LCD_NEW_Y1 = LCD_OLD_Y1 + 2.0  # 61.59
+LCD_NEW_Y2 = LCD_OLD_Y2 + 1.0  # 77.59
+Z_BOT = CEIL_INNER - 0.2; Z_TOP = CEIL_Z + 0.2
+# Plug old cutout (oversized XY for reliable fuse)
+plug = Part.makeBox(LCD_X2 - LCD_X1 + 2, LCD_OLD_Y2 - LCD_OLD_Y1 + 2,
+                    Z_TOP - Z_BOT,
+                    Vector(LCD_X1 - 1, LCD_OLD_Y1 - 1, Z_BOT))
+result = result.fuse(plug)
+# Cut new cutout (same Z range, no residual layers)
+lcd_cut = Part.makeBox(LCD_X2 - LCD_X1, LCD_NEW_Y2 - LCD_NEW_Y1,
+                       Z_TOP - Z_BOT,
+                       Vector(LCD_X1, LCD_NEW_Y1, Z_BOT))
+result = result.cut(lcd_cut)
+print(f"LCD repositioned: volume={result.Volume:.0f}")
+
 step_f = shell_dir + "3DShell_GoodmanHPv3_T_3.5mm_TC_flipped.step"
 stl_f = shell_dir + "3DShell_GoodmanHPv3_T_3.5mm_TC_flipped.stl"
 result.exportStep(step_f)
