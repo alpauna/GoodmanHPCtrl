@@ -561,4 +561,7 @@ loadTemps();
 scanI2C();
 loadSPIConfig();
 refresh();startPolling(2000);
-</script></body></html>
+</script>
+<div class="btt" id="btt" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Back to top">&#9650;</div>
+<script>window.addEventListener('scroll',function(){document.getElementById('btt').classList.toggle('show',window.scrollY>300)});</script>
+</body></html>

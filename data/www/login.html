@@ -48,4 +48,7 @@ location.href=redirect;
 return false;
 }
 fetch('/theme').then(function(r){return r.json()}).then(function(d){var t=d.theme||'light';document.documentElement.dataset.theme=t;localStorage.setItem('hp-theme',t);if(d.systemName){var b=document.querySelector('.brand');if(b)b.textContent=d.systemName;document.title=document.title.replace('Goodman HP',d.systemName);}}).catch(function(){});
-</script></body></html>
+</script>
+<div class="btt" id="btt" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Back to top">&#9650;</div>
+<script>window.addEventListener('scroll',function(){document.getElementById('btt').classList.toggle('show',window.scrollY>300)});</script>
+</body></html>

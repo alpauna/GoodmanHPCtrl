@@ -30,6 +30,15 @@
     --code-bg: #2d2d2d;
 }
 
+/* Back to top button */
+.btt{position:fixed;bottom:24px;right:24px;width:40px;height:40px;border-radius:50%;
+  background:var(--surface);color:var(--text);border:1px solid var(--border);
+  cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;
+  opacity:0;transition:opacity .3s;pointer-events:none;z-index:80;
+  box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.btt.show{opacity:.7;pointer-events:auto}
+.btt:hover{opacity:1}
+
 /* Hamburger button — hidden on desktop */
 .hamburger{display:none;flex-direction:column;justify-content:center;gap:4px;background:none;border:none;cursor:pointer;padding:6px;}
 .hamburger span{display:block;width:22px;height:2px;background:#fff;border-radius:1px;}

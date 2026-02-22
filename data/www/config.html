@@ -381,4 +381,7 @@ function hl(){var scrollY=window.scrollY+80;var cur='';for(var i=0;i<ids.length;
 links.forEach(function(a){a.classList.toggle('active',a.getAttribute('href')==='#'+cur);});}
 window.addEventListener('scroll',hl);hl();
 })();
-</script></body></html>
+</script>
+<div class="btt" id="btt" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Back to top">&#9650;</div>
+<script>window.addEventListener('scroll',function(){document.getElementById('btt').classList.toggle('show',window.scrollY>300)});</script>
+</body></html>
