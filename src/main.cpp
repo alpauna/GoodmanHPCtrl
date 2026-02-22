@@ -1187,8 +1187,8 @@ void loop() {
   if (bIdle) {
     _idleLoopCount++;
     printIdleStatus();
-    vTaskDelay(1); // Yield to FreeRTOS so idle hooks can fire
   } else {
     _workLoopCount++;
   }
+  vTaskDelay(1); // Yield to FreeRTOS so idle hooks can fire on both cores
 }
