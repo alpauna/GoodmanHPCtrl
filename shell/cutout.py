@@ -377,14 +377,15 @@ def _make_text_solid(text, height, font_dir=None, font_file=None, track=0):
         for char_wires in wire_sets:
             if not char_wires:
                 continue
-            # First wire is the outer boundary, remaining are holes
-            outer_wire = char_wires[0]
-            inner_wires = char_wires[1:] if len(char_wires) > 1 else []
 
-            face = Part.Face(outer_wire)
-            for hole_wire in inner_wires:
-                hole_face = Part.Face(hole_wire)
-                face = face.cut(hole_face)
+            # Use FaceMakerBullseye for reliable hole detection in
+            # multi-wire glyphs (0, 4, a, b, d, e, g, o, p, q, etc.)
+            try:
+                face = Part.makeFace(list(char_wires),
+                                     "Part::FaceMakerBullseye")
+            except Exception:
+                # Fallback: outer wire only (loses counter holes)
+                face = Part.Face(char_wires[0])
 
             char_solid = face.extrude(Vector(0, 0, 1.0))
             if y_offset != 0:

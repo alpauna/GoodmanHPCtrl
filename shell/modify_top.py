@@ -7,8 +7,8 @@ shell_dir = os.path.dirname(os.path.abspath(__file__)) + "/"
 sys.path.insert(0, shell_dir)
 
 from cutout import (wall_ring, add_standoff, drill_hole, drill_hole_lateral,
-                    reposition_cutout, rectangular_cutout, max6675_mount,
-                    deboss_text, verify_cutout, z_probe, print_volume)
+                    reposition_cutout, deboss_text,
+                    verify_cutout, z_probe, print_volume)
 
 # Rebuild: original -> mating flip -> wall thicken -> pillar -> drill -> LCD reposition -> labels
 top_orig = Part.read(shell_dir + "3DShell_GoodmanHPv3_T_3mm_TC.step")
@@ -70,17 +70,18 @@ result = result.fuse(wall_ring(NX_L, NY_F, NX_R, NY_B,
                                OX_L, OY_F, OX_R, OY_B,
                                TOP_RIM_Z, CEIL_Z))
 
-# 5. MAX6675 thermocouple mount (pillar + hole + cutout)
-result = max6675_mount(result,
-                       cutout_x1=TC["x1"], cutout_y1=TC["y1"],
-                       z_inner=CEIL_INNER, z_outer=CEIL_Z,
-                       cutout_w=TC["x2"] - TC["x1"],
-                       cutout_h=TC["y2"] - TC["y1"])
-print_volume(result, "After TC mount")
+# 5. M3 pillar below ceiling (below TC cutout, board screw mount)
+pil_x = bb.XMin + 35   # -63.76 — centered under TC cutout in X
+pil_y = bb.YMax - 30    # 67.14 — below TC cutout bottom edge (71.5)
+result = add_standoff(result, pil_x, pil_y, z_surface=CEIL_INNER,
+                      height=3.0, radius=2.5, z_outer=CEIL_Z)
+
+# 6. M3 hole through pillar + ceiling
+result = drill_hole(result, pil_x, pil_y,
+                    z_bottom=CEIL_INNER - 3.0, z_top=CEIL_Z, radius=1.25)
+print_volume(result, "After pillar+hole")
 
 # Verify pillar and hole
-pil_x = (TC["x1"] + TC["x2"]) / 2
-pil_y = TC["y1"] + 4.5  # default pillar_offset_y
 for dx, dy, label in [(0, 0, "hole center"), (2, 0, "pillar wall")]:
     zs = z_probe(result, pil_x + dx, pil_y + dy)
     print(f"  {label}: Z={[f'{z:.2f}' for z in zs]}" if zs else f"  {label}: OPEN")
@@ -102,28 +103,28 @@ print_volume(result, "After LCD reposition")
 verify_cutout(result, LCD["old_x1"], LCD["new_y1"],
               LCD["old_x2"], LCD["new_y2"], CEIL_INNER, CEIL_Z, "LCD")
 
-# 8. Deboss feature labels
+# 8. Deboss feature labels (0.8mm depth for slicer visibility)
 # LV: "24v Signal Wires" centered above cutout
 result = deboss_text(result, LV["label"],
     x=(LV["x1"] + LV["x2"]) / 2, y=LV["y2"] + 2.0,
-    z_surface=CEIL_Z, height=4.0, depth=0.4, anchor="center")
+    z_surface=CEIL_Z, height=5.0, depth=0.8, anchor="center")
 print_volume(result, "After LV label")
 
 # HV: "240 V" centered above cutout
 result = deboss_text(result, HV["label"],
     x=(HV["x1"] + HV["x2"]) / 2, y=HV["y2"] + 2.0,
-    z_surface=CEIL_Z, height=4.0, depth=0.4, anchor="center")
+    z_surface=CEIL_Z, height=5.0, depth=0.8, anchor="center")
 print_volume(result, "After HV label")
 
 # TC: "+" below-left, "-" below-right
 result = deboss_text(result, "+", x=TC["x1"] + 2, y=TC["y1"] - 5.0,
-    z_surface=CEIL_Z, height=4.0, depth=0.4)
+    z_surface=CEIL_Z, height=5.0, depth=0.8)
 result = deboss_text(result, "-", x=TC["x2"] - 4, y=TC["y1"] - 5.0,
-    z_surface=CEIL_Z, height=4.0, depth=0.4)
+    z_surface=CEIL_Z, height=5.0, depth=0.8)
 # TC: "Liquid" / "Line" below the +/- symbols
 result = deboss_text(result, ["Liquid", "Line"],
     x=(TC["x1"] + TC["x2"]) / 2, y=TC["y1"] - 12.0,
-    z_surface=CEIL_Z, height=3.0, depth=0.4, anchor="center")
+    z_surface=CEIL_Z, height=4.0, depth=0.8, anchor="center")
 print_volume(result, "After TC labels")
 
 # Export
