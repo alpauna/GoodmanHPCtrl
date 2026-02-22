@@ -320,7 +320,7 @@ initMaxPins();
 fetch('/pins?format=json').then(function(r){return r.json();}).then(function(d){
 var ins=d.inputs||[];for(var i=0;i<ins.length;i++)_usedPins[ins[i].pin]=ins[i].name;
 var outs=d.outputs||[];for(var i=0;i<outs.length;i++)_usedPins[outs[i].pin]=outs[i].name;
-_usedPins[8]='SDA';_usedPins[9]='SCL';_usedPins[10]='SD SS';_usedPins[11]='SD MOSI';_usedPins[12]='SD SCK';_usedPins[13]='SD MISO';_usedPins[21]='OneWire';
+_usedPins[8]='SDA';_usedPins[9]='SCL';_usedPins[10]='SD SS';_usedPins[11]='SD MOSI';_usedPins[12]='SD SCK';_usedPins[13]='SD MISO';_usedPins[19]='USB D-';_usedPins[20]='USB D+';_usedPins[21]='OneWire';
 initMaxPins();syncMaxPins();
 });
 function formatSD(){

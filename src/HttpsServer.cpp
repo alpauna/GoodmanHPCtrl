@@ -27,14 +27,21 @@ extern bool _apModeActive;
 extern const char compile_date[];
 
 // Get client IP from esp_http_server request via socket fd
+// Uses sockaddr_in6 to handle both IPv4 and IPv4-mapped IPv6 (::ffff:x.x.x.x)
 static String getClientIP(httpd_req_t* req) {
     int sockfd = httpd_req_to_sockfd(req);
     if (sockfd < 0) return "unknown";
-    struct sockaddr_in addr;
+    struct sockaddr_in6 addr;
     socklen_t addrLen = sizeof(addr);
     if (getpeername(sockfd, (struct sockaddr*)&addr, &addrLen) != 0) return "unknown";
-    char ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &addr.sin_addr, ip, sizeof(ip));
+    char ip[INET6_ADDRSTRLEN];
+    if (addr.sin6_family == AF_INET) {
+        inet_ntop(AF_INET, &((struct sockaddr_in*)&addr)->sin_addr, ip, sizeof(ip));
+    } else {
+        inet_ntop(AF_INET6, &addr.sin6_addr, ip, sizeof(ip));
+        // Strip ::ffff: prefix for IPv4-mapped addresses
+        if (strncmp(ip, "::ffff:", 7) == 0) return String(ip + 7);
+    }
     return String(ip);
 }
 
