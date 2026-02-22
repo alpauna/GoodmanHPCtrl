@@ -186,6 +186,17 @@ for z in [32, 33, 34]:
                 segs.append(f"[{xs[i]:.2f},{xs[i+1]:.2f}]={w:.2f}mm")
         print(f"  Z={z}: {' | '.join(segs)}")
 
+# === 7. Drill M1.5 screw holes through left and right walls ===
+# Original EasyEDA holes were at wall Y-midpoint, Z=32.65, lost during profile flip
+HOLE_Y = (OY_F + OY_B) / 2  # 32.32
+HOLE_Z = 32.65
+HOLE_R = 0.75  # M1.5 = 1.5mm diameter
+screw_hole = Part.makeCylinder(HOLE_R, NX_R - NX_L + 4,
+                                Vector(NX_L - 2, HOLE_Y, HOLE_Z),
+                                Vector(1, 0, 0))
+result = result.cut(screw_hole)
+print(f"7. Screw holes drilled: {result.Volume:.0f}")
+
 print(f"\nBoundBox: X[{result.BoundBox.XMin:.2f},{result.BoundBox.XMax:.2f}] Y[{result.BoundBox.YMin:.2f},{result.BoundBox.YMax:.2f}] Z[{result.BoundBox.ZMin:.2f},{result.BoundBox.ZMax:.2f}]")
 
 # === EXPORT ===

@@ -86,6 +86,16 @@ if sec.Vertexes:
 else:
     print(f"  TC cutout: OPEN (preserved)")
 
+# 7. Drill M1.5 screw holes through left and right walls at mating zone midpoint
+HOLE_Y = (OY_F + OY_B) / 2  # 32.32
+HOLE_Z = 32.65
+HOLE_R = 0.75  # M1.5 = 1.5mm diameter
+screw_hole = Part.makeCylinder(HOLE_R, NX_R - NX_L + 4,
+                                Vector(NX_L - 2, HOLE_Y, HOLE_Z),
+                                Vector(1, 0, 0))
+result = result.cut(screw_hole)
+print(f"Screw holes: volume={result.Volume:.0f}")
+
 step_f = shell_dir + "3DShell_GoodmanHPv3_T_3.5mm_TC_flipped.step"
 stl_f = shell_dir + "3DShell_GoodmanHPv3_T_3.5mm_TC_flipped.stl"
 result.exportStep(step_f)
