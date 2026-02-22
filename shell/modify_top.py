@@ -48,7 +48,7 @@ FEATURES = {
     },
     "SCREW": {  # M1.5 enclosure screws — left and right walls
         "axis": "x", "cy": None,  # computed: wall Y midpoint
-        "cz": 30.0,               # 2mm above bottom lip edge (Z=28)
+        "cz": 31.0,               # 3mm above tongue base (Z=28), within inner lip
         "radius": 0.75,           # M1.5
     },
 }
@@ -69,10 +69,16 @@ result = result.fuse(wall_ring(NMX_L, NMY_F, NMX_R, NMY_B,
 result = result.cut(wall_ring(NX_L-1, NY_F-1, NX_R+1, NY_B+1,
                               NMX_L, NMY_F, NMX_R, NMY_B,
                               TOP_TONGUE_Z-0.1, TOP_RIM_Z))
-# 4. Thicken walls only
+# 4. Solid wall above groove (thicken + fill gap between outer wall and inner lip)
 result = result.fuse(wall_ring(NX_L, NY_F, NX_R, NY_B,
-                               OX_L, OY_F, OX_R, OY_B,
+                               IX_L, IY_F, IX_R, IY_B,
                                TOP_RIM_Z, CEIL_Z))
+
+# 4b. Clean up original internal ribs in mating zone (EasyEDA design artifacts)
+rib_cleanup = wall_ring(IX_L, IY_F, IX_R, IY_B,
+                        IX_L+5, IY_F+5, IX_R-5, IY_B-5,
+                        TOP_TONGUE_Z, 35.5)
+result = result.cut(rib_cleanup)
 
 # 5. MAX6675 thermocouple mount (cutout + 6mm pillar + M3 hole)
 result = max6675_mount(result,

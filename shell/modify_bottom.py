@@ -32,20 +32,11 @@ BOTTOM_FEATURES = {
     "ACCESS": {  # General access / venting
         "wall": "right", "y1": 47.0, "y2": 88.5, "z1": 7, "z2": 24,
     },
-    "ACCESS_SMALL": {  # Small right wall cutout near floor
-        "wall": "right", "y1": 4.0, "y2": 7.5, "z1": 1, "z2": 4,
-    },
     "ANTENNA": {  # ESP32 antenna clearance
         "wall": "back", "x1": -50.0, "x2": -35.0, "z1": 6, "z2": 13,
     },
     "VENT": {  # Air vent slot
         "wall": "back", "x1": -89.5, "x2": -3.5, "z1": 14, "z2": 17,
-    },
-    "FLOOR_RIGHT": {  # Right wall floor-level gap
-        "wall": "right", "y1": -29, "y2": 94, "z1": FLOOR_Z, "z2": FLOOR_Z + 2,
-    },
-    "FLOOR_BACK": {  # Back wall floor-level gap
-        "wall": "back", "x1": -95, "x2": -6, "z1": FLOOR_Z, "z2": FLOOR_Z + 2,
     },
 }
 
