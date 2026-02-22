@@ -23,10 +23,6 @@
 #include "DisplayManager.h"
 #include <max6675.h>
 
-#ifndef AP_PASSWORD
-#define AP_PASSWORD ""
-#endif
-
 extern const char compile_date[] = __DATE__ " " __TIME__;
 IPAddress _MQTT_HOST_DEFAULT = IPAddress(192, 168, 0, 46);
 const char* _filename = "/config.txt";
