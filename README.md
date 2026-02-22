@@ -593,9 +593,19 @@ Sensitive endpoints (`/config`, `/update`, `/ftp`) are protected by HTTP Basic A
 
 ### Password Encryption
 
-All passwords (WiFi, MQTT, admin) are encrypted at rest on the SD card. Plaintext passwords are automatically encrypted on the next config save.
+All passwords (WiFi, MQTT, admin) are encrypted at rest on the SD card using **AES-256-GCM** when a hardware HMAC key is provisioned, or XOR obfuscation as a fallback. Plaintext passwords are automatically encrypted on the next config save.
 
-Optionally, an eFuse HMAC key can be provisioned for hardware-backed encryption:
+**Encryption tiers:**
+
+| Tier | Method | Key Source | Prefix | Security |
+|------|--------|------------|--------|----------|
+| 1 (recommended) | AES-256-GCM | eFuse HMAC hardware key | `$AES$` | Key never leaves silicon — only the HMAC peripheral can access it. Cannot be extracted even with physical access to the flash/SD card |
+| 2 (fallback) | XOR obfuscation | `XOR_KEY` from `secrets.ini` | `$ENC$` | Symmetric key compiled into firmware — extractable from firmware binary |
+| 3 (no key) | Plaintext | None | (none) | No encryption — passwords readable on SD card |
+
+**How it works:** On boot, the firmware calls `esp_hmac_calculate()` with eFuse BLOCK_KEY0 and a salt to derive a 256-bit AES key. The eFuse key is read-protected (`-/-`) — software cannot read it directly; only the ESP32-S3 hardware HMAC peripheral can use it to produce derived keys. Each password is encrypted with a unique random 12-byte IV (nonce), and the GCM authentication tag ensures tampering is detected.
+
+**Provisioning the eFuse HMAC key:**
 
 ```bash
 # Linux/macOS
@@ -605,7 +615,30 @@ Optionally, an eFuse HMAC key can be provisioned for hardware-backed encryption:
 .\scripts\burn-efuse-key.ps1 [-Port COM3]
 ```
 
-This permanently burns a random 256-bit HMAC key to eFuse BLOCK_KEY0. Without an eFuse key, passwords are encrypted using a stable key from `secrets.ini`.
+This permanently burns a random 256-bit HMAC key to eFuse BLOCK_KEY0 with `HMAC_UP` purpose. The key block becomes read-protected and write-protected immediately after burning.
+
+**WARNING:** eFuse burning is permanent and irreversible. Each key block can only be written once per chip. A backup of the key is saved to `efuse_hmac_key.bin` (gitignored) — store this securely.
+
+**Verified on hardware (2026-02-22):**
+
+```
+$ espefuse.py summary (before burn)
+BLOCK_KEY0: Purpose=USER, Access=R/W, Data=00 00 00 ... 00
+
+$ espefuse.py burn_key BLOCK_KEY0 efuse_hmac_key.bin HMAC_UP
+BURN BLOCK4 - OK
+BURN BLOCK0 - OK
+
+$ espefuse.py summary (after burn)
+BLOCK_KEY0: Purpose=HMAC_UP, Access=-/-, Data=?? ?? ?? ... ??
+
+Boot log:
+  AES-256-GCM encryption enabled (eFuse HMAC key found)
+  Admin password encryption: $AES$
+  Admin password: set
+```
+
+Existing `$ENC$` passwords are automatically re-encrypted as `$AES$` on the next config save. The firmware handles all three tiers transparently — it decrypts any format and re-encrypts with the highest available tier on save.
 
 ### FTP Server
 

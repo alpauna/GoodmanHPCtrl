@@ -620,7 +620,9 @@ void setup() {
   Config::setObfuscationKey(XOR_KEY);
 
   // Derive AES-256 key from eFuse HMAC for password encryption
-  if (!config.initEncryption()) {
+  if (config.initEncryption()) {
+    Serial.println("AES-256-GCM encryption enabled (eFuse HMAC key found)");
+  } else {
     Serial.println("WARNING: eFuse HMAC key not available. Using XOR obfuscation for passwords.");
     Serial.println("Burn an eFuse key with -D BURN_EFUSE_KEY to enable AES-256-GCM encryption.");
   }
