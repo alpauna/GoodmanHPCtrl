@@ -1096,8 +1096,16 @@ static esp_err_t pinsPostHandler(httpd_req_t* req) {
     // Toggle manual override
     if (data["manualOverride"].is<bool>()) {
         bool on = data["manualOverride"] | false;
-        ctx->hpController->setManualOverride(on);
+        String err = ctx->hpController->setManualOverride(on);
         JsonDocument resp;
+        if (err.length() > 0) {
+            resp["error"] = err;
+            String json;
+            serializeJson(resp, json);
+            httpd_resp_set_status(req, "409 Conflict");
+            httpd_resp_send(req, json.c_str(), json.length());
+            return ESP_OK;
+        }
         resp["status"] = "ok";
         resp["manualOverride"] = ctx->hpController->isManualOverrideActive();
         resp["message"] = on ? "Manual override enabled (30 min timeout)" : "Manual override disabled, all outputs OFF";

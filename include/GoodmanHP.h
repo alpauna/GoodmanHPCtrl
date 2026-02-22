@@ -133,7 +133,7 @@ class GoodmanHP {
     // Manual override for pin control page
     bool isManualOverrideActive() const;
     uint32_t getManualOverrideRemainingMs() const;
-    void setManualOverride(bool on);
+    String setManualOverride(bool on);
     String setManualOutput(const String& name, bool on);
     String forceDefrost();
 

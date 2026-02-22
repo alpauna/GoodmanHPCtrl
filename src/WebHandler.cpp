@@ -705,7 +705,14 @@ void WebHandler::setupRoutes() {
         // Toggle manual override
         if (data["manualOverride"].is<bool>()) {
             bool on = data["manualOverride"] | false;
-            _hpController->setManualOverride(on);
+            String err = _hpController->setManualOverride(on);
+            if (err.length() > 0) {
+                resp["error"] = err;
+                String json;
+                serializeJson(resp, json);
+                request->send(409, "application/json", json);
+                return;
+            }
             resp["status"] = "ok";
             resp["manualOverride"] = _hpController->isManualOverrideActive();
             resp["message"] = on ? "Manual override enabled (30 min timeout)" : "Manual override disabled, all outputs OFF";

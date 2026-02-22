@@ -1439,7 +1439,12 @@ uint32_t GoodmanHP::getManualOverrideRemainingMs() const {
     return MANUAL_OVERRIDE_TIMEOUT_MS - elapsed;
 }
 
-void GoodmanHP::setManualOverride(bool on) {
+String GoodmanHP::setManualOverride(bool on) {
+    if (on && _startupLockout) {
+        uint32_t remainSec = (getStartupLockoutRemainingMs() + 999) / 1000;
+        Log.warn("HP", "Manual override blocked: startup lockout (%us remaining)", remainSec);
+        return "Startup lockout: " + String(remainSec) + "s remaining";
+    }
     if (on && !_manualOverride) {
         _manualOverride = true;
         _manualOverrideStart = millis();
@@ -1462,19 +1467,21 @@ void GoodmanHP::setManualOverride(bool on) {
         _cntActivated = false;
         Log.warn("HP", "MANUAL OVERRIDE disabled, all outputs OFF");
     }
+    return "";
 }
 
 String GoodmanHP::setManualOutput(const String& name, bool on) {
     if (!_manualOverride) return "Manual override not active";
+    if (_startupLockout) return "Startup lockout active";
 
     OutPin* pin = getOutput(name);
     if (pin == nullptr) return "Output not found: " + name;
 
     if (on && name == "CNT") {
-        // Apply same short cycle protection as normal mode
+        // Apply short cycle protection
         if (pin->getOffTick() > 0) {
             uint32_t offElapsed = millis() - pin->getOffTick();
-            if (offElapsed < 5UL * 60 * 1000 && offElapsed < _cntShortCycleMs) {
+            if (offElapsed < _cntShortCycleMs) {
                 uint32_t remainSec = (_cntShortCycleMs - offElapsed + 999) / 1000;
                 return "Short cycle protection: " + String(remainSec) + "s remaining";
             }
