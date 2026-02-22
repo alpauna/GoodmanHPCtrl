@@ -2,8 +2,12 @@ import Part
 import MeshPart
 from FreeCAD import Vector
 
-import os
+import os, sys
 shell_dir = os.path.dirname(os.path.abspath(__file__)) + "/"
+sys.path.insert(0, shell_dir)
+
+from cutout import wall_ring, drill_hole_lateral
+
 bot_orig = Part.read(shell_dir + "3DShell_GoodmanHPv3_B_3mm.step")
 bb = bot_orig.BoundBox
 
@@ -18,11 +22,6 @@ NMY_F = IY_F - NEW_HALF; NMY_B = IY_B + NEW_HALF
 MX_L = -96.762; MX_R = 3.417; MY_F = -30.98; MY_B = 95.62
 BOT_GROOVE_Z = 31.0; BOT_RIM_Z = 35.0
 FLOOR_Z = bb.ZMin  # actual floor Z
-
-def wall_ring(xol, yof, xor_, yob, xil, yif, xir, yib, zb, zt):
-    outer = Part.makeBox(xor_-xol, yob-yof, zt-zb, Vector(xol, yof, zb))
-    inner = Part.makeBox(xir-xil, yib-yif, zt-zb, Vector(xil, yif, zb))
-    return outer.cut(inner)
 
 print(f"Original volume: {bot_orig.Volume:.0f}")
 print(f"BoundBox: X[{bb.XMin:.2f},{bb.XMax:.2f}] Y[{bb.YMin:.2f},{bb.YMax:.2f}] Z[{bb.ZMin:.2f},{bb.ZMax:.2f}]")
@@ -188,13 +187,8 @@ for z in [32, 33, 34]:
 
 # === 7. Drill M1.5 screw holes through left and right walls ===
 # Original EasyEDA holes were at wall Y-midpoint, Z=32.65, lost during profile flip
-HOLE_Y = (OY_F + OY_B) / 2  # 32.32
-HOLE_Z = 32.65
-HOLE_R = 0.75  # M1.5 = 1.5mm diameter
-screw_hole = Part.makeCylinder(HOLE_R, NX_R - NX_L + 4,
-                                Vector(NX_L - 2, HOLE_Y, HOLE_Z),
-                                Vector(1, 0, 0))
-result = result.cut(screw_hole)
+result = drill_hole_lateral(result, axis='x', start=NX_L, end=NX_R,
+                            cy=(OY_F + OY_B) / 2, cz=32.65, radius=0.75)
 print(f"7. Screw holes drilled: {result.Volume:.0f}")
 
 print(f"\nBoundBox: X[{result.BoundBox.XMin:.2f},{result.BoundBox.XMax:.2f}] Y[{result.BoundBox.YMin:.2f},{result.BoundBox.YMax:.2f}] Z[{result.BoundBox.ZMin:.2f},{result.BoundBox.ZMax:.2f}]")

@@ -252,6 +252,7 @@ The enclosure is an EasyEDA-exported 3D shell, post-processed with FreeCAD Pytho
 | `3DShell_GoodmanHPv3_B_3.5mm_flipped.step/.stl` | Modified bottom shell (3.5mm walls, tongue replaces groove) |
 | `modify_top.py` | FreeCAD script to generate the modified top shell |
 | `modify_bottom.py` | FreeCAD script to generate the modified bottom shell |
+| `cutout.py` | Reusable FreeCAD utility library for cutout, standoff, and mounting operations |
 
 **Why the mating profile was flipped:** The original design had a tongue (raised band) on the top shell mating rim. When 3D printed, this thin horizontal band is prone to layer separation because it prints as an unsupported overhang at the shell's open edge. Moving the tongue to the bottom shell and the groove to the top eliminates this — the bottom tongue prints vertically up from the floor (strong layer adhesion), and the top groove is simply a recess in a solid wall.
 
@@ -264,6 +265,42 @@ The enclosure is an EasyEDA-exported 3D shell, post-processed with FreeCAD Pytho
    - **Top**: Original tongue (Z=28-32) removed, new inner lip + outer groove cut
 
 3. **M3 screw pillar** — 5mm OD, 3mm tall pillar on the top shell ceiling for mounting the MAX6675 thermocouple board, with M3 (2.5mm) through-hole centered in the pillar
+
+**Utility library (`cutout.py`):**
+
+Composable functions for shell modifications. Each takes a `Part.Shape` and returns a modified shape. OCCT boolean operation quirks (oversized plugs, Z range matching, flush trimming) are handled internally:
+
+| Function | Purpose |
+|----------|---------|
+| `rectangular_cutout()` | Cut a window through a Z-normal surface |
+| `reposition_cutout()` | Plug an existing cutout and re-cut at a new position (3-step: oversized plug, matching-Z cut, flush trim) |
+| `add_standoff()` | Fuse a cylindrical pillar onto a surface (with auto-trim for reliable OCCT fuse) |
+| `drill_hole()` | Vertical through-hole along Z axis |
+| `drill_hole_lateral()` | Horizontal through-hole along X or Y axis (screw holes through walls) |
+| `add_standoffs_with_holes()` | Multiple standoffs + centered screw holes (convenience combo) |
+| `wall_ring()` | Rectangular ring (outer box minus inner box) for wall thickening and mating profiles |
+| `z_probe()` | Probe Z intersections at an XY point (verification) |
+| `verify_cutout()` | Check a rectangular cutout is fully open (probes center + corners) |
+| `verify_solid()` | Check material exists at a point between two Z levels |
+
+Example usage:
+```python
+from cutout import reposition_cutout, add_standoff, drill_hole
+
+# Reposition an LCD cutout (plug old hole, cut new, trim flush — all in one call)
+result = reposition_cutout(result,
+    old_x1=-38.48, old_y1=59.59, old_x2=-11.43, old_y2=76.59,
+    new_x1=-38.48, new_y1=61.59, new_x2=-11.43, new_y2=77.59,
+    z_inner=48.50, z_outer=51.50)
+
+# Add a mounting standoff below the ceiling
+result = add_standoff(result, cx=-63.76, cy=67.14,
+    z_surface=48.50, height=3.0, radius=2.5, z_outer=51.50)
+
+# Drill a screw hole through the standoff
+result = drill_hole(result, cx=-63.76, cy=67.14,
+    z_bottom=45.50, z_top=51.50, radius=1.25)
+```
 
 **Regenerating modified shells:**
 
