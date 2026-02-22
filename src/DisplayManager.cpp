@@ -9,6 +9,7 @@
 extern uint8_t getCpuLoadCore0();
 extern uint8_t getCpuLoadCore1();
 extern bool _apModeActive;
+extern String _apPassword;
 
 DisplayManager::DisplayManager(Scheduler* ts)
     : _ts(ts), _hp(nullptr), _display(nullptr),
@@ -95,6 +96,12 @@ void DisplayManager::setEnabled(bool enabled) {
 
 void DisplayManager::flipPage() {
     _currentPage = (_currentPage + 1) % NUM_PAGES;
+    // Hold AP credentials screen 3x longer so password is readable
+    if (_currentPage == 0 && _apModeActive && _tFlipPage) {
+        _tFlipPage->setInterval(_pageIntervalSec * 3 * TASK_SECOND);
+    } else if (_tFlipPage) {
+        _tFlipPage->setInterval(_pageIntervalSec * TASK_SECOND);
+    }
 }
 
 void DisplayManager::updateDisplay() {
@@ -115,6 +122,22 @@ void DisplayManager::updateDisplay() {
 }
 
 void DisplayManager::drawPageStatus() {
+    if (_apModeActive) {
+        _display->setTextSize(2);
+        _display->setCursor(0, 0);
+        _display->print(F("AP MODE"));
+        _display->drawLine(0, 20, 127, 20, SSD1306_WHITE);
+        _display->setTextSize(1);
+        _display->setCursor(0, 26);
+        _display->print(F("SSID: GoodmanHP"));
+        _display->setCursor(0, 38);
+        _display->print(F("Pass: "));
+        _display->print(_apPassword);
+        _display->setCursor(0, 50);
+        _display->print(F("IP: 192.168.4.1"));
+        return;
+    }
+
     // State banner in large text
     _display->setTextSize(2);
     _display->setCursor(0, 0);
@@ -125,11 +148,9 @@ void DisplayManager::drawPageStatus() {
 
     _display->setTextSize(1);
 
-    // WiFi IP or AP Mode
+    // WiFi IP
     _display->setCursor(0, 26);
-    if (_apModeActive) {
-        _display->print(F("AP: 192.168.4.1"));
-    } else if (WiFi.isConnected()) {
+    if (WiFi.isConnected()) {
         _display->print(F("IP: "));
         _display->print(WiFi.localIP().toString());
     } else {

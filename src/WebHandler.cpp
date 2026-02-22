@@ -28,6 +28,11 @@ void WebHandler::setFtpState(bool* activePtr, unsigned long* stopTimePtr) {
     _ftpStopTimePtr = stopTimePtr;
 }
 
+void WebHandler::setAPCallbacks(APStartCallback startCb, APStopCallback stopCb) {
+    _apStartCb = startCb;
+    _apStopCb = stopCb;
+}
+
 bool WebHandler::checkAuth(AsyncWebServerRequest* request) {
     if (!_config || !_config->hasAdminPassword()) return true;
 
@@ -901,6 +906,7 @@ void WebHandler::setupRoutes() {
                 doc["defrostExitTempF"] = proj->defrostExitTempF;
                 doc["heatRuntimeThresholdMin"] = proj->heatRuntimeThresholdMs / 60000;
                 doc["apFallbackMinutes"] = proj->apFallbackSeconds / 60;
+                doc["apPassword"] = proj->apPassword;
                 doc["maxLogSize"] = proj->maxLogSize;
                 doc["maxOldLogCount"] = proj->maxOldLogCount;
                 doc["tempHistoryIntervalSec"] = proj->tempHistoryIntervalSec;
@@ -1042,6 +1048,27 @@ void WebHandler::setupRoutes() {
             }
         });
         _server.addHandler(ftpPostHandler);
+
+        // AP mode test/stop endpoints
+        _server.on("/ap/test", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            if (_apStartCb) {
+                String password = _apStartCb();
+                request->send(200, "application/json",
+                    "{\"ssid\":\"GoodmanHP\",\"password\":\"" + password + "\",\"ip\":\"192.168.4.1\"}");
+            } else {
+                request->send(500, "application/json", "{\"error\":\"AP control not available\"}");
+            }
+        });
+        _server.on("/ap/stop", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            if (!checkAuth(request)) return;
+            if (_apStopCb) {
+                _apStopCb();
+                request->send(200, "application/json", "{\"status\":\"ok\",\"message\":\"AP mode stopped\"}");
+            } else {
+                request->send(500, "application/json", "{\"error\":\"AP control not available\"}");
+            }
+        });
 
         // SD card info/format endpoints (HTTP fallback)
         _server.on("/sd/info", HTTP_GET, [this](AsyncWebServerRequest *request) {
@@ -1328,6 +1355,12 @@ void WebHandler::setupRoutes() {
         _server.on("/ftp", HTTP_POST, [this](AsyncWebServerRequest *request) {
             request->redirect("https://" + String(getWiFiIP()) + "/ftp");
         });
+        _server.on("/ap/test", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/ap/test");
+        });
+        _server.on("/ap/stop", HTTP_POST, [this](AsyncWebServerRequest *request) {
+            request->redirect("https://" + String(getWiFiIP()) + "/ap/stop");
+        });
         _server.on("/sd/info", HTTP_GET, [this](AsyncWebServerRequest *request) {
             request->redirect("https://" + String(getWiFiIP()) + "/sd/info");
         });
@@ -1611,6 +1644,10 @@ void WebHandler::setupRoutes() {
         uint32_t apMinutes = data["apFallbackMinutes"] | (proj->apFallbackSeconds / 60);
         proj->apFallbackSeconds = apMinutes * 60;
 
+        if (data["apPassword"].is<const char*>()) {
+            proj->apPassword = data["apPassword"] | String("");
+        }
+
         uint32_t maxLogSize = data["maxLogSize"] | proj->maxLogSize;
         uint8_t maxOldLogCount = data["maxOldLogCount"] | proj->maxOldLogCount;
         proj->maxLogSize = maxLogSize;
@@ -1710,6 +1747,8 @@ bool WebHandler::beginSecure(const uint8_t* cert, size_t certLen, const uint8_t*
     _httpsCtx.tempHistory = _tempHistory;
     _httpsCtx.tempHistIntervalCb = _tempHistIntervalCb;
     _httpsCtx.displayConfigCb = _displayConfigCb;
+    _httpsCtx.apStartCb = _apStartCb;
+    _httpsCtx.apStopCb = _apStopCb;
 
     _httpsServer = httpsStart(cert, certLen, key, keyLen, &_httpsCtx);
     return _httpsServer != nullptr;

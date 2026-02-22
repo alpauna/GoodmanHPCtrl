@@ -164,6 +164,19 @@ String Config::decryptPassword(const String& encrypted) {
     return encrypted;
 }
 
+String Config::generateRandomPassword(uint8_t length) {
+    static const char charset[] = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+    uint8_t buf[32];
+    if (length > sizeof(buf)) length = sizeof(buf);
+    esp_fill_random(buf, length);
+    String result;
+    result.reserve(length);
+    for (uint8_t i = 0; i < length; i++) {
+        result += charset[buf[i] % (sizeof(charset) - 1)];
+    }
+    return result;
+}
+
 void Config::setI2CDevice(const String& addr, const String& driver, const String& role) {
     if (driver.length() == 0) {
         _i2cDevices.erase(addr);
@@ -379,7 +392,11 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     _wifiSSID = wifi_ssid != nullptr ? wifi_ssid : "";
     _wifiPassword = wifi_password != nullptr ? decryptPassword(wifi_password != nullptr ? wifi_password : "") : "";
     proj.apFallbackSeconds = wifiObj["apFallbackSeconds"] | 600;
-    Serial.printf("Read WiFi SSID:%s apFallback:%us\n", wifi_ssid ? wifi_ssid : "", proj.apFallbackSeconds);
+    const char* apPw = wifiObj["apPassword"];
+    proj.apPassword = (apPw != nullptr && strlen(apPw) > 0) ? decryptPassword(String(apPw)) : "";
+    Serial.printf("Read WiFi SSID:%s apFallback:%us apPassword:%s\n",
+                  wifi_ssid ? wifi_ssid : "", proj.apFallbackSeconds,
+                  proj.apPassword.length() > 0 ? "set" : "auto");
 
     JsonObject mqtt = doc["mqtt"];
     const char* mqtt_user = mqtt["user"];
@@ -667,6 +684,11 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     wifi["ssid"] = _wifiSSID;
     wifi["password"] = encryptPassword(_wifiPassword);
     wifi["apFallbackSeconds"] = proj.apFallbackSeconds;
+    if (proj.apPassword.length() > 0) {
+        wifi["apPassword"] = encryptPassword(proj.apPassword);
+    } else {
+        wifi.remove("apPassword");
+    }
 
     JsonObject mqtt = doc["mqtt"].to<JsonObject>();
     mqtt["user"] = _mqttUser;

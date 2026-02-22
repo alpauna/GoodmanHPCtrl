@@ -67,7 +67,13 @@ button:hover{background:#45a049;}
 <label>Password</label><input type='password' id='wifiPassword'>
 <label>Current Password or Admin Password (required to change)</label><input type='password' id='curWifiPw'>
 <label>AP Fallback Timeout (minutes) <span class='tag tag-live'>live</span></label><input type='number' id='apFallbackMinutes' min='1' step='1'>
-<a href='/wifi/view' class='btn-sm' style='display:inline-block;text-decoration:none;margin-top:8px;'>Scan WiFi</a>
+<label>AP Password (leave blank for auto-generate) <span class='tag tag-live'>live</span></label><input type='text' id='apPassword'>
+<div style='margin-top:8px'>
+<a href='/wifi/view' class='btn-sm' style='display:inline-block;text-decoration:none;margin-right:8px;'>Scan WiFi</a>
+<button type='button' class='btn-sm' id='btnTestAP' onclick='testAP()'>Test AP Mode</button>
+<button type='button' class='btn-sm btn-red' id='btnStopAP' style='display:none' onclick='stopAP()'>Stop AP Mode</button>
+<span id='apTestStatus' style='margin-left:8px;font-size:13px;'></span>
+</div>
 </fieldset>
 <fieldset><legend>MQTT <span class='tag tag-reboot'>reboot</span></legend>
 <label>Host</label><input type='text' id='mqttHost'>
@@ -130,7 +136,7 @@ button:hover{background:#45a049;}
 <div id='status'></div>
 </div>
 <script>
-var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do'];
+var fields=['wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','gmtOffsetHrs','daylightOffsetHrs','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','apPassword','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do'];
 var adminPwSet=false;
 fetch('/config?format=json').then(r=>r.json()).then(d=>{
 fields.forEach(f=>{var e=document.getElementById(f);if(e)e.value=d[f]!=null?d[f]:'';});
@@ -274,4 +280,27 @@ document.getElementById('sdFormatConfirm').value='';
 loadSDInfo();
 }).catch(err=>{st.className='err';st.textContent='Error: '+err;st.style.display='block';});
 }
+function testAP(){
+document.getElementById('apTestStatus').textContent='Starting...';
+fetch('/ap/test',{method:'POST'}).then(r=>r.json()).then(r=>{
+if(r.error){document.getElementById('apTestStatus').textContent=r.error;return;}
+document.getElementById('apTestStatus').textContent='SSID: '+r.ssid+' Pass: '+r.password+' IP: '+r.ip;
+document.getElementById('btnTestAP').style.display='none';
+document.getElementById('btnStopAP').style.display='inline-block';
+}).catch(err=>{document.getElementById('apTestStatus').textContent='Error: '+err;});
+}
+function stopAP(){
+fetch('/ap/stop',{method:'POST'}).then(r=>r.json()).then(r=>{
+document.getElementById('apTestStatus').textContent='';
+document.getElementById('btnStopAP').style.display='none';
+document.getElementById('btnTestAP').style.display='inline-block';
+}).catch(err=>{document.getElementById('apTestStatus').textContent='Error: '+err;});
+}
+fetch('/state').then(r=>r.json()).then(d=>{
+if(d.apMode){
+document.getElementById('btnTestAP').style.display='none';
+document.getElementById('btnStopAP').style.display='inline-block';
+document.getElementById('apTestStatus').textContent='AP Mode active';
+}
+}).catch(()=>{});
 </script></body></html>

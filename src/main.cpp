@@ -24,7 +24,7 @@
 #include <max6675.h>
 
 #ifndef AP_PASSWORD
-#error "AP_PASSWORD not defined — create secrets.ini with: -D AP_PASSWORD=\\\"yourpassword\\\""
+#define AP_PASSWORD ""
 #endif
 
 extern const char compile_date[] = __DATE__ " " __TIME__;
@@ -103,6 +103,7 @@ u_int32_t _wifiStartMillis = 0;
 // WiFi AP fallback mode
 static uint32_t _wifiDisconnectCount = 0;
 bool _apModeActive = false;
+String _apPassword;
 
 u_long runTimeStart;
 u_long currentRuntime;  
@@ -187,6 +188,7 @@ ProjectInfo proj = {
   5400000,            // heatRuntimeThresholdMs: 90 min default
   false,              // softwareDefrost: not active
   600,                // apFallbackSeconds: 10 minutes
+  "",                 // apPassword: empty = auto-generate
   120,                // tempHistoryIntervalSec: 2 minutes default
   "dark",             // theme: dark default
   10,                 // displayPageIntervalSec: 10s default
@@ -288,26 +290,96 @@ bool onWifiWaitEnable(){
   return true;
 }
 
+// Forward declaration for AP reconnect task
+void onAPReconnect();
+Task tAPReconnect(TASK_MINUTE, TASK_FOREVER, &onAPReconnect, &ts, false);
+
 void startAPMode() {
-  _apModeActive = true;
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_AP);
   const char* apSSID = "GoodmanHP";
-  const char* apPass = AP_PASSWORD;
-  WiFi.softAP(apSSID, apPass);
+
+  // Password: configured > previously generated > new random
+  if (proj.apPassword.length() >= 8) {
+    _apPassword = proj.apPassword;
+  } else if (_apPassword.length() == 0) {
+    _apPassword = Config::generateRandomPassword();
+  }
+  // else: reuse existing _apPassword
+
+  if (!_apModeActive) {
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.softAP(apSSID, _apPassword.c_str());
+    _apModeActive = true;
+  }
+
   IPAddress apIP = WiFi.softAPIP();
   Log.warn("WiFi", "========================================");
-  Log.warn("WiFi", "AP MODE ACTIVE - Could not connect to WiFi");
+  Log.warn("WiFi", "AP MODE ACTIVE");
   Log.warn("WiFi", "SSID: %s", apSSID);
-  Log.warn("WiFi", "Password: %s", apPass);
+  Log.warn("WiFi", "Password: %s", _apPassword.c_str());
   Log.warn("WiFi", "IP: %s", apIP.toString().c_str());
   Log.warn("WiFi", "========================================");
   Serial.println();
   Serial.println("*** AP MODE ***");
   Serial.printf("SSID: %s\n", apSSID);
-  Serial.printf("Pass: %s\n", apPass);
+  Serial.printf("Pass: %s\n", _apPassword.c_str());
   Serial.printf("IP:   %s\n", apIP.toString().c_str());
   Serial.println("***************");
+
+  // Start periodic WiFi reconnect attempts using AP fallback interval
+  tAPReconnect.setInterval(proj.apFallbackSeconds * (unsigned long)TASK_SECOND);
+  tAPReconnect.enableDelayed();
+
+  // Kick off STA connection attempt in background
+  if (_WIFI_SSID.length() > 0) {
+    WiFi.begin(_WIFI_SSID.c_str(), _WIFI_PASSWORD.c_str());
+  }
+}
+
+String startAPModeTest() {
+  // Disconnect WiFi to simulate fallback, then start AP
+  WiFi.disconnect(true);
+  _apModeActive = false;  // allow startAPMode() to initialize
+  startAPMode();
+  return _apPassword;
+}
+
+void stopAPMode() {
+  _apModeActive = false;
+  // Keep _apPassword for reuse
+  tAPReconnect.disable();
+  WiFi.softAPdisconnect(true);
+  WiFi.mode(WIFI_STA);
+  Log.info("WiFi", "AP mode stopped");
+  _wifiDisconnectCount = 0;
+  if (_WIFI_SSID.length() > 0) {
+    WiFi.begin(_WIFI_SSID.c_str(), _WIFI_PASSWORD.c_str());
+  }
+}
+
+void onAPReconnect() {
+  if (!_apModeActive) {
+    tAPReconnect.disable();
+    return;
+  }
+
+  if (WiFi.isConnected()) {
+    // WiFi reconnected — exit AP mode gracefully
+    Log.info("WiFi", "WiFi reconnected to %s, exiting AP mode", _WIFI_SSID.c_str());
+    _apModeActive = false;
+    _wifiDisconnectCount = 0;
+    tAPReconnect.disable();
+    WiFi.softAPdisconnect(true);
+    WiFi.mode(WIFI_STA);
+    mqttHandler.startReconnect();
+    return;
+  }
+
+  // Not connected — retry
+  if (_WIFI_SSID.length() > 0) {
+    Log.info("WiFi", "AP mode: retrying WiFi connection to %s", _WIFI_SSID.c_str());
+    WiFi.begin(_WIFI_SSID.c_str(), _WIFI_PASSWORD.c_str());
+  }
 }
 
 void onWifiWaitDisable(){
@@ -341,6 +413,13 @@ void onWiFiEvent(arduino_event_id_t event, arduino_event_info_t info){
       tWaitOnWiFi.disable();
       webHandler.startNtpSync();
       Log.info("WIFI", "Got ip: %s", webHandler.getWiFiIP());
+      if (_apModeActive) {
+        Log.info("WiFi", "WiFi reconnected while in AP mode, exiting AP");
+        _apModeActive = false;
+        tAPReconnect.disable();
+        WiFi.softAPdisconnect(true);
+        WiFi.mode(WIFI_STA);
+      }
       break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
       if (_apModeActive) break;
@@ -582,6 +661,12 @@ void setup() {
     }
   );
   webHandler.setFtpState(&ftpActive, &ftpStopTime);
+
+  // AP mode test/stop callbacks
+  webHandler.setAPCallbacks(
+    []() -> String { return startAPModeTest(); },
+    []() { stopAPMode(); }
+  );
 
   // Start HTTPS before HTTP so setupRoutes() knows whether to redirect or serve directly
   if (config.hasCertificates()) {

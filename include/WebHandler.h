@@ -34,11 +34,14 @@ class WebHandler {
     typedef std::function<String()> FtpStatusCallback;
     typedef std::function<void(uint32_t)> TempHistoryIntervalCallback;
     typedef std::function<void(uint32_t, bool)> DisplayConfigCallback;
+    typedef std::function<String()> APStartCallback;
+    typedef std::function<void()> APStopCallback;
     void setTempHistory(TempHistory* th) { _tempHistory = th; }
     void setFtpControl(FtpEnableCallback enableCb, FtpDisableCallback disableCb, FtpStatusCallback statusCb);
     void setTempHistoryIntervalCallback(TempHistoryIntervalCallback cb) { _tempHistIntervalCb = cb; }
     void setDisplayConfigCallback(DisplayConfigCallback cb) { _displayConfigCb = cb; }
     void setFtpState(bool* activePtr, unsigned long* stopTimePtr);
+    void setAPCallbacks(APStartCallback startCb, APStopCallback stopCb);
 
   private:
     AsyncWebServer _server;
@@ -71,6 +74,8 @@ class WebHandler {
     FtpStatusCallback _ftpStatusCb;
     TempHistoryIntervalCallback _tempHistIntervalCb;
     DisplayConfigCallback _displayConfigCb;
+    APStartCallback _apStartCb;
+    APStopCallback _apStopCb;
     bool* _ftpActivePtr = nullptr;
     unsigned long* _ftpStopTimePtr = nullptr;
 

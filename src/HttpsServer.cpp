@@ -630,6 +630,35 @@ static esp_err_t ftpPostHandler(httpd_req_t* req) {
     return ESP_OK;
 }
 
+// --- AP mode handlers ---
+
+static esp_err_t apTestHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+    httpd_resp_set_type(req, "application/json");
+    if (ctx->apStartCb) {
+        String password = ctx->apStartCb();
+        String json = "{\"ssid\":\"GoodmanHP\",\"password\":\"" + password + "\",\"ip\":\"192.168.4.1\"}";
+        httpd_resp_send(req, json.c_str(), json.length());
+    } else {
+        httpd_resp_send(req, "{\"error\":\"AP control not available\"}", HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t apStopHandler(httpd_req_t* req) {
+    if (!checkHttpsAuth(req)) return ESP_OK;
+    HttpsContext* ctx = (HttpsContext*)req->user_ctx;
+    httpd_resp_set_type(req, "application/json");
+    if (ctx->apStopCb) {
+        ctx->apStopCb();
+        httpd_resp_send(req, "{\"status\":\"ok\",\"message\":\"AP mode stopped\"}", HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_send(req, "{\"error\":\"AP control not available\"}", HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+}
+
 // --- Temps handler ---
 
 static esp_err_t tempsGetHandler(httpd_req_t* req) {
@@ -2078,6 +2107,22 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
         .user_ctx = ctx
     };
     httpd_register_uri_handler(server, &ftpPost);
+
+    httpd_uri_t apTestPost = {
+        .uri = "/ap/test",
+        .method = HTTP_POST,
+        .handler = apTestHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &apTestPost);
+
+    httpd_uri_t apStopPost = {
+        .uri = "/ap/stop",
+        .method = HTTP_POST,
+        .handler = apStopHandler,
+        .user_ctx = ctx
+    };
+    httpd_register_uri_handler(server, &apStopPost);
 
     httpd_uri_t sdInfoGet = {
         .uri = "/sd/info",

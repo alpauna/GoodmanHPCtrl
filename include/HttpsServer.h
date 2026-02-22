@@ -37,6 +37,8 @@ struct HttpsContext {
     TempHistory* tempHistory;
     std::function<void(uint32_t)> tempHistIntervalCb;
     std::function<void(uint32_t, bool)> displayConfigCb;
+    std::function<String()> apStartCb;
+    std::function<void()> apStopCb;
 };
 
 // Opaque handle

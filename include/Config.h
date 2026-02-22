@@ -39,6 +39,7 @@ struct ProjectInfo {
     uint32_t heatRuntimeThresholdMs;     // Heat runtime threshold to trigger defrost in ms (default 5400000 = 90 min)
     bool softwareDefrost;                // Persisted software defrost state (survives reboot)
     uint32_t apFallbackSeconds;  // WiFi disconnect time before AP fallback (default 600 = 10 min)
+    String apPassword;           // AP mode password override (empty = auto-generate)
     uint32_t tempHistoryIntervalSec; // Temp history capture interval in seconds (30-300, default 120)
     String theme;                // UI theme: "light" or "dark" (default "light")
     // Display settings
@@ -111,6 +112,7 @@ class Config {
     static void setObfuscationKey(const String& key);
     static String encryptPassword(const String& plaintext);
     static String decryptPassword(const String& encrypted);
+    static String generateRandomPassword(uint8_t length = 8);
 
     // I2C device assignments
     I2CDeviceMap& getI2CDevices() { return _i2cDevices; }
