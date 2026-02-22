@@ -52,7 +52,7 @@ BOTTOM_FEATURES = {
 # Enclosure screw holes (shared with top shell)
 SCREW = {
     "axis": "x", "cy": None,  # computed: wall Y midpoint
-    "cz": 30.0,               # 2mm above bottom lip edge (Z=28)
+    "cz": 33.0,               # 2mm below rim edge (Z=35)
     "radius": 0.75,           # M1.5
 }
 
