@@ -11,6 +11,13 @@ from cutout import (wall_ring, drill_hole_lateral, reposition_cutout,
                     max6675_mount, labeled_cutout, deboss_text,
                     verify_cutout, z_probe, print_volume,
                     knuckle_hinge, snap_clip)
+from hinge_config import (NX_L, NX_R, OY_F, OY_B,
+                           HINGE_Z, HINGE_A_START, HINGE_A_END,
+                           KNUCKLE_COUNT, KNUCKLE_RADIUS, PIN_RADIUS,
+                           KNUCKLE_CLEARANCE, PIN_AXIS_X, PIN_AXIS_Z,
+                           CLIP_Z, CLIP_Y_POSITIONS, CLIP_WIDTH,
+                           CLIP_HEIGHT, CLIP_DEPTH, CLIP_LIP_HEIGHT,
+                           CLIP_LIP_DEPTH, WALL_THICK)
 
 top_orig = Part.read(shell_dir + "3DShell_GoodmanHPv3_T_3mm_TC.step")
 bb = top_orig.BoundBox
@@ -18,7 +25,6 @@ bb = top_orig.BoundBox
 OX_L = -98.262; IX_L = -95.262; IX_R = 1.917; OX_R = 4.917
 OY_F = -32.48;  IY_F = -29.48;  IY_B = 94.12;  OY_B = 97.12
 THICK = 0.5
-NX_L = OX_L - THICK; NX_R = OX_R + THICK
 NY_F = OY_F - THICK; NY_B = OY_B + THICK
 NEW_HALF = 1.75
 NMX_L = IX_L - NEW_HALF; NMX_R = IX_R + NEW_HALF
@@ -50,17 +56,7 @@ FEATURES = {
 TC = FEATURES["TC"]
 LCD = FEATURES["LCD"]
 
-# Hinge parameters — must match bottom shell
-HINGE_Z = 33.0  # midpoint of mating zone
-HINGE_INSET = 5.0
-HINGE_A_START = OY_F + HINGE_INSET
-HINGE_A_END = OY_B - HINGE_INSET
-KNUCKLE_RADIUS = 3.0
-PIN_RADIUS = 1.0
-
-# Snap clip parameters — must match bottom shell positions
-CLIP_Z = 33.0
-CLIP_Y_POSITIONS = [20.0, 65.0]
+print(f"Pin axis (from hinge_config): X={PIN_AXIS_X:.3f}  Z={PIN_AXIS_Z:.3f}")
 
 # === 1-4. Mating profile (same as non-hinged) ===
 # 1. Remove tongue
@@ -84,7 +80,15 @@ rib_cleanup = wall_ring(IX_L, IY_F, IX_R, IY_B,
                         IX_L+5, IY_F+5, IX_R-5, IY_B-5,
                         TOP_TONGUE_Z, 35.5)
 result = result.cut(rib_cleanup)
-print_volume(result, "After mating profile")
+
+# === 4c. Remove groove/lip on left (hinge) wall — prevents pivot binding ===
+hinge_cut = Part.makeBox(
+    (IX_L + 1) - (NX_L - 1),                       # X: generous span through left wall
+    IY_B - IY_F,                                     # Y: inner span (preserves front/back corners)
+    (TOP_RIM_Z + 0.2) - (TOP_TONGUE_Z - 0.5),      # Z: mating zone
+    Vector(NX_L - 1, IY_F, TOP_TONGUE_Z - 0.5))
+result = result.cut(hinge_cut)
+print_volume(result, "After mating profile (left wall cleared)")
 
 # === 5. MAX6675 thermocouple mount ===
 result = max6675_mount(result,
@@ -130,40 +134,53 @@ result = deboss_text(result, ["Liquid", "Line"],
     z_surface=CEIL_Z, height=4.0, depth=0.8, anchor="center")
 print_volume(result, "After TC labels")
 
-# === 8. Knuckle hinge on left wall (odd knuckles for top) ===
+# === 8. Knuckle hinge on left wall (odd knuckles: 1, 3) ===
+# Struts run from barrel up to ceiling for full stress transfer
 result = knuckle_hinge(result, wall='left', wall_coord=NX_L,
                        a_start=HINGE_A_START, a_end=HINGE_A_END,
                        z_center=HINGE_Z,
-                       knuckle_count=5, knuckle_radius=KNUCKLE_RADIUS,
-                       pin_radius=PIN_RADIUS, clearance=0.3,
-                       side="top")
-print_volume(result, "After hinge knuckles")
+                       knuckle_count=KNUCKLE_COUNT,
+                       knuckle_radius=KNUCKLE_RADIUS,
+                       pin_radius=PIN_RADIUS,
+                       clearance=KNUCKLE_CLEARANCE,
+                       side="top",
+                       strut_z_max=CEIL_Z)
+print_volume(result, "After hinge knuckles + struts")
 
 # === 9. Snap clip pockets on right wall ===
 for i, clip_y in enumerate(CLIP_Y_POSITIONS):
     result = snap_clip(result, wall='right', wall_coord=NX_R,
                        a_center=clip_y, z_center=CLIP_Z,
-                       clip_width=8.0, clip_height=4.0, clip_depth=2.0,
-                       lip_height=1.0, lip_depth=0.8,
-                       wall_thick=3.5, side="top")
+                       clip_width=CLIP_WIDTH, clip_height=CLIP_HEIGHT,
+                       clip_depth=CLIP_DEPTH, lip_height=CLIP_LIP_HEIGHT,
+                       lip_depth=CLIP_LIP_DEPTH, wall_thick=WALL_THICK,
+                       side="top")
     print_volume(result, f"After snap pocket at Y={clip_y}")
 
 # === VERIFICATION ===
 print("\n=== VERIFICATION ===")
+
+# Pin axis alignment check — probe through each knuckle center
+print(f"Pin axis alignment (expected X={PIN_AXIS_X:.3f}, Z={PIN_AXIS_Z:.3f}):")
+total_length = abs(HINGE_A_END - HINGE_A_START)
+seg_length = (total_length - KNUCKLE_CLEARANCE * (KNUCKLE_COUNT - 1)) / KNUCKLE_COUNT
+a_min = min(HINGE_A_START, HINGE_A_END)
+for i in range(1, KNUCKLE_COUNT, 2):  # top knuckles: 1, 3
+    seg_start = a_min + i * (seg_length + KNUCKLE_CLEARANCE)
+    seg_mid_y = seg_start + seg_length / 2
+    # Probe in X direction through pin center
+    line = Part.makeLine(Vector(PIN_AXIS_X - 5, seg_mid_y, PIN_AXIS_Z),
+                         Vector(PIN_AXIS_X + 5, seg_mid_y, PIN_AXIS_Z))
+    sec = result.section(line)
+    xs = sorted([v.X for v in sec.Vertexes]) if sec.Vertexes else []
+    print(f"  Knuckle {i} (Y={seg_mid_y:.1f}): X={[f'{x:.2f}' for x in xs]}")
+
+# TC mount
 pil_x = bb.XMin + 35
 pil_y = bb.YMax - 30
 for dx, dy, label in [(0, 0, "hole center"), (2, 0, "pillar wall")]:
     zs = z_probe(result, pil_x + dx, pil_y + dy)
     print(f"  {label}: Z={[f'{z:.2f}' for z in zs]}" if zs else f"  {label}: OPEN")
-
-print("Hinge knuckles (top side, should have material):")
-y_mid = (OY_F + OY_B) / 2
-for y in [HINGE_A_START + 15, y_mid - 10]:
-    line = Part.makeLine(Vector(NX_L - 10, y, HINGE_Z),
-                         Vector(NX_L + 5, y, HINGE_Z))
-    sec = result.section(line)
-    xs = sorted([v.X for v in sec.Vertexes]) if sec.Vertexes else []
-    print(f"  Y={y:.0f}: X={[f'{x:.1f}' for x in xs]}")
 
 bb2 = result.BoundBox
 print(f"\nBoundBox: X[{bb2.XMin:.2f},{bb2.XMax:.2f}] Y[{bb2.YMin:.2f},{bb2.YMax:.2f}] Z[{bb2.ZMin:.2f},{bb2.ZMax:.2f}]")
