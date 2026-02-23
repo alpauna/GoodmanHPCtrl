@@ -613,3 +613,171 @@ def max6675_mount(shape, cutout_x1, cutout_y1, z_inner, z_outer,
                        z_top=z_outer, radius=hole_radius)
 
     return shape
+
+
+# ---------------------------------------------------------------------------
+# Hinge and closure features
+# ---------------------------------------------------------------------------
+
+def knuckle_hinge(shape, wall, wall_coord, a_start, a_end,
+                  z_center, knuckle_count=5, knuckle_radius=3.0,
+                  pin_radius=1.0, clearance=0.3, side="bottom"):
+    """Add knuckle/barrel hinge cylinders along a wall edge.
+
+    Creates alternating interlocking knuckle barrels for a pin hinge.
+    Bottom shell gets even-indexed knuckles (0, 2, 4, ...),
+    top shell gets odd-indexed knuckles (1, 3, ...).
+
+    The knuckles sit centered on the wall exterior at z_center, with
+    the barrel axis running along the wall (Y for left/right walls,
+    X for front/back walls).
+
+    Args:
+        shape:          Shape to modify.
+        wall:           Wall side: 'left', 'right', 'front', 'back'.
+        wall_coord:     Outer wall coordinate (e.g., NX_L for left wall).
+        a_start, a_end: Range along the wall (Y for left/right, X for front/back).
+        z_center:       Z center of the hinge barrel axis.
+        knuckle_count:  Total number of knuckle segments (default 5).
+        knuckle_radius: Outer radius of each knuckle barrel (default 3.0mm).
+        pin_radius:     Pin hole radius (default 1.0mm for ~2mm pin/filament).
+        clearance:      Gap between adjacent knuckles (default 0.3mm).
+        side:           'bottom' or 'top' — determines which knuckles to place.
+
+    Returns:
+        Modified shape with knuckle barrels fused and pin holes drilled.
+    """
+    total_length = abs(a_end - a_start)
+    seg_length = (total_length - clearance * (knuckle_count - 1)) / knuckle_count
+    a_min = min(a_start, a_end)
+
+    # Determine axis direction and center position on the wall exterior
+    if wall in ('left', 'right'):
+        barrel_dir = Vector(0, 1, 0)  # barrels run along Y
+        if wall == 'left':
+            cx = wall_coord - knuckle_radius  # protrude outward (-X)
+        else:
+            cx = wall_coord + knuckle_radius  # protrude outward (+X)
+        cz = z_center
+    else:
+        barrel_dir = Vector(1, 0, 0)  # barrels run along X
+        if wall == 'front':
+            cy_pos = wall_coord - knuckle_radius
+        else:
+            cy_pos = wall_coord + knuckle_radius
+        cz = z_center
+
+    # Select which knuckle indices this side gets
+    if side == "bottom":
+        indices = range(0, knuckle_count, 2)  # even: 0, 2, 4
+    else:
+        indices = range(1, knuckle_count, 2)  # odd: 1, 3
+
+    for i in indices:
+        seg_start = a_min + i * (seg_length + clearance)
+
+        if wall in ('left', 'right'):
+            origin = Vector(cx, seg_start, cz)
+            knuckle = Part.makeCylinder(knuckle_radius, seg_length,
+                                        origin, barrel_dir)
+        else:
+            origin = Vector(seg_start, cy_pos, cz)
+            knuckle = Part.makeCylinder(knuckle_radius, seg_length,
+                                        origin, barrel_dir)
+
+        shape = shape.fuse(knuckle)
+
+    # Drill pin hole through entire hinge length
+    margin = 2.0
+    if wall in ('left', 'right'):
+        pin_origin = Vector(cx, a_min - margin, cz)
+        pin = Part.makeCylinder(pin_radius, total_length + 2 * margin,
+                                pin_origin, Vector(0, 1, 0))
+    else:
+        pin_origin = Vector(a_min - margin, cy_pos, cz)
+        pin = Part.makeCylinder(pin_radius, total_length + 2 * margin,
+                                pin_origin, Vector(1, 0, 0))
+
+    shape = shape.cut(pin)
+    return shape
+
+
+def snap_clip(shape, wall, wall_coord, a_center, z_center,
+              clip_width=8.0, clip_height=4.0, clip_depth=2.0,
+              lip_height=1.0, lip_depth=0.8, wall_thick=3.5,
+              side="bottom"):
+    """Add a snap-fit clip feature on a wall.
+
+    Bottom shell gets the flexible cantilever arm with a lip/hook.
+    Top shell gets a matching rectangular pocket/recess for the lip.
+
+    The clip is oriented perpendicular to the wall, protruding inward
+    from the wall interior.
+
+    Args:
+        shape:       Shape to modify.
+        wall:        Wall side: 'left', 'right', 'front', 'back'.
+        wall_coord:  Outer wall coordinate.
+        a_center:    Center position along the wall (Y for left/right).
+        z_center:    Z center of the clip.
+        clip_width:  Width of clip along the wall (default 8.0mm).
+        clip_height: Height of the cantilever arm (default 4.0mm).
+        clip_depth:  How far the arm extends inward from the wall (default 2.0mm).
+        lip_height:  Height of the hook lip (default 1.0mm).
+        lip_depth:   Depth of the hook lip (default 0.8mm).
+        wall_thick:  Wall thickness for positioning (default 3.5mm).
+        side:        'bottom' (cantilever arm) or 'top' (pocket).
+
+    Returns:
+        Modified shape.
+    """
+    half_w = clip_width / 2
+    half_h = clip_height / 2
+
+    if wall == 'right':
+        inner_x = wall_coord - wall_thick
+        if side == "bottom":
+            # Cantilever arm: box extending inward from inner wall
+            arm = Part.makeBox(
+                clip_depth, clip_width, clip_height,
+                Vector(inner_x - clip_depth, a_center - half_w,
+                       z_center - half_h))
+            shape = shape.fuse(arm)
+            # Lip/hook at the tip pointing upward
+            lip = Part.makeBox(
+                lip_depth, clip_width, lip_height,
+                Vector(inner_x - clip_depth - lip_depth, a_center - half_w,
+                       z_center + half_h))
+            shape = shape.fuse(lip)
+        else:
+            # Pocket/recess in the top shell inner wall for the lip
+            pocket_depth = clip_depth + lip_depth + 0.4  # clearance
+            pocket = Part.makeBox(
+                pocket_depth, clip_width + 0.4, clip_height + lip_height + 0.4,
+                Vector(inner_x - pocket_depth,
+                       a_center - half_w - 0.2,
+                       z_center - half_h - 0.2))
+            shape = shape.cut(pocket)
+    elif wall == 'left':
+        inner_x = wall_coord + wall_thick
+        if side == "bottom":
+            arm = Part.makeBox(
+                clip_depth, clip_width, clip_height,
+                Vector(inner_x, a_center - half_w,
+                       z_center - half_h))
+            shape = shape.fuse(arm)
+            lip = Part.makeBox(
+                lip_depth, clip_width, lip_height,
+                Vector(inner_x + clip_depth, a_center - half_w,
+                       z_center + half_h))
+            shape = shape.fuse(lip)
+        else:
+            pocket_depth = clip_depth + lip_depth + 0.4
+            pocket = Part.makeBox(
+                pocket_depth, clip_width + 0.4, clip_height + lip_height + 0.4,
+                Vector(inner_x,
+                       a_center - half_w - 0.2,
+                       z_center - half_h - 0.2))
+            shape = shape.cut(pocket)
+
+    return shape
