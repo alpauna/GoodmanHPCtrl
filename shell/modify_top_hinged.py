@@ -82,16 +82,16 @@ rib_cleanup = wall_ring(IX_L, IY_F, IX_R, IY_B,
 result = result.cut(rib_cleanup)
 
 # === 4c. Remove left wall below barrel — prevents pivot binding ===
-# Cut from tongue zone up to barrel bottom so the barrel sits at the wall edge,
-# matching the bottom shell where the barrel is 0.2mm above the wall top.
-# Without this cut, the 3.2mm of wall below the barrel sweeps through the
+# Cut from tongue zone up to barrel bottom across the full Y span
+# (including front/back corners) so the left wall rim is flush everywhere.
+# Without this cut, wall material below the barrel sweeps through the
 # bottom shell's tongue on the left wall during hinge rotation.
-BARREL_Z_BOTTOM = HINGE_Z - KNUCKLE_RADIUS  # 35.2
+BARREL_Z_BOTTOM = HINGE_Z - KNUCKLE_RADIUS  # 33.0
 hinge_cut = Part.makeBox(
     (IX_L + 1) - (NX_L - 1),                       # X: generous span through left wall
-    IY_B - IY_F,                                     # Y: inner span (preserves front/back corners)
-    BARREL_Z_BOTTOM - (TOP_TONGUE_Z - 0.5),        # Z: 27.5→35.2 (barrel bottom)
-    Vector(NX_L - 1, IY_F, TOP_TONGUE_Z - 0.5))
+    (NY_B + 1) - (NY_F - 1),                        # Y: full span including corners
+    BARREL_Z_BOTTOM - (TOP_TONGUE_Z - 0.5),        # Z: 27.5→33.0 (barrel bottom)
+    Vector(NX_L - 1, NY_F - 1, TOP_TONGUE_Z - 0.5))
 result = result.cut(hinge_cut)
 print_volume(result, "After mating profile (left wall cleared to barrel)")
 
