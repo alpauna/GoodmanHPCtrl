@@ -29,7 +29,7 @@ NY_F = OY_F - THICK; NY_B = OY_B + THICK
 NEW_HALF = 1.75
 NMX_L = IX_L - NEW_HALF; NMX_R = IX_R + NEW_HALF
 NMY_F = IY_F - NEW_HALF; NMY_B = IY_B + NEW_HALF
-TOP_TONGUE_Z = 28.0; TOP_RIM_Z = 33.0  # matches BARREL_Z_BOTTOM — no step on hinge wall
+TOP_TONGUE_Z = 28.0; TOP_RIM_Z = 32.0  # matches BARREL_Z_BOTTOM (HINGE_Z - KNUCKLE_RADIUS)
 CEIL_Z = bb.ZMax  # 51.50
 CEIL_INNER = 48.50
 
@@ -86,11 +86,11 @@ result = result.cut(rib_cleanup)
 # (including front/back corners) so the left wall rim is flush everywhere.
 # Without this cut, wall material below the barrel sweeps through the
 # bottom shell's tongue on the left wall during hinge rotation.
-BARREL_Z_BOTTOM = HINGE_Z - KNUCKLE_RADIUS  # 33.0
+BARREL_Z_BOTTOM = HINGE_Z - KNUCKLE_RADIUS  # 32.0
 hinge_cut = Part.makeBox(
     (IX_L + 1) - (NX_L - 1),                       # X: generous span through left wall
     (NY_B + 1) - (NY_F - 1),                        # Y: full span including corners
-    BARREL_Z_BOTTOM - (TOP_TONGUE_Z - 0.5),        # Z: 27.5→33.0 (barrel bottom)
+    BARREL_Z_BOTTOM - (TOP_TONGUE_Z - 0.5),        # Z: 27.5→32.0 (barrel bottom)
     Vector(NX_L - 1, NY_F - 1, TOP_TONGUE_Z - 0.5))
 result = result.cut(hinge_cut)
 print_volume(result, "After mating profile (left wall cleared to barrel)")
