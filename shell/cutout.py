@@ -179,6 +179,68 @@ def drill_hole(shape, cx, cy, z_bottom, z_top, radius, z_margin=0.0):
     return shape.cut(hole)
 
 
+def countersink_cup(shape, cx, cy, z_bottom, z_surface, z_outer,
+                    outer_radius, wall_thick=1.5, clearance_radius=1.1):
+    """Add a hollow countersink cup (boss) hanging from a ceiling surface.
+
+    Creates a cylindrical cup fused into the ceiling with uniform wall
+    thickness and a floor at the bottom. A clearance hole through the
+    floor allows a screw to pass through without touching.
+
+    The cup is built as a single pre-assembled solid (outer shell minus
+    bore minus clearance hole) and fused in one operation for reliable
+    OCCT boolean behavior.
+
+    Cross-section:
+        |<-- wall_thick -->|<-- bore -->|<-- wall_thick -->|
+        +------------------+            +------------------+ z_outer
+        |    ceiling       |  (bore)    |    ceiling       |
+        +------------------+            +------------------+ z_surface
+        |  wall  |         |  (bore)    |         |  wall  |
+        |  wall  |         |  (bore)    |         |  wall  |
+        |  wall  +---------+---+   +----+---------+  wall  |
+        |  wall  |  floor  | clearance  |  floor  |  wall  |
+        +--------+---------+---+   +----+---------+--------+ z_bottom
+
+    Args:
+        shape:            Shape to modify.
+        cx, cy:           Center of the cup.
+        z_bottom:         Z of the cup base (lowest point of pillar).
+        z_surface:        Z of the inner ceiling surface.
+        z_outer:          Z of the outer ceiling surface.
+        outer_radius:     Outer radius of the cup cylinder.
+        wall_thick:       Uniform wall and floor thickness (default 1.5mm).
+        clearance_radius: Screw clearance hole radius (default 1.1mm for M2).
+
+    Returns:
+        Modified shape with countersink cup fused in.
+    """
+    bore_radius = outer_radius - wall_thick
+    bore_z_bottom = z_bottom + wall_thick  # floor top
+
+    overshoot = 1.0  # extend past z_outer to avoid coincident-face fuse failures
+
+    # 1. Outer cylinder: z_bottom past z_outer (full ceiling penetration + overshoot)
+    cup = Part.makeCylinder(outer_radius, z_outer + overshoot - z_bottom,
+                            Vector(cx, cy, z_bottom))
+    # 2. Bore out interior: bore_z_bottom to past z_outer
+    bore = Part.makeCylinder(bore_radius, z_outer + overshoot - bore_z_bottom,
+                             Vector(cx, cy, bore_z_bottom))
+    cup = cup.cut(bore)
+    # 3. Clearance hole through floor
+    clearance = Part.makeCylinder(clearance_radius,
+                                  wall_thick + 2.0,
+                                  Vector(cx, cy, z_bottom - 1.0))
+    cup = cup.cut(clearance)
+    # 4. Fuse WITH overshoot — avoids coincident faces at z_outer
+    shape = shape.fuse(cup)
+    # 5. Trim overshoot flush with outer ceiling surface
+    trim = Part.makeBox(outer_radius * 4, outer_radius * 4, overshoot + 10.0,
+                        Vector(cx - outer_radius * 2,
+                               cy - outer_radius * 2, z_outer))
+    return shape.cut(trim)
+
+
 def drill_hole_lateral(shape, axis, start, end, cy, cz, radius, margin=2.0):
     """Drill a horizontal through-hole along the X or Y axis.
 
@@ -565,6 +627,112 @@ def wall_opening(shape, wall, a1, a2, z1, z2,
     return shape.cut(box)
 
 
+def wall_cutout(shape, wall, wall_coord, a1, a2, z1, z2,
+                wall_thick=3.5, brim_sides=None, brim_inside=True,
+                brim_height=2.0, brim_depth=3.0, cut_margin=2.0):
+    """Cut a rectangular opening through a wall with optional reinforcement brim.
+
+    Creates a through-hole in the specified wall. Optionally fuses a brim
+    (reinforcement lip) around selected edges of the cutout opening.
+
+    Args:
+        shape:       Shape to modify.
+        wall:        'left' (-X), 'right' (+X), 'front' (-Y), 'back' (+Y).
+        wall_coord:  Outermost wall coordinate (e.g., NY_F for thickened front wall).
+        a1, a2:      Along-wall range (Y for left/right, X for front/back).
+        z1, z2:      Z range of the opening.
+        wall_thick:  Total wall thickness from outer to inner face (default 3.5mm).
+        brim_sides:  Set of sides to add brim: subset of {'top','bottom','left','right'}.
+                     None = no brim (cutout only).
+        brim_inside: True = brim on shell interior, False = on exterior.
+        brim_height: Brim extends this far from cutout edge along wall (default 2.0mm).
+        brim_depth:  Brim protrudes this far from wall surface (default 3.0mm).
+        cut_margin:  Extra cut depth past wall for clean boolean (default 2.0mm).
+
+    Returns:
+        Modified shape with cutout and optional brim.
+    """
+    # 1. Cut the opening through the wall
+    if wall in ('left', 'right'):
+        if wall == 'left':
+            cut_x = wall_coord - cut_margin
+        else:
+            cut_x = wall_coord - wall_thick - cut_margin
+        cut_box = Part.makeBox(wall_thick + 2 * cut_margin, a2 - a1, z2 - z1,
+                               Vector(cut_x, a1, z1))
+    elif wall in ('front', 'back'):
+        if wall == 'front':
+            cut_y = wall_coord - cut_margin
+        else:
+            cut_y = wall_coord - wall_thick - cut_margin
+        cut_box = Part.makeBox(a2 - a1, wall_thick + 2 * cut_margin, z2 - z1,
+                               Vector(a1, cut_y, z1))
+    else:
+        raise ValueError(f"wall must be 'left','right','front','back', got '{wall}'")
+
+    shape = shape.cut(cut_box)
+
+    # 2. Add brim if requested
+    if not brim_sides:
+        return shape
+
+    # Compute brim attachment surface (perpendicular to wall)
+    # The brim sits on the inner or outer face and protrudes away from the wall.
+    if wall in ('left', 'right'):
+        if wall == 'left':
+            brim_px = (wall_coord + wall_thick) if brim_inside else (wall_coord - brim_depth)
+        else:
+            brim_px = (wall_coord - wall_thick - brim_depth) if brim_inside else wall_coord
+
+        # Corner-aware Z range for vertical strips
+        z_lo = (z1 - brim_height) if 'bottom' in brim_sides else z1
+        z_hi = (z2 + brim_height) if 'top' in brim_sides else z2
+
+        brims = []
+        if 'top' in brim_sides:
+            brims.append(Part.makeBox(brim_depth, a2 - a1, brim_height,
+                                      Vector(brim_px, a1, z2)))
+        if 'bottom' in brim_sides:
+            brims.append(Part.makeBox(brim_depth, a2 - a1, brim_height,
+                                      Vector(brim_px, a1, z1 - brim_height)))
+        if 'left' in brim_sides:
+            brims.append(Part.makeBox(brim_depth, brim_height, z_hi - z_lo,
+                                      Vector(brim_px, a1 - brim_height, z_lo)))
+        if 'right' in brim_sides:
+            brims.append(Part.makeBox(brim_depth, brim_height, z_hi - z_lo,
+                                      Vector(brim_px, a2, z_lo)))
+    else:
+        if wall == 'front':
+            brim_py = (wall_coord + wall_thick) if brim_inside else (wall_coord - brim_depth)
+        else:
+            brim_py = (wall_coord - wall_thick - brim_depth) if brim_inside else wall_coord
+
+        z_lo = (z1 - brim_height) if 'bottom' in brim_sides else z1
+        z_hi = (z2 + brim_height) if 'top' in brim_sides else z2
+
+        brims = []
+        if 'top' in brim_sides:
+            brims.append(Part.makeBox(a2 - a1, brim_depth, brim_height,
+                                      Vector(a1, brim_py, z2)))
+        if 'bottom' in brim_sides:
+            brims.append(Part.makeBox(a2 - a1, brim_depth, brim_height,
+                                      Vector(a1, brim_py, z1 - brim_height)))
+        if 'left' in brim_sides:
+            brims.append(Part.makeBox(brim_height, brim_depth, z_hi - z_lo,
+                                      Vector(a1 - brim_height, brim_py, z_lo)))
+        if 'right' in brim_sides:
+            brims.append(Part.makeBox(brim_height, brim_depth, z_hi - z_lo,
+                                      Vector(a2, brim_py, z_lo)))
+
+    if brims:
+        brim = brims[0]
+        for b in brims[1:]:
+            brim = brim.fuse(b)
+        shape = shape.fuse(brim)
+
+    return shape
+
+
 def max6675_mount(shape, cutout_x1, cutout_y1, z_inner, z_outer,
                   cutout_w=16.0, cutout_h=14.0,
                   pillar_x=None, pillar_y=None,
@@ -621,16 +789,21 @@ def max6675_mount(shape, cutout_x1, cutout_y1, z_inner, z_outer,
 
 def knuckle_hinge(shape, wall, wall_coord, a_start, a_end,
                   z_center, knuckle_count=5, knuckle_radius=3.0,
-                  pin_radius=1.0, clearance=0.3, side="bottom"):
-    """Add knuckle/barrel hinge cylinders along a wall edge.
+                  pin_radius=1.0, clearance=0.3, side="bottom",
+                  strut_z_min=None, strut_z_max=None):
+    """Add knuckle/barrel hinge cylinders with full-height wall struts.
 
     Creates alternating interlocking knuckle barrels for a pin hinge.
     Bottom shell gets even-indexed knuckles (0, 2, 4, ...),
     top shell gets odd-indexed knuckles (1, 3, ...).
 
-    The knuckles sit centered on the wall exterior at z_center, with
-    the barrel axis running along the wall (Y for left/right walls,
-    X for front/back walls).
+    Each knuckle has:
+    - A full-width rectangular buildup (2x knuckle_radius from wall)
+      spanning the barrel diameter in Z, creating a solid D-shaped
+      cross-section that encases the barrel on the wall side.
+    - A vertical strut running from the barrel to the shell edge
+      (floor for bottom, ceiling for top), transferring hinge stress
+      through the entire wall height. Strut width = knuckle_radius.
 
     Args:
         shape:          Shape to modify.
@@ -643,9 +816,13 @@ def knuckle_hinge(shape, wall, wall_coord, a_start, a_end,
         pin_radius:     Pin hole radius (default 1.0mm for ~2mm pin/filament).
         clearance:      Gap between adjacent knuckles (default 0.3mm).
         side:           'bottom' or 'top' — determines which knuckles to place.
+        strut_z_min:    Z bottom of vertical strut (e.g., floor Z for bottom shell).
+                        Strut runs from here up to the barrel. None = no downward strut.
+        strut_z_max:    Z top of vertical strut (e.g., ceiling Z for top shell).
+                        Strut runs from barrel up to here. None = no upward strut.
 
     Returns:
-        Modified shape with knuckle barrels fused and pin holes drilled.
+        Modified shape with knuckle barrels, buildup, struts, and pin hole.
     """
     total_length = abs(a_end - a_start)
     seg_length = (total_length - clearance * (knuckle_count - 1)) / knuckle_count
@@ -655,9 +832,9 @@ def knuckle_hinge(shape, wall, wall_coord, a_start, a_end,
     if wall in ('left', 'right'):
         barrel_dir = Vector(0, 1, 0)  # barrels run along Y
         if wall == 'left':
-            cx = wall_coord - knuckle_radius  # protrude outward (-X)
+            cx = wall_coord - knuckle_radius  # barrel center (-X)
         else:
-            cx = wall_coord + knuckle_radius  # protrude outward (+X)
+            cx = wall_coord + knuckle_radius  # barrel center (+X)
         cz = z_center
     else:
         barrel_dir = Vector(1, 0, 0)  # barrels run along X
@@ -666,6 +843,9 @@ def knuckle_hinge(shape, wall, wall_coord, a_start, a_end,
         else:
             cy_pos = wall_coord + knuckle_radius
         cz = z_center
+
+    barrel_z_bottom = cz - knuckle_radius
+    barrel_z_top = cz + knuckle_radius
 
     # Select which knuckle indices this side gets
     if side == "bottom":
@@ -677,15 +857,99 @@ def knuckle_hinge(shape, wall, wall_coord, a_start, a_end,
         seg_start = a_min + i * (seg_length + clearance)
 
         if wall in ('left', 'right'):
+            # 1. Barrel cylinder
             origin = Vector(cx, seg_start, cz)
             knuckle = Part.makeCylinder(knuckle_radius, seg_length,
                                         origin, barrel_dir)
+            shape = shape.fuse(knuckle)
+
+            # 2. Full-width buildup: 2x radius from wall, full barrel diameter in Z
+            buildup_width = knuckle_radius * 2  # full barrel diameter
+            if wall == 'left':
+                block = Part.makeBox(
+                    buildup_width, seg_length, knuckle_radius * 2,
+                    Vector(wall_coord - buildup_width, seg_start,
+                           barrel_z_bottom))
+            else:
+                block = Part.makeBox(
+                    buildup_width, seg_length, knuckle_radius * 2,
+                    Vector(wall_coord, seg_start, barrel_z_bottom))
+            shape = shape.fuse(block)
+
+            # 3. Vertical strut down to shell floor
+            strut_width = knuckle_radius  # half the buildup width
+            if strut_z_min is not None and strut_z_min < barrel_z_bottom:
+                strut_height = barrel_z_bottom - strut_z_min
+                if wall == 'left':
+                    strut = Part.makeBox(
+                        strut_width, seg_length, strut_height,
+                        Vector(wall_coord - strut_width, seg_start,
+                               strut_z_min))
+                else:
+                    strut = Part.makeBox(
+                        strut_width, seg_length, strut_height,
+                        Vector(wall_coord, seg_start, strut_z_min))
+                shape = shape.fuse(strut)
+
+            # 4. Vertical strut up to shell ceiling
+            if strut_z_max is not None and strut_z_max > barrel_z_top:
+                strut_height = strut_z_max - barrel_z_top
+                if wall == 'left':
+                    strut = Part.makeBox(
+                        strut_width, seg_length, strut_height,
+                        Vector(wall_coord - strut_width, seg_start,
+                               barrel_z_top))
+                else:
+                    strut = Part.makeBox(
+                        strut_width, seg_length, strut_height,
+                        Vector(wall_coord, seg_start, barrel_z_top))
+                shape = shape.fuse(strut)
+
         else:
+            # Front/back walls — same pattern, axes swapped
             origin = Vector(seg_start, cy_pos, cz)
             knuckle = Part.makeCylinder(knuckle_radius, seg_length,
                                         origin, barrel_dir)
+            shape = shape.fuse(knuckle)
 
-        shape = shape.fuse(knuckle)
+            buildup_width = knuckle_radius * 2
+            if wall == 'front':
+                block = Part.makeBox(
+                    seg_length, buildup_width, knuckle_radius * 2,
+                    Vector(seg_start, wall_coord - buildup_width,
+                           barrel_z_bottom))
+            else:
+                block = Part.makeBox(
+                    seg_length, buildup_width, knuckle_radius * 2,
+                    Vector(seg_start, wall_coord, barrel_z_bottom))
+            shape = shape.fuse(block)
+
+            strut_width = knuckle_radius
+            if strut_z_min is not None and strut_z_min < barrel_z_bottom:
+                strut_height = barrel_z_bottom - strut_z_min
+                if wall == 'front':
+                    strut = Part.makeBox(
+                        seg_length, strut_width, strut_height,
+                        Vector(seg_start, wall_coord - strut_width,
+                               strut_z_min))
+                else:
+                    strut = Part.makeBox(
+                        seg_length, strut_width, strut_height,
+                        Vector(seg_start, wall_coord, strut_z_min))
+                shape = shape.fuse(strut)
+
+            if strut_z_max is not None and strut_z_max > barrel_z_top:
+                strut_height = strut_z_max - barrel_z_top
+                if wall == 'front':
+                    strut = Part.makeBox(
+                        seg_length, strut_width, strut_height,
+                        Vector(seg_start, wall_coord - strut_width,
+                               barrel_z_top))
+                else:
+                    strut = Part.makeBox(
+                        seg_length, strut_width, strut_height,
+                        Vector(seg_start, wall_coord, barrel_z_top))
+                shape = shape.fuse(strut)
 
     # Drill pin hole through entire hinge length
     margin = 2.0

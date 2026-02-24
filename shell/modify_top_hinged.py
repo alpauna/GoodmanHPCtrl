@@ -9,8 +9,8 @@ sys.path.insert(0, shell_dir)
 
 from cutout import (wall_ring, drill_hole_lateral, reposition_cutout,
                     max6675_mount, labeled_cutout, deboss_text,
-                    verify_cutout, z_probe, print_volume,
-                    knuckle_hinge, snap_clip)
+                    verify_cutout, verify_solid, z_probe, print_volume,
+                    knuckle_hinge, snap_clip, countersink_cup)
 from hinge_config import (NX_L, NX_R, OY_F, OY_B,
                            HINGE_Z, HINGE_A_START, HINGE_A_END,
                            KNUCKLE_COUNT, KNUCKLE_RADIUS, PIN_RADIUS,
@@ -81,15 +81,19 @@ rib_cleanup = wall_ring(IX_L, IY_F, IX_R, IY_B,
                         TOP_TONGUE_Z, 35.5)
 result = result.cut(rib_cleanup)
 
-# === 4c. Remove tongue on left (hinge) wall — prevents pivot binding ===
-# Only remove the tongue/lip below TOP_RIM_Z; structural wall above stays intact
+# === 4c. Remove left wall below barrel — prevents pivot binding ===
+# Cut from tongue zone up to barrel bottom so the barrel sits at the wall edge,
+# matching the bottom shell where the barrel is 0.2mm above the wall top.
+# Without this cut, the 3.2mm of wall below the barrel sweeps through the
+# bottom shell's tongue on the left wall during hinge rotation.
+BARREL_Z_BOTTOM = HINGE_Z - KNUCKLE_RADIUS  # 35.2
 hinge_cut = Part.makeBox(
     (IX_L + 1) - (NX_L - 1),                       # X: generous span through left wall
     IY_B - IY_F,                                     # Y: inner span (preserves front/back corners)
-    TOP_RIM_Z - (TOP_TONGUE_Z - 0.5),              # Z: 27.5→32, tongue zone only
+    BARREL_Z_BOTTOM - (TOP_TONGUE_Z - 0.5),        # Z: 27.5→35.2 (barrel bottom)
     Vector(NX_L - 1, IY_F, TOP_TONGUE_Z - 0.5))
 result = result.cut(hinge_cut)
-print_volume(result, "After mating profile (left wall cleared)")
+print_volume(result, "After mating profile (left wall cleared to barrel)")
 
 # === 5. MAX6675 thermocouple mount ===
 result = max6675_mount(result,
@@ -158,6 +162,31 @@ for i, clip_y in enumerate(CLIP_Y_POSITIONS):
                        side="top")
     print_volume(result, f"After snap pocket at Y={clip_y}")
 
+# === 10. Countersunk M2 screw mount in front-right corner ===
+SCREW_X = -1.0    # inset from right wall
+SCREW_Y = -27.5   # embeds into front wall (IY_F=-29.48)
+MATING_Z = 35.0   # same Z as left hinged wall top (BOT_RIM_Z)
+SCREW_GAP = 0.2   # gap between top and bottom pillars for secure clamping
+BOTTOM_R = 2.5    # bottom pillar radius (must match bottom shell)
+TOP_R = BOTTOM_R * 1.5  # 3.75mm — countersink pillar 1.5x bottom radius
+CS_WALL = 1.5     # uniform wall and floor thickness of countersink cup
+SCREW_PILLAR_Z = MATING_Z + SCREW_GAP  # 35.2 — top pillar stops 0.2mm above bottom
+
+# Countersink cup: 1.5mm wall, 1.5mm floor, M2 clearance through floor
+result = countersink_cup(result, SCREW_X, SCREW_Y,
+                         z_bottom=SCREW_PILLAR_Z,
+                         z_surface=CEIL_INNER, z_outer=CEIL_Z,
+                         outer_radius=TOP_R, wall_thick=CS_WALL,
+                         clearance_radius=1.1)
+print_volume(result, "After M2 screw mount (front-right)")
+
+# === 10b. Restore groove profile on 3 walls (not hinge/left) ===
+# Re-cut outer groove — same as step 3 — in case cup affected front-right corner
+result = result.cut(wall_ring(NX_L-1, NY_F-1, NX_R+1, NY_B+1,
+                              NMX_L, NMY_F, NMX_R, NMY_B,
+                              TOP_TONGUE_Z-0.1, TOP_RIM_Z))
+print_volume(result, "After groove restore")
+
 # === VERIFICATION ===
 print("\n=== VERIFICATION ===")
 
@@ -175,6 +204,34 @@ for i in range(1, KNUCKLE_COUNT, 2):  # top knuckles: 1, 3
     sec = result.section(line)
     xs = sorted([v.X for v in sec.Vertexes]) if sec.Vertexes else []
     print(f"  Knuckle {i} (Y={seg_mid_y:.1f}): X={[f'{x:.2f}' for x in xs]}")
+
+# Hinge barrel Z extent check
+print(f"Hinge barrel Z extent (expected bottom={HINGE_Z - KNUCKLE_RADIUS:.1f}, top={HINGE_Z + KNUCKLE_RADIUS:.1f}):")
+for i in range(1, KNUCKLE_COUNT, 2):  # top knuckles: 1, 3
+    seg_start = a_min + i * (seg_length + KNUCKLE_CLEARANCE)
+    seg_mid_y = seg_start + seg_length / 2
+    # Z probe at barrel center X
+    zs = z_probe(result, PIN_AXIS_X, seg_mid_y)
+    print(f"  Knuckle {i} (Y={seg_mid_y:.1f}): Z={[f'{z:.2f}' for z in zs]}")
+# Left wall Z at non-knuckle position (between knuckles)
+gap_y = a_min + 0.5 * (seg_length + KNUCKLE_CLEARANCE) + seg_length  # gap between knuckle 0 and 1
+zs_wall = z_probe(result, NX_L - 1.0, gap_y)
+zs_wall2 = z_probe(result, NX_L + 1.0, gap_y)
+print(f"  Left wall exterior (X={NX_L-1:.1f}, Y={gap_y:.1f}): Z={[f'{z:.2f}' for z in zs_wall]}")
+print(f"  Left wall interior (X={NX_L+1:.1f}, Y={gap_y:.1f}): Z={[f'{z:.2f}' for z in zs_wall2]}")
+
+# M2 screw mount
+print("M2 screw mount verification:")
+verify_solid(result, SCREW_X, SCREW_Y + TOP_R - 0.5,
+             SCREW_PILLAR_Z, CEIL_Z, "cup wall (+Y, cavity)")
+verify_solid(result, SCREW_X - TOP_R + 0.5, SCREW_Y,
+             SCREW_PILLAR_Z, CEIL_Z, "cup wall (-X, cavity)")
+# Center: should see floor boundaries (bore above, clearance through)
+zs = z_probe(result, SCREW_X, SCREW_Y)
+print(f"  cup center: Z={[f'{z:.2f}' for z in zs]}")
+# Wall junction: use wide Z range to see both wall bottom and cup
+zs = z_probe(result, SCREW_X + TOP_R - 0.5, SCREW_Y)
+print(f"  cup wall (+X, in wall): Z={[f'{z:.2f}' for z in zs]}")
 
 # TC mount
 pil_x = bb.XMin + 35

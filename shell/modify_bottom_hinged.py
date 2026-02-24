@@ -7,8 +7,8 @@ import os, sys
 shell_dir = os.path.dirname(os.path.abspath(__file__)) + "/"
 sys.path.insert(0, shell_dir)
 
-from cutout import (wall_ring, wall_opening, drill_hole_lateral,
-                    knuckle_hinge, snap_clip, print_volume)
+from cutout import (wall_ring, wall_opening, wall_cutout, drill_hole_lateral,
+                    knuckle_hinge, snap_clip, drill_hole, print_volume)
 from hinge_config import (NX_L, NX_R, OY_F, OY_B,
                            HINGE_Z, HINGE_A_START, HINGE_A_END,
                            KNUCKLE_COUNT, KNUCKLE_RADIUS, PIN_RADIUS,
@@ -116,8 +116,85 @@ for i, clip_y in enumerate(CLIP_Y_POSITIONS):
                        side="bottom")
     print_volume(result, f"8.{i+1}. After snap clip at Y={clip_y}")
 
+# === 9. M2 screw post in front-right corner (matches top shell) ===
+SCREW_X = -1.0
+SCREW_Y = -27.5   # embeds into front wall (IY_F=-29.48)
+MATING_Z = 35.0   # same Z as left hinged wall top (BOT_RIM_Z)
+BOTTOM_R = 2.5
+SCREW_POST_H = MATING_Z - FLOOR_Z  # floor up to mating line
+
+# Standoff post rising from floor to mating line
+post = Part.makeCylinder(BOTTOM_R, SCREW_POST_H,
+                         Vector(SCREW_X, SCREW_Y, FLOOR_Z))
+result = result.fuse(post)
+# M2 pilot hole (0.85mm radius for self-tapping)
+result = drill_hole(result, SCREW_X, SCREW_Y,
+                    FLOOR_Z, MATING_Z, 0.85, z_margin=0.5)
+print_volume(result, "9. After M2 screw post (front-right)")
+
+# === 9b. Restore tongue profile — direct box cuts per wall ===
+# Inner cut zone: between NMX/NMY (outer) and IX/IY (inner), Z=31→35.
+# Build all cuts into one compound tool to minimize boolean ops on complex shape.
+# Use 0.01mm offsets to avoid coincident faces with inner wall surfaces.
+CUT_Z0 = BOT_GROOVE_Z - 0.1
+CUT_Z1 = BOT_RIM_Z + 0.01
+CUT_H = CUT_Z1 - CUT_Z0
+E = 0.01  # epsilon to avoid coincident faces
+# Front wall inner strip: full X width, NMY_F to IY_F in Y
+front_cut = Part.makeBox(NMX_R - NMX_L + 2*E, IY_F - NMY_F + E, CUT_H,
+                         Vector(NMX_L - E, NMY_F - E, CUT_Z0))
+# Right wall inner strip: IX_R to NMX_R in X, full Y width
+right_cut = Part.makeBox(NMX_R - IX_R + E, NMY_B - NMY_F + 2*E, CUT_H,
+                         Vector(IX_R - E, NMY_F - E, CUT_Z0))
+# Back wall inner strip: full X width, IY_B to NMY_B in Y
+back_cut = Part.makeBox(NMX_R - NMX_L + 2*E, NMY_B - IY_B + E, CUT_H,
+                        Vector(NMX_L - E, IY_B - E, CUT_Z0))
+# Left wall skipped — hinge side keeps tongue for wall height
+# Fuse tool pieces together, then cut once
+tool = front_cut.fuse(right_cut).fuse(back_cut)
+result = result.cut(tool)
+# Tongue clearance trim (same as step 6)
+trim_out = wall_ring(NX_L, NY_F, NX_R, NY_B,
+                     NX_L+CLR, NY_F+CLR, NX_R-CLR, NY_B-CLR,
+                     BOT_GROOVE_Z, BOT_RIM_Z)
+trim_in = wall_ring(NMX_L-CLR, NMY_F-CLR, NMX_R+CLR, NMY_B+CLR,
+                    NMX_L, NMY_F, NMX_R, NMY_B,
+                    BOT_GROOVE_Z, BOT_RIM_Z)
+trim_tool = trim_out.fuse(trim_in)
+result = result.cut(trim_tool)
+print_volume(result, "9b. After tongue restore")
+
+# === 10. Additional low voltage wire access (front wall + brim) ===
+# 75mm wide (X) x 18mm tall (Z), centered in X, offset 5mm above Z center
+# Interior brim on top/left/right: 2mm height, 3mm depth
+WALL_CX = (OX_L + OX_R) / 2                     # -46.67 — shell center X
+WALL_CZ = (FLOOR_Z + BOT_RIM_Z) / 2 + 5.0      #  21.75 — Z center + 5mm offset
+LV_W = 75.0; LV_H = 18.0
+result = wall_cutout(result, wall='front', wall_coord=NY_F,
+                     a1=WALL_CX - LV_W/2, a2=WALL_CX + LV_W/2,
+                     z1=WALL_CZ - LV_H/2, z2=WALL_CZ + LV_H/2,
+                     wall_thick=IY_F - NY_F,
+                     brim_sides={'top', 'left', 'right'},
+                     brim_inside=True, brim_height=2.0, brim_depth=3.0)
+print_volume(result, "10. After LV wire access + brim (front wall)")
+
 # === VERIFICATION ===
 print("\n=== VERIFICATION ===")
+
+# Tongue profile check near screw post
+print("Tongue profile near screw post (inner cut zone should be OPEN):")
+from cutout import z_probe, verify_solid
+# Probe inner cut zone on front wall near post: between IY_F and NMY_F
+for px, py, label in [
+    (0.0, -30.5, "front inner cut (X=0, Y=-30.5)"),      # center of inner cut zone
+    (SCREW_X, -30.0, "post edge Y (X=-1, Y=-30)"),        # post Y edge
+    (0.0, -29.9, "just inside IY_F (X=0, Y=-29.9)"),      # near inner boundary
+    (0.0, -31.0, "tongue body (X=0, Y=-31.0)"),            # should be SOLID (tongue)
+]:
+    zs = z_probe(result, px, py)
+    hits_in_tongue = [z for z in zs if BOT_GROOVE_Z - 0.5 <= z <= BOT_RIM_Z + 0.5]
+    print(f"  {label}: Z={[f'{z:.2f}' for z in hits_in_tongue]}"
+          f" {'OPEN' if len(hits_in_tongue) < 2 else 'SOLID'}")
 
 # Pin axis alignment check — probe through each knuckle center
 print(f"Pin axis alignment (expected X={PIN_AXIS_X:.3f}, Z={PIN_AXIS_Z:.3f}):")
