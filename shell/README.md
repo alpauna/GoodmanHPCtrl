@@ -30,6 +30,25 @@ freecadcmd shell/modify_bottom.py
 - Mating zone: Z=28-35mm, tongue-and-groove with 0.1mm clearance
 - M1.5 screw holes at wall midpoints for assembly
 
+## Hinged Shell Variant
+
+| File | Purpose |
+|------|---------|
+| `hinge_config.py` | Shared hinge/closure constants (pin axis, knuckle layout, snap clips) |
+| `modify_top_hinged.py` | Hinged top shell (knuckle hinge on left wall, snap clip pockets on right) |
+| `modify_bottom_hinged.py` | Hinged bottom shell (knuckle hinge on left wall, snap clips on right) |
+
+- 5-knuckle interleaving barrel hinge on the left wall (bottom: 0,2,4; top: 1,3)
+- Pin axis at Z=35.2 (0.2mm above mating line for FDM tolerance/binding clearance)
+- Snap clips on right wall at Y=20 and Y=65 for tool-free closure
+- M2 screw post in front-right corner for additional clamping
+- Hinge barrels use rectangular struts (not round) which act as a built-in 90-degree travel stop. To allow wider opening, replace the rectangular buildup/strut in `knuckle_hinge()` in `cutout.py` with cylindrical geometry.
+
+```bash
+freecadcmd shell/modify_top_hinged.py
+freecadcmd shell/modify_bottom_hinged.py
+```
+
 ## Top Shell Features
 
 | ID | Description | Dimensions | Position (XY) | Label |
