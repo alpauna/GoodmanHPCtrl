@@ -15,7 +15,7 @@ NX_R = OX_R + THICK   #   5.417 — thickened right wall exterior
 # --- Hinge on left wall ---
 # Pin axis: X = NX_L - KNUCKLE_RADIUS, Z = HINGE_Z
 # Both halves MUST produce the same (X, Z) for the pin to thread through
-HINGE_Z = 36.0                        # Z center of pin axis (raised 3mm for alignment)
+HINGE_Z = 34.0                        # Z center of pin axis (tuned for alignment)
 HINGE_INSET = 5.0                     # inset from wall ends to avoid corners
 HINGE_A_START = OY_F + HINGE_INSET    # -27.48  — first knuckle Y start
 HINGE_A_END = OY_B - HINGE_INSET      #  92.12  — last knuckle Y end
@@ -26,7 +26,7 @@ KNUCKLE_CLEARANCE = 0.3               # gap between adjacent knuckles (mm)
 
 # Derived: pin axis position
 PIN_AXIS_X = NX_L - KNUCKLE_RADIUS    # -101.762
-PIN_AXIS_Z = HINGE_Z                  #   36.0
+PIN_AXIS_Z = HINGE_Z                  #   34.0
 
 # --- Snap clips on right wall ---
 CLIP_Z = 33.0                         # Z center of clips

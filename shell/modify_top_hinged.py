@@ -82,11 +82,12 @@ rib_cleanup = wall_ring(IX_L, IY_F, IX_R, IY_B,
 result = result.cut(rib_cleanup)
 
 # === 4c. Remove groove/lip on left (hinge) wall — prevents pivot binding ===
+# Inner lip (step 2) extends to TOP_RIM_Z+2=34, so cut must reach that high
 hinge_cut = Part.makeBox(
     (IX_L + 1) - (NX_L - 1),                       # X: generous span through left wall
     IY_B - IY_F,                                     # Y: inner span (preserves front/back corners)
-    (TOP_RIM_Z + 0.2) - (TOP_TONGUE_Z - 0.5),      # Z: mating zone
-    Vector(NX_L - 1, IY_F, TOP_TONGUE_Z - 0.5))
+    (TOP_RIM_Z + 2.5) - (TOP_TONGUE_Z - 1),        # Z: 27→34.5, covers full inner lip
+    Vector(NX_L - 1, IY_F, TOP_TONGUE_Z - 1))
 result = result.cut(hinge_cut)
 print_volume(result, "After mating profile (left wall cleared)")
 
