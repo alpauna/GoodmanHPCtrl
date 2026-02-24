@@ -89,14 +89,9 @@ trim_in = wall_ring(NMX_L-CLR, NMY_F-CLR, NMX_R+CLR, NMY_B+CLR,
 result = result.cut(trim_in)
 print(f"6. Tongue trimmed: {result.Volume:.0f}")
 
-# === 6b. Remove tongue/groove on left (hinge) wall — prevents pivot binding ===
-hinge_cut = Part.makeBox(
-    (IX_L + 1) - (NX_L - 1),                      # X: generous span through left wall
-    IY_B - IY_F,                                    # Y: inner span (preserves front/back corners)
-    (BOT_RIM_Z + 0.5) - (BOT_GROOVE_Z - 0.5),     # Z: mating zone
-    Vector(NX_L - 1, IY_F, BOT_GROOVE_Z - 0.5))
-result = result.cut(hinge_cut)
-print(f"6b. Left wall tongue removed: {result.Volume:.0f}")
+# NOTE: No tongue removal on left wall — tongue stays to keep wall height
+# level with other 3 sides. Top shell has no groove here (step 4c), so
+# the tongue is just a flat extension. Hinge provides alignment.
 
 # === 7. Knuckle hinge on left wall (even knuckles: 0, 2, 4) ===
 # Struts run from barrel down to shell floor for full stress transfer
