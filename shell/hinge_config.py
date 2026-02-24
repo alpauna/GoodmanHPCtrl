@@ -15,18 +15,20 @@ NX_R = OX_R + THICK   #   5.417 — thickened right wall exterior
 # --- Hinge on left wall ---
 # Pin axis: X = NX_L - KNUCKLE_RADIUS, Z = HINGE_Z
 # Both halves MUST produce the same (X, Z) for the pin to thread through
-HINGE_Z = 34.0                        # Z center of pin axis (tuned for alignment)
+KNUCKLE_RADIUS = 3.0                   # barrel outer radius (mm)
+_BOT_RIM_Z = 35.0                      # bottom shell wall top (mating rim)
+_BARREL_GAP = 0.2                      # clearance between barrel bottom and wall
+HINGE_Z = _BOT_RIM_Z + _BARREL_GAP + KNUCKLE_RADIUS  # 38.2
 HINGE_INSET = 5.0                     # inset from wall ends to avoid corners
 HINGE_A_START = OY_F + HINGE_INSET    # -27.48  — first knuckle Y start
 HINGE_A_END = OY_B - HINGE_INSET      #  92.12  — last knuckle Y end
 KNUCKLE_COUNT = 5                      # total segments (bottom=0,2,4  top=1,3)
-KNUCKLE_RADIUS = 3.0                   # barrel outer radius (mm)
 PIN_RADIUS = 1.0                       # pin hole radius (~2mm pin / 1.75mm filament)
 KNUCKLE_CLEARANCE = 0.3               # gap between adjacent knuckles (mm)
 
 # Derived: pin axis position
 PIN_AXIS_X = NX_L - KNUCKLE_RADIUS    # -101.762
-PIN_AXIS_Z = HINGE_Z                  #   34.0
+PIN_AXIS_Z = HINGE_Z                  #   38.2
 
 # --- Snap clips on right wall ---
 CLIP_Z = 33.0                         # Z center of clips
