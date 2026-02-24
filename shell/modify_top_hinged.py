@@ -29,7 +29,7 @@ NY_F = OY_F - THICK; NY_B = OY_B + THICK
 NEW_HALF = 1.75
 NMX_L = IX_L - NEW_HALF; NMX_R = IX_R + NEW_HALF
 NMY_F = IY_F - NEW_HALF; NMY_B = IY_B + NEW_HALF
-TOP_TONGUE_Z = 28.0; TOP_RIM_Z = 32.0
+TOP_TONGUE_Z = 28.0; TOP_RIM_Z = 33.0  # matches BARREL_Z_BOTTOM — no step on hinge wall
 CEIL_Z = bb.ZMax  # 51.50
 CEIL_INNER = 48.50
 
