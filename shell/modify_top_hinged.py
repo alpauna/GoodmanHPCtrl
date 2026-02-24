@@ -10,7 +10,7 @@ sys.path.insert(0, shell_dir)
 from cutout import (wall_ring, drill_hole_lateral, reposition_cutout,
                     max6675_mount, labeled_cutout, deboss_text,
                     verify_cutout, verify_solid, z_probe, print_volume,
-                    knuckle_hinge, snap_clip, countersink_cup)
+                    knuckle_hinge, snap_clip, coved_corner_countersink)
 from hinge_config import (NX_L, NX_R, OY_F, OY_B,
                            HINGE_Z, HINGE_A_START, HINGE_A_END,
                            KNUCKLE_COUNT, KNUCKLE_RADIUS, PIN_RADIUS,
@@ -169,59 +169,14 @@ MATING_Z = 35.0   # same Z as left hinged wall top (BOT_RIM_Z)
 SCREW_GAP = 0.2   # gap between top and bottom pillars for secure clamping
 BOTTOM_R = 2.5    # bottom pillar radius (must match bottom shell)
 TOP_R = BOTTOM_R * 3.0  # 7.5mm — doubled from 3.75mm
-CS_WALL = 1.5     # uniform wall and floor thickness of countersink cup
 SCREW_PILLAR_Z = MATING_Z + SCREW_GAP - 2.0  # 33.2 — 2mm deeper than original 35.2
 
-# Solid cylindrical boss in front-right corner, clipped flush at walls
-# Extends into shell interior as a quarter-round fillet in the corner
-overshoot = 1.0
-
-# 1. Full solid cylinder at screw position
-cup = Part.makeCylinder(TOP_R, CEIL_Z + overshoot - SCREW_PILLAR_Z,
-                        Vector(SCREW_X, SCREW_Y, SCREW_PILLAR_Z))
-
-# 2. Clip at wall outer surfaces only (prevent overhang past shell walls)
-# Let cylinder extend freely into interior (-X and +Y from center)
-clip_box = Part.makeBox(
-    NX_R - (SCREW_X - TOP_R),                     # full -X extent to right wall
-    (SCREW_Y + TOP_R) - NY_F,                     # front wall to full +Y extent
-    CEIL_Z + overshoot - SCREW_PILLAR_Z + 2,
-    Vector(SCREW_X - TOP_R, NY_F, SCREW_PILLAR_Z - 1))
-cup = cup.common(clip_box)
-
-# 3. Fuse solid boss with shell
-result = result.fuse(cup)
-
-# 4. Trim overshoot above ceiling
-trim = Part.makeBox(TOP_R * 4, TOP_R * 4, overshoot + 10.0,
-                    Vector(SCREW_X - TOP_R * 2, SCREW_Y - TOP_R * 2, CEIL_Z))
-result = result.cut(trim)
-
-# 5. Drill M2 clearance hole through entire column + ceiling
-hole = Part.makeCylinder(1.2, 30.0,
-                         Vector(SCREW_X, SCREW_Y, SCREW_PILLAR_Z - 5))
-result = result.cut(hole)
-
-# 6. Quarter-round countersink recess — matches boss profile from below
-# Same cylinder + wall clip as boss, but cut as a shallow pocket from the top
-CS_HEAD_D = 10.0  # recess depth from outer ceiling surface
-csink = Part.makeCylinder(TOP_R, CS_HEAD_D + 1.0,
-                          Vector(SCREW_X, SCREW_Y, CEIL_Z - CS_HEAD_D))
-csink_clip = Part.makeBox(
-    NX_R - (SCREW_X - TOP_R),
-    (SCREW_Y + TOP_R) - NY_F,
-    CS_HEAD_D + 2,
-    Vector(SCREW_X - TOP_R, NY_F, CEIL_Z - CS_HEAD_D - 0.5))
-csink = csink.common(csink_clip)
-# Fill the corner gap between cylinder curve and wall corner
-corner_fill = Part.makeBox(
-    NX_R - SCREW_X,                    # screw center to right wall
-    SCREW_Y - NY_F,                    # front wall to screw center
-    CS_HEAD_D + 1.0,
-    Vector(SCREW_X, NY_F, CEIL_Z - CS_HEAD_D))
-csink = csink.fuse(corner_fill)
-result = result.cut(csink)
-print_volume(result, "After M2 quarter-round boss (front-right)")
+result = coved_corner_countersink(result, SCREW_X, SCREW_Y,
+                                  z_bottom=SCREW_PILLAR_Z, z_outer=CEIL_Z,
+                                  radius=TOP_R, recess_depth=10.0,
+                                  clearance_radius=1.2,
+                                  wall_x=NX_R, wall_y=NY_F)
+print_volume(result, "After M2 coved corner countersink (front-right)")
 
 # === 10b. Restore groove profile on 3 walls (not hinge/left) ===
 # Re-cut outer groove — same as step 3 — in case cup affected front-right corner

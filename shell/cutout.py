@@ -241,6 +241,96 @@ def countersink_cup(shape, cx, cy, z_bottom, z_surface, z_outer,
     return shape.cut(trim)
 
 
+def coved_corner_countersink(shape, cx, cy, z_bottom, z_outer,
+                             radius, recess_depth, clearance_radius=1.2,
+                             wall_x=None, wall_y=None):
+    """Add a coved corner countersink — a solid boss with matching recess.
+
+    Creates a cylindrical screw boss in a wall corner, clipped flush at two
+    wall surfaces. A matching quarter-round recess is cut from the ceiling
+    surface, with a rectangular corner fill to eliminate artifacts where the
+    cylinder curve doesn't reach the wall intersection. A clearance hole is
+    drilled through the entire column for the screw.
+
+    The result is an inverse quarter-round profile visible from both sides:
+    curved face toward the shell interior, flat faces flush with the walls,
+    and a countersunk pocket on the outer ceiling surface.
+
+    Cross-section (top view, +X right wall, -Y front wall):
+
+        interior
+            \\
+             \\  curved face
+              \\
+        -------+  screw hole at (cx, cy)
+        |      |
+        | wall | wall
+        +------+  corner (wall_x, wall_y)
+
+    Args:
+        shape:            Shape to modify.
+        cx, cy:           Screw center position (matches bottom pillar).
+        z_bottom:         Z of the boss base (lowest point).
+        z_outer:          Z of the outer ceiling surface.
+        radius:           Boss cylinder radius (mm).
+        recess_depth:     Depth of countersink recess from ceiling (mm).
+        clearance_radius: Screw clearance hole radius (default 1.2mm for M2).
+        wall_x:           X coordinate of the wall to clip at (e.g., right wall
+                          outer face). Boss extends in -X from here. Required.
+        wall_y:           Y coordinate of the wall to clip at (e.g., front wall
+                          outer face). Boss extends in +Y from here. Required.
+
+    Returns:
+        Modified shape with coved corner countersink.
+    """
+    overshoot = 1.0
+
+    # 1. Solid cylinder at screw position
+    cup = Part.makeCylinder(radius, z_outer + overshoot - z_bottom,
+                            Vector(cx, cy, z_bottom))
+
+    # 2. Clip at wall outer surfaces — let cylinder extend into interior
+    clip_box = Part.makeBox(
+        wall_x - (cx - radius),
+        (cy + radius) - wall_y,
+        z_outer + overshoot - z_bottom + 2,
+        Vector(cx - radius, wall_y, z_bottom - 1))
+    cup = cup.common(clip_box)
+
+    # 3. Fuse solid boss with shell
+    shape = shape.fuse(cup)
+
+    # 4. Trim overshoot above ceiling
+    trim = Part.makeBox(radius * 4, radius * 4, overshoot + 10.0,
+                        Vector(cx - radius * 2, cy - radius * 2, z_outer))
+    shape = shape.cut(trim)
+
+    # 5. Drill clearance hole through entire column + ceiling
+    hole = Part.makeCylinder(clearance_radius, 30.0,
+                             Vector(cx, cy, z_bottom - 5))
+    shape = shape.cut(hole)
+
+    # 6. Quarter-round countersink recess from ceiling surface
+    csink = Part.makeCylinder(radius, recess_depth + 1.0,
+                              Vector(cx, cy, z_outer - recess_depth))
+    csink_clip = Part.makeBox(
+        wall_x - (cx - radius),
+        (cy + radius) - wall_y,
+        recess_depth + 2,
+        Vector(cx - radius, wall_y, z_outer - recess_depth - 0.5))
+    csink = csink.common(csink_clip)
+
+    # 7. Fill corner gap between cylinder curve and wall intersection
+    corner_fill = Part.makeBox(
+        wall_x - cx,
+        cy - wall_y,
+        recess_depth + 1.0,
+        Vector(cx, wall_y, z_outer - recess_depth))
+    csink = csink.fuse(corner_fill)
+
+    return shape.cut(csink)
+
+
 def drill_hole_lateral(shape, axis, start, end, cy, cz, radius, margin=2.0):
     """Drill a horizontal through-hole along the X or Y axis.
 
