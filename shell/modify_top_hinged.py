@@ -168,17 +168,60 @@ SCREW_Y = -27.5   # embeds into front wall (IY_F=-29.48)
 MATING_Z = 35.0   # same Z as left hinged wall top (BOT_RIM_Z)
 SCREW_GAP = 0.2   # gap between top and bottom pillars for secure clamping
 BOTTOM_R = 2.5    # bottom pillar radius (must match bottom shell)
-TOP_R = BOTTOM_R * 1.5  # 3.75mm — countersink pillar 1.5x bottom radius
+TOP_R = BOTTOM_R * 3.0  # 7.5mm — doubled from 3.75mm
 CS_WALL = 1.5     # uniform wall and floor thickness of countersink cup
-SCREW_PILLAR_Z = MATING_Z + SCREW_GAP  # 35.2 — top pillar stops 0.2mm above bottom
+SCREW_PILLAR_Z = MATING_Z + SCREW_GAP - 2.0  # 33.2 — 2mm deeper than original 35.2
 
-# Countersink cup: 1.5mm wall, 1.5mm floor, M2 clearance through floor
-result = countersink_cup(result, SCREW_X, SCREW_Y,
-                         z_bottom=SCREW_PILLAR_Z,
-                         z_surface=CEIL_INNER, z_outer=CEIL_Z,
-                         outer_radius=TOP_R, wall_thick=CS_WALL,
-                         clearance_radius=1.1)
-print_volume(result, "After M2 screw mount (front-right)")
+# Solid cylindrical boss in front-right corner, clipped flush at walls
+# Extends into shell interior as a quarter-round fillet in the corner
+overshoot = 1.0
+
+# 1. Full solid cylinder at screw position
+cup = Part.makeCylinder(TOP_R, CEIL_Z + overshoot - SCREW_PILLAR_Z,
+                        Vector(SCREW_X, SCREW_Y, SCREW_PILLAR_Z))
+
+# 2. Clip at wall outer surfaces only (prevent overhang past shell walls)
+# Let cylinder extend freely into interior (-X and +Y from center)
+clip_box = Part.makeBox(
+    NX_R - (SCREW_X - TOP_R),                     # full -X extent to right wall
+    (SCREW_Y + TOP_R) - NY_F,                     # front wall to full +Y extent
+    CEIL_Z + overshoot - SCREW_PILLAR_Z + 2,
+    Vector(SCREW_X - TOP_R, NY_F, SCREW_PILLAR_Z - 1))
+cup = cup.common(clip_box)
+
+# 3. Fuse solid boss with shell
+result = result.fuse(cup)
+
+# 4. Trim overshoot above ceiling
+trim = Part.makeBox(TOP_R * 4, TOP_R * 4, overshoot + 10.0,
+                    Vector(SCREW_X - TOP_R * 2, SCREW_Y - TOP_R * 2, CEIL_Z))
+result = result.cut(trim)
+
+# 5. Drill M2 clearance hole through entire column + ceiling
+hole = Part.makeCylinder(1.2, 30.0,
+                         Vector(SCREW_X, SCREW_Y, SCREW_PILLAR_Z - 5))
+result = result.cut(hole)
+
+# 6. Quarter-round countersink recess — matches boss profile from below
+# Same cylinder + wall clip as boss, but cut as a shallow pocket from the top
+CS_HEAD_D = 10.0  # recess depth from outer ceiling surface
+csink = Part.makeCylinder(TOP_R, CS_HEAD_D + 1.0,
+                          Vector(SCREW_X, SCREW_Y, CEIL_Z - CS_HEAD_D))
+csink_clip = Part.makeBox(
+    NX_R - (SCREW_X - TOP_R),
+    (SCREW_Y + TOP_R) - NY_F,
+    CS_HEAD_D + 2,
+    Vector(SCREW_X - TOP_R, NY_F, CEIL_Z - CS_HEAD_D - 0.5))
+csink = csink.common(csink_clip)
+# Fill the corner gap between cylinder curve and wall corner
+corner_fill = Part.makeBox(
+    NX_R - SCREW_X,                    # screw center to right wall
+    SCREW_Y - NY_F,                    # front wall to screw center
+    CS_HEAD_D + 1.0,
+    Vector(SCREW_X, NY_F, CEIL_Z - CS_HEAD_D))
+csink = csink.fuse(corner_fill)
+result = result.cut(csink)
+print_volume(result, "After M2 quarter-round boss (front-right)")
 
 # === 10b. Restore groove profile on 3 walls (not hinge/left) ===
 # Re-cut outer groove — same as step 3 — in case cup affected front-right corner
@@ -220,18 +263,20 @@ zs_wall2 = z_probe(result, NX_L + 1.0, gap_y)
 print(f"  Left wall exterior (X={NX_L-1:.1f}, Y={gap_y:.1f}): Z={[f'{z:.2f}' for z in zs_wall]}")
 print(f"  Left wall interior (X={NX_L+1:.1f}, Y={gap_y:.1f}): Z={[f'{z:.2f}' for z in zs_wall2]}")
 
-# M2 screw mount
-print("M2 screw mount verification:")
-verify_solid(result, SCREW_X, SCREW_Y + TOP_R - 0.5,
-             SCREW_PILLAR_Z, CEIL_Z, "cup wall (+Y, cavity)")
-verify_solid(result, SCREW_X - TOP_R + 0.5, SCREW_Y,
-             SCREW_PILLAR_Z, CEIL_Z, "cup wall (-X, cavity)")
-# Center: should see floor boundaries (bore above, clearance through)
+# M2 boss verification (probes in interior where boss extends)
+print("M2 boss verification:")
+# Probe interior side (-X from center): should be solid boss material
+verify_solid(result, SCREW_X - 3.0, SCREW_Y,
+             SCREW_PILLAR_Z - 1, CEIL_Z, "boss interior (-X)")
+# Probe interior side (+Y from center)
+verify_solid(result, SCREW_X, SCREW_Y + 3.0,
+             SCREW_PILLAR_Z - 1, CEIL_Z, "boss interior (+Y)")
+# Screw hole center: should be OPEN (clearance drilled)
 zs = z_probe(result, SCREW_X, SCREW_Y)
-print(f"  cup center: Z={[f'{z:.2f}' for z in zs]}")
-# Wall junction: use wide Z range to see both wall bottom and cup
-zs = z_probe(result, SCREW_X + TOP_R - 0.5, SCREW_Y)
-print(f"  cup wall (+X, in wall): Z={[f'{z:.2f}' for z in zs]}")
+print(f"  screw center: Z={[f'{z:.2f}' for z in zs]}")
+# Boss extent at 45° into interior
+zs = z_probe(result, SCREW_X - 4.0, SCREW_Y + 4.0)
+print(f"  boss 45° interior (X={SCREW_X-4:.0f},Y={SCREW_Y+4:.0f}): Z={[f'{z:.2f}' for z in zs]}")
 
 # TC mount
 pil_x = bb.XMin + 35

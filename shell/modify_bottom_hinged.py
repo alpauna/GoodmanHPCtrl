@@ -169,7 +169,7 @@ print_volume(result, "9b. After tongue restore")
 # Interior brim on top/left/right: 2mm height, 3mm depth
 WALL_CX = (OX_L + OX_R) / 2                     # -46.67 — shell center X
 WALL_CZ = (FLOOR_Z + BOT_RIM_Z) / 2 + 5.0      #  21.75 — Z center + 5mm offset
-LV_W = 75.0; LV_H = 18.0
+LV_W = 75.0; LV_H = 15.0
 result = wall_cutout(result, wall='front', wall_coord=NY_F,
                      a1=WALL_CX - LV_W/2, a2=WALL_CX + LV_W/2,
                      z1=WALL_CZ - LV_H/2, z2=WALL_CZ + LV_H/2,
