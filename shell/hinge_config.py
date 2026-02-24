@@ -16,9 +16,9 @@ NX_R = OX_R + THICK   #   5.417 — thickened right wall exterior
 # Pin axis: X = NX_L - KNUCKLE_RADIUS, Z = HINGE_Z
 # Both halves MUST produce the same (X, Z) for the pin to thread through
 KNUCKLE_RADIUS = 3.0                   # barrel outer radius (mm)
-_LEFT_WALL_Z = 35.0                    # bottom shell left wall top (BOT_RIM_Z, tongue kept)
+_MATING_Z = 35.0                       # mating line Z (rim where top meets bottom)
 _HINGE_CLEARANCE = 0.2                 # lift pin axis above mating line to prevent binding
-HINGE_Z = _LEFT_WALL_Z + _HINGE_CLEARANCE  # 35.2 — 0.2mm above mating line
+HINGE_Z = _MATING_Z + _HINGE_CLEARANCE  # 35.2 — 0.2mm above mating line
 HINGE_INSET = 5.0                     # inset from wall ends to avoid corners
 HINGE_A_START = OY_F + HINGE_INSET    # -27.48  — first knuckle Y start
 HINGE_A_END = OY_B - HINGE_INSET      #  92.12  — last knuckle Y end

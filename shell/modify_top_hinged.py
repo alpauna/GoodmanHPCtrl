@@ -29,7 +29,7 @@ NY_F = OY_F - THICK; NY_B = OY_B + THICK
 NEW_HALF = 1.75
 NMX_L = IX_L - NEW_HALF; NMX_R = IX_R + NEW_HALF
 NMY_F = IY_F - NEW_HALF; NMY_B = IY_B + NEW_HALF
-TOP_TONGUE_Z = 26.0; TOP_RIM_Z = 35.0  # mating line Z — matches HINGE_Z and BOT_RIM_Z
+TOP_TONGUE_Z = 32.0; TOP_RIM_Z = 35.0  # 3mm tongue (32-35) matches bottom groove (31-35)
 CEIL_Z = bb.ZMax  # 51.50
 CEIL_INNER = 48.50
 
@@ -59,10 +59,11 @@ LCD = FEATURES["LCD"]
 print(f"Pin axis (from hinge_config): X={PIN_AXIS_X:.3f}  Z={PIN_AXIS_Z:.3f}")
 
 # === 1-4. Mating profile (same as non-hinged) ===
-# 1. Remove tongue
+# 1. Remove tongue (clean from Z=27 to catch all original geometry below new tongue)
+ORIG_CLEANUP_Z = 27.0
 result = top_orig.cut(wall_ring(OX_L-2, OY_F-2, OX_R+2, OY_B+2,
                                 IX_L, IY_F, IX_R, IY_B,
-                                TOP_TONGUE_Z-0.1, TOP_RIM_Z+0.01))
+                                ORIG_CLEANUP_Z, TOP_RIM_Z+0.01))
 # 2. Inner lip
 result = result.fuse(wall_ring(NMX_L, NMY_F, NMX_R, NMY_B,
                                IX_L, IY_F, IX_R, IY_B,
@@ -167,7 +168,7 @@ MATING_Z = 35.0   # same Z as left hinged wall top (BOT_RIM_Z)
 SCREW_GAP = 0.2   # gap between top and bottom pillars for secure clamping
 BOTTOM_R = 2.5    # bottom pillar radius (must match bottom shell)
 TOP_R = BOTTOM_R * 3.0  # 7.5mm — doubled from 3.75mm
-SCREW_PILLAR_Z = MATING_Z + SCREW_GAP - 2.0  # 33.2 — 2mm deeper than original 35.2
+SCREW_PILLAR_Z = TOP_RIM_Z + 0.5              # 35.5 — cove bottom sits just below shelf
 
 result = coved_corner_countersink(result, SCREW_X, SCREW_Y,
                                   z_bottom=SCREW_PILLAR_Z, z_outer=CEIL_Z,
