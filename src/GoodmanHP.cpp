@@ -516,6 +516,7 @@ void GoodmanHP::checkYAndActivateCNT() {
             if (w != nullptr) w->turnOff();
             _defrostTransition = false;
             _defrostCntPending = false;
+            _defrostStartTick = 0;
             Log.info("HP", "Y dropped during defrost, system shutdown (defrost pending)");
         }
         if (_defrostExiting) {
@@ -764,7 +765,7 @@ bool GoodmanHP::isSoftwareDefrostActive() const {
 }
 
 uint32_t GoodmanHP::getDefrostElapsedMs() const {
-    if (!_softwareDefrost || _defrostStartTick == 0) return 0;
+    if (!_softwareDefrost || _defrostStartTick == 0 || _state != State::DEFROST) return 0;
     return millis() - _defrostStartTick;
 }
 
