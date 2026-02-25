@@ -1320,6 +1320,7 @@ uint32_t GoodmanHP::getStateValidationMs() const {
 
 bool GoodmanHP::canTransitionToNormalState() {
     if (!_stateValidationActive) return true;
+    if (_manualOverride) return true;  // Skip validation during manual override
     uint32_t now = millis();
     uint32_t elapsed = now - _stateValidationStart;
     if (elapsed >= _stateValidationMs) {
@@ -1339,6 +1340,7 @@ bool GoodmanHP::canTransitionToNormalState() {
 
 void GoodmanHP::startStateValidation() {
     if (_stateValidationMs == 0) return;  // Disabled
+    if (_manualOverride) return;  // Skip during manual override
     _stateValidationActive = true;
     _stateValidationStart = millis();
     _lastValidationLogTick = millis();
