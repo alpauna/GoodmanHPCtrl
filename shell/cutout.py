@@ -973,21 +973,24 @@ def knuckle_hinge(shape, wall, wall_coord, a_start, a_end,
             shape = shape.fuse(block)
 
             # 2b. Chamfer wall-side corners of buildup (inside, nearest pivot)
+            # Only bevel the corner facing the OTHER shell's pivot path:
+            #   bottom shell: bevel TOP corner only (top shell swings above)
+            #   top shell: bevel BOTTOM corner only (bottom shell below)
+            # The opposite corner stays square for solid wall/strut attachment.
             if wall == 'left':
                 dx = -chamfer  # toward barrel center
             else:
                 dx = chamfer
-            # Bottom wall-side corner
-            w = Part.makePolygon([
-                Vector(wall_coord, seg_start, barrel_z_bottom),
-                Vector(wall_coord + dx, seg_start, barrel_z_bottom),
-                Vector(wall_coord, seg_start, barrel_z_bottom + chamfer),
-                Vector(wall_coord, seg_start, barrel_z_bottom)])
-            prism = Part.Face(w).extrude(Vector(0, seg_length, 0))
-            shape = shape.cut(prism)
-            # Top wall-side corner — skip for top-side knuckles so the
-            # upper edge stays square for a solid connection to the wall
-            # reinforcement and upward strut
+            # Bottom wall-side corner — skip for bottom shell (strut attachment)
+            if side != "bottom":
+                w = Part.makePolygon([
+                    Vector(wall_coord, seg_start, barrel_z_bottom),
+                    Vector(wall_coord + dx, seg_start, barrel_z_bottom),
+                    Vector(wall_coord, seg_start, barrel_z_bottom + chamfer),
+                    Vector(wall_coord, seg_start, barrel_z_bottom)])
+                prism = Part.Face(w).extrude(Vector(0, seg_length, 0))
+                shape = shape.cut(prism)
+            # Top wall-side corner — skip for top shell (strut attachment)
             if side != "top":
                 w = Part.makePolygon([
                     Vector(wall_coord, seg_start, barrel_z_top),
@@ -1050,22 +1053,24 @@ def knuckle_hinge(shape, wall, wall_coord, a_start, a_end,
                 dy = -chamfer  # toward barrel center
             else:
                 dy = chamfer
-            # Bottom wall-side corner
-            w = Part.makePolygon([
-                Vector(seg_start, wall_coord, barrel_z_bottom),
-                Vector(seg_start, wall_coord + dy, barrel_z_bottom),
-                Vector(seg_start, wall_coord, barrel_z_bottom + chamfer),
-                Vector(seg_start, wall_coord, barrel_z_bottom)])
-            prism = Part.Face(w).extrude(Vector(seg_length, 0, 0))
-            shape = shape.cut(prism)
-            # Top wall-side corner
-            w = Part.makePolygon([
-                Vector(seg_start, wall_coord, barrel_z_top),
-                Vector(seg_start, wall_coord + dy, barrel_z_top),
-                Vector(seg_start, wall_coord, barrel_z_top - chamfer),
-                Vector(seg_start, wall_coord, barrel_z_top)])
-            prism = Part.Face(w).extrude(Vector(seg_length, 0, 0))
-            shape = shape.cut(prism)
+            # Bottom wall-side corner — skip for bottom shell (strut attachment)
+            if side != "bottom":
+                w = Part.makePolygon([
+                    Vector(seg_start, wall_coord, barrel_z_bottom),
+                    Vector(seg_start, wall_coord + dy, barrel_z_bottom),
+                    Vector(seg_start, wall_coord, barrel_z_bottom + chamfer),
+                    Vector(seg_start, wall_coord, barrel_z_bottom)])
+                prism = Part.Face(w).extrude(Vector(seg_length, 0, 0))
+                shape = shape.cut(prism)
+            # Top wall-side corner — skip for top shell (strut attachment)
+            if side != "top":
+                w = Part.makePolygon([
+                    Vector(seg_start, wall_coord, barrel_z_top),
+                    Vector(seg_start, wall_coord + dy, barrel_z_top),
+                    Vector(seg_start, wall_coord, barrel_z_top - chamfer),
+                    Vector(seg_start, wall_coord, barrel_z_top)])
+                prism = Part.Face(w).extrude(Vector(seg_length, 0, 0))
+                shape = shape.cut(prism)
 
             strut_width = knuckle_radius
             if strut_z_min is not None and strut_z_min < barrel_z_bottom:
