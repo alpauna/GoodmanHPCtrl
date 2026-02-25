@@ -168,7 +168,7 @@ MATING_Z = 35.0   # same Z as left hinged wall top (BOT_RIM_Z)
 SCREW_GAP = 0.2   # gap between top and bottom pillars for secure clamping
 BOTTOM_R = 2.5    # bottom pillar radius (must match bottom shell)
 TOP_R = 2.0       # 1.5mm visible protrusion, 0.8mm wall around clearance hole
-SCREW_PILLAR_Z = TOP_RIM_Z + 1.5              # 36.5 — cove bottom 1.5mm above mating edge
+SCREW_PILLAR_Z = TOP_RIM_Z                     # 35.0 — cove bottom at mating surface
 
 result = coved_corner_countersink(result, SCREW_X, SCREW_Y,
                                   z_bottom=SCREW_PILLAR_Z, z_outer=CEIL_Z,
