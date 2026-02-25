@@ -101,11 +101,13 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - Auto-recovers when temperature rises above threshold
   - Threshold is configurable via `lowTemp.threshold` in SD card config
 
-- **Input Pin Validation Delay** — All 4 input pins (LPS, DFT, Y, O) use a configurable debounce/validation delay (default 10 seconds) to prevent false triggers from electrical noise or transient signals:
-  - When an ISR detects a pin change, the new state is recorded and a validation timer starts
+- **Input Pin Validation Delay** — All 4 input pins (LPS, DFT, Y, O) use a configurable debounce/validation delay (default 2 seconds) to prevent false triggers from electrical noise or transient signals:
+  - Input pins are polled every 500ms via `onCheckInputQueue()` (direct GPIO polling, no ISR attachment required)
+  - When a pin's live GPIO state differs from its confirmed state, a validation timer starts
   - After the delay expires, the GPIO is re-read to confirm the pin is still in the expected state
   - If the pin has reverted to its original state, the change is discarded as a false trigger and logged as a warning
   - `isActive()` returns the confirmed/debounced state, not the live GPIO — the state machine only sees validated inputs
+  - `getPendingState()` prevents re-triggering while a validation is already in progress
   - Both activation (pin going HIGH) and deactivation (pin going LOW) go through the full delay
   - Configurable via `heatpump.inputDelay.ms` in config JSON (0–60 seconds, live — changes apply immediately to all input pins)
 
@@ -119,11 +121,13 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 - **Output State Validation** — Every 10 seconds, `validateOutputStates()` verifies all relay outputs match the expected state for the current operating mode using a table-driven approach:
   - **Global invariants** enforced first: W must never be on when O is active; CNT must be off during any blocking fault (priority: compressor overtemp > suction low temp > LPS fault > low temp > RV fail)
   - **Per-state table** defines expected output values: OFF=all off, COOL=RV on/W off, HEAT=RV off, DEFROST Ph3=RV+W on/FAN off, ERROR=CNT off, LOW_TEMP=CNT+FAN+RV off
+  - **Transition phase rows** validated: COOL Trans Ph1/Ph2, HEAT Trans Ph1/Ph2, DEFROST Ph1/Ph2, Defrost Exit Ph1/Ph2
   - Mismatches are logged as errors and auto-corrected
-  - Skipped during transitions (defrost phases, COOL transition, startup lockout, manual override)
+  - Skipped during startup lockout and manual override only (transitions are now validated)
+  - Manual override also bypasses the state validation timer so it doesn't interfere with manual pin control testing
   - Logs "State check OK" at info level every 30 seconds when all outputs are correct
 
-- **Automatic Defrost (3-Phase Sequencing)** — After a configurable heat runtime threshold (default 90 minutes, range 30–90 min) of accumulated CNT runtime in HEAT mode while DFT is active (coil temp ≤ 32°F, indicating icing conditions), initiates a 3-phase software defrost cycle for safe pressure equalization and output sequencing:
+- **Automatic Defrost (3-Phase Sequencing)** — After a configurable heat runtime threshold (default 90 minutes, range 1–90 min) of accumulated CNT runtime in HEAT mode while DFT is active (coil temp ≤ 32°F, indicating icing conditions), initiates a 3-phase software defrost cycle for safe pressure equalization and output sequencing:
 
   **Phase 1 — Pressure Equalization** (`defrostTransition`):
   - All outputs OFF (CNT, FAN, W, RV)
@@ -159,13 +163,39 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 
   **Additional defrost behavior:**
   - Heat runtime only accumulates when DFT input is active (closed at 32°F, indicating icing conditions)
-  - DFT turning off (temps > 32°F) clears accumulated runtime — no ice risk
+  - DFT turning off (temps > 32°F) clears accumulated runtime after a 30-second debounce — prevents false resets from intermittent DFT wire contact
   - Only COOL and DEFROST modes clear accumulated runtime; Y going off does not
   - Only HEAT mode adds time to accumulated runtime
   - Runtime persists to SD card every 5 minutes, restored on boot
   - **Y drop during defrost entry**: All outputs turn off (including W), transition flags are cleared, but `_softwareDefrost` stays set. When Y reactivates in HEAT mode, defrost restarts from Phase 1
   - **Y drop during defrost exit**: All outputs turn off, exit transition cancelled. Normal state machine resumes on Y reactivation
   - **COOL cancellation**: If the thermostat switches to COOL mode (O becomes active) during any phase of a pending defrost, the defrost is cancelled entirely, heat runtime is cleared, and the system enters normal COOL mode
+
+- **HEAT→COOL Mode Transition (3-Phase)** — When switching from HEAT to COOL (O input activates), the reversing valve must switch safely with the compressor stopped:
+
+  **Phase 1 — Pressure Equalization** (`coolTransition`):
+  - CNT and FAN turned OFF, RV stays OFF (from HEAT position)
+  - Duration: `heatpump.shortCycle.rv` (default 30s)
+
+  **Phase 2 — RV On + CNT Hold** (`coolCntPending`):
+  - RV turned ON (switches to COOL position), CNT remains OFF
+  - Duration: `heatpump.shortCycle.cnt` (default 30s)
+
+  **Complete**: CNT and FAN turned ON — normal COOL mode active. If RV is already ON (e.g., from defrost Phase 2/3→COOL), the transition is skipped.
+
+- **COOL→HEAT Mode Transition (3-Phase)** — When switching from COOL to HEAT (O input deactivates), the reversing valve must switch safely with the compressor stopped:
+
+  **Phase 1 — Pressure Equalization** (`heatTransition`):
+  - CNT and FAN turned OFF, RV stays ON (from COOL position)
+  - Duration: `heatpump.shortCycle.rv` (default 30s)
+
+  **Phase 2 — RV Off + CNT Hold** (`heatCntPending`):
+  - RV turned OFF (switches to HEAT position), CNT remains OFF
+  - Duration: `heatpump.shortCycle.cnt` (default 30s)
+
+  **Complete**: CNT and FAN turned ON — normal HEAT mode active.
+
+  Both mode transitions abort on Y drop or state change (fault/LOW_TEMP), turning all outputs off.
 
 ### State Table
 
@@ -180,6 +210,10 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | `HEAT` Exit Phase 1 | Defrost exit pressure equalization (30s) | OFF | OFF | ON | ON | RV+W stay on from defrost, CNT+FAN off |
 | `HEAT` Exit Phase 2 | RV switch + CNT hold (30s) | OFF | OFF | OFF | OFF | RV switches back to heat position |
 | `HEAT` Exit Complete | CNT+FAN resume | ON | ON | OFF | OFF | Normal HEAT mode resumes |
+| `COOL` Trans Phase 1 | HEAT→COOL pressure equalization (30s) | OFF | OFF | OFF | OFF | CNT+FAN off before RV switches |
+| `COOL` Trans Phase 2 | RV on, CNT hold (30s) | OFF | OFF | ON | OFF | RV seats before compressor starts |
+| `HEAT` Trans Phase 1 | COOL→HEAT pressure equalization (30s) | OFF | OFF | ON | OFF | CNT+FAN off, RV still on from COOL |
+| `HEAT` Trans Phase 2 | RV off, CNT hold (30s) | OFF | OFF | OFF | OFF | RV switches to HEAT position |
 | `ERROR` | LPS fault (low pressure) | OFF | OFF | OFF | ON* | *W on only in HEAT mode (Y active, O inactive) |
 | `LOW_TEMP` | Ambient < 20°F | OFF | OFF | OFF | ON* | *W on only in HEAT mode; W turns off if thermostat switches to COOL (Y+O) |
 | `HEAT` + RV Fail | RV fail latched | ON | OFF | OFF | ON* | *W on only in HEAT mode; CNT blocked until cleared |
@@ -203,7 +237,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | Class | Purpose |
 |-------|---------|
 | `GoodmanHP` | Central controller with pin maps, temp sensors, and state machine |
-| `InputPin` | Digital/analog input with ISR, configurable validation delay, confirmed-state debouncing, callbacks |
+| `InputPin` | Digital/analog input with polling-based validation delay, confirmed-state debouncing, callbacks |
 | `OutPin` | Output relay with delay, PWM support, state tracking, hardware state validation |
 | `TempSensor` | Temperature sensor with callbacks; supports OneWire (DS18B20), I2C (MCP9600), and SPI (MAX6675) |
 | `Config` | SD card and JSON configuration management |
@@ -549,10 +583,10 @@ This prompts for system name, MQTT prefix, WiFi, and MQTT credentials, then writ
 - `heatpump.shortCycle.rv` — Phase 1 pressure equalization delay in ms (default: 30000)
 - `heatpump.shortCycle.cnt` — Phase 2 CNT short cycle delay in ms (default: 30000)
 - `heatpump.stateValidation.delayMs` — State validation hold time in ms after state changes; prevents rapid cycling (default: 30000 = 30s, range: 0–300s, live)
-- `heatpump.inputDelay.ms` — Input pin validation delay in ms; re-reads GPIO after delay to confirm state change (default: 10000 = 10s, range: 0–60s, live)
+- `heatpump.inputDelay.ms` — Input pin validation delay in ms; re-reads GPIO after delay to confirm state change (default: 2000 = 2s, range: 0–60s, live)
 - `heatpump.defrost.minRuntimeMs` — Minimum Phase 3 runtime in ms before checking exit conditions (default: 180000 = 3 min)
 - `heatpump.defrost.exitTempF` — Condenser temp (°F) at which Phase 3 exits (default: 60.0)
-- `heatpump.defrost.heatRuntimeThresholdMs` — Accumulated HEAT runtime in ms before triggering defrost (default: 5400000 = 90 min, range: 30–90 min via config page)
+- `heatpump.defrost.heatRuntimeThresholdMs` — Accumulated HEAT runtime in ms before triggering defrost (default: 5400000 = 90 min, range: 1–90 min via config page)
 - `sensors.max6675.clk` — MAX6675 SPI clock pin (default: 39, requires reboot)
 - `sensors.max6675.cs` — MAX6675 SPI chip select pin (default: 40, requires reboot)
 - `sensors.max6675.do` — MAX6675 SPI data out pin (default: 41, requires reboot)
@@ -1100,7 +1134,12 @@ Full controller state, published on every state transition, fault event, and com
   "rvFail": false,
   "highSuctionTemp": false,
   "stateValidating": false,
-  "manualOverride": false
+  "manualOverride": false,
+  "coolTransition": false,
+  "coolCntPending": false,
+  "heatTransition": false,
+  "heatCntPending": false,
+  "defrostElapsedSec": 0
 }
 ```
 
