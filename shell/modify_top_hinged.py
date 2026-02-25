@@ -174,7 +174,7 @@ RECESS_DEPTH = CEIL_Z - SCREW_PILLAR_Z - 1.5   # leave 1.5mm solid above mating 
 result = coved_corner_countersink(result, SCREW_X, SCREW_Y,
                                   z_bottom=SCREW_PILLAR_Z, z_outer=CEIL_Z,
                                   radius=TOP_R, recess_depth=RECESS_DEPTH,
-                                  clearance_radius=1.2,
+                                  clearance_radius=0.6,
                                   wall_x=NX_R, wall_y=NY_F)
 print_volume(result, "After M2 coved corner countersink (front-right)")
 
