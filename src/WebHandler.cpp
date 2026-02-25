@@ -537,6 +537,7 @@ void WebHandler::setupRoutes() {
         doc["defrostCntPending"] = _hpController->isDefrostCntPendingActive();
         doc["defrostCntPendingRemainSec"] = _hpController->getDefrostCntPendingRemainingMs() / 1000;
         doc["defrostExiting"] = _hpController->isDefrostExitingActive();
+        doc["defrostElapsedSec"] = _hpController->getDefrostElapsedMs() / 1000;
         doc["coolTransition"] = _hpController->isCoolTransitionActive();
         doc["coolTransitionRemainSec"] = _hpController->getCoolTransitionRemainingMs() / 1000;
         doc["coolCntPending"] = _hpController->isCoolCntPendingActive();
@@ -750,6 +751,7 @@ void WebHandler::setupRoutes() {
             doc["startupLockoutRemainSec"] = _hpController->getStartupLockoutRemainingMs() / 1000;
             doc["defrostTransitionRemainSec"] = _hpController->getDefrostTransitionRemainingMs() / 1000;
             doc["defrostCntPendingRemainSec"] = _hpController->getDefrostCntPendingRemainingMs() / 1000;
+            doc["defrostElapsedSec"] = _hpController->getDefrostElapsedMs() / 1000;
             doc["coolTransitionRemainSec"] = _hpController->getCoolTransitionRemainingMs() / 1000;
             doc["coolCntPendingRemainSec"] = _hpController->getCoolCntPendingRemainingMs() / 1000;
             doc["heatTransitionRemainSec"] = _hpController->getHeatTransitionRemainingMs() / 1000;

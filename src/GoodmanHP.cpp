@@ -763,6 +763,11 @@ bool GoodmanHP::isSoftwareDefrostActive() const {
     return _softwareDefrost;
 }
 
+uint32_t GoodmanHP::getDefrostElapsedMs() const {
+    if (!_softwareDefrost || _defrostStartTick == 0) return 0;
+    return millis() - _defrostStartTick;
+}
+
 bool GoodmanHP::isLPSFaultActive() const {
     return _lpsFault;
 }

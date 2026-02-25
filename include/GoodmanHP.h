@@ -84,6 +84,7 @@ class GoodmanHP {
     void setHeatRuntimeMs(uint32_t ms);
     void resetHeatRuntime();
     bool isSoftwareDefrostActive() const;
+    uint32_t getDefrostElapsedMs() const;
     bool isLPSFaultActive() const;
     bool isLowTempActive() const;
     bool isCompressorOverTempActive() const;

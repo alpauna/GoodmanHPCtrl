@@ -187,6 +187,7 @@ function update(d){
   if(su){var sec=d.startupLockoutRemainSec||0;var m=Math.ceil(sec/60);su.textContent=d.startupLockout?'Startup Protect: '+m+'m':'Startup Protect';}
   setPill('fShortCycle',d.shortCycleProtection);
   setPill('fDefrost',d.defrost);
+  var dfEl=document.getElementById('fDefrost');if(dfEl){var dfs=d.defrostElapsedSec||0;var dfm=Math.floor(dfs/60);var dfr=dfs%60;dfEl.textContent=d.defrost?(dfs>0?'Defrost: '+dfm+':'+(dfr<10?'0':'')+dfr:'Defrost'):'Defrost';}
   var lpsEl=document.getElementById('fLPS');if(lpsEl){lpsEl.textContent=d.lpsFault?'LPS Fault':'LPS No Fault';setPill('fLPS',d.lpsFault);}
   var ts=d.temps||{};
   var ambValid=ts.AMBIENT_TEMP!==undefined;

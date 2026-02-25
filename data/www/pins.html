@@ -460,7 +460,7 @@ function renderFlags(d){
     {key:'suctionLowTemp',label:'Suction Low',color:'red'},
     {key:'rvFail',label:'RV Fail',color:'red'},
     {key:'highSuctionTemp',label:'High Suct Temp',color:'orange'},
-    {key:'defrost',label:'Defrost',color:'orange'},
+    {key:'defrost',label:'Defrost',elapsed:d.defrostElapsedSec,color:'orange'},
     {key:'defrostTransition',label:'Defrost Ph1 (RV SC)',cd:d.defrostTransitionRemainSec,color:'orange'},
     {key:'defrostCntPending',label:'Defrost Ph2 (CNT SC)',cd:d.defrostCntPendingRemainSec,color:'orange'},
     {key:'defrostExiting',label:'Defrost Exit',color:'orange'},
@@ -475,6 +475,7 @@ function renderFlags(d){
     var cls='flag '+(active?(f.color+' on'):'off');
     var label=f.label;
     if(active&&f.cd&&f.cd>0) label+=' '+fmtSec(f.cd);
+    if(active&&f.elapsed&&f.elapsed>0) label+=' '+fmtSec(f.elapsed);
     h+='<span class="'+cls+'">'+label+'</span>';
   }
   // Heat runtime (always show if > 0)
