@@ -937,6 +937,9 @@ def knuckle_hinge(shape, wall, wall_coord, a_start, a_end,
     barrel_z_bottom = cz - knuckle_radius
     barrel_z_top = cz + knuckle_radius
 
+    # Chamfer size for outer buildup corners (slightly > R(sqrt2-1) for clearance)
+    chamfer = knuckle_radius * 0.45
+
     # Select which knuckle indices this side gets
     if side == "bottom":
         indices = range(0, knuckle_count, 2)  # even: 0, 2, 4
@@ -965,6 +968,30 @@ def knuckle_hinge(shape, wall, wall_coord, a_start, a_end,
                     buildup_width, seg_length, knuckle_radius * 2,
                     Vector(wall_coord, seg_start, barrel_z_bottom))
             shape = shape.fuse(block)
+
+            # 2b. Chamfer outer corners of buildup
+            if wall == 'left':
+                outer_x = wall_coord - buildup_width
+                dx = chamfer
+            else:
+                outer_x = wall_coord + buildup_width
+                dx = -chamfer
+            # Bottom-outer corner
+            w = Part.makePolygon([
+                Vector(outer_x, seg_start, barrel_z_bottom),
+                Vector(outer_x + dx, seg_start, barrel_z_bottom),
+                Vector(outer_x, seg_start, barrel_z_bottom + chamfer),
+                Vector(outer_x, seg_start, barrel_z_bottom)])
+            prism = Part.Face(w).extrude(Vector(0, seg_length, 0))
+            shape = shape.cut(prism)
+            # Top-outer corner
+            w = Part.makePolygon([
+                Vector(outer_x, seg_start, barrel_z_top),
+                Vector(outer_x + dx, seg_start, barrel_z_top),
+                Vector(outer_x, seg_start, barrel_z_top - chamfer),
+                Vector(outer_x, seg_start, barrel_z_top)])
+            prism = Part.Face(w).extrude(Vector(0, seg_length, 0))
+            shape = shape.cut(prism)
 
             # 3. Vertical strut down to shell floor
             strut_width = knuckle_radius  # half the buildup width
@@ -1013,6 +1040,30 @@ def knuckle_hinge(shape, wall, wall_coord, a_start, a_end,
                     seg_length, buildup_width, knuckle_radius * 2,
                     Vector(seg_start, wall_coord, barrel_z_bottom))
             shape = shape.fuse(block)
+
+            # 2b. Chamfer outer corners of buildup
+            if wall == 'front':
+                outer_y = wall_coord - buildup_width
+                dy = chamfer
+            else:
+                outer_y = wall_coord + buildup_width
+                dy = -chamfer
+            # Bottom-outer corner
+            w = Part.makePolygon([
+                Vector(seg_start, outer_y, barrel_z_bottom),
+                Vector(seg_start, outer_y + dy, barrel_z_bottom),
+                Vector(seg_start, outer_y, barrel_z_bottom + chamfer),
+                Vector(seg_start, outer_y, barrel_z_bottom)])
+            prism = Part.Face(w).extrude(Vector(seg_length, 0, 0))
+            shape = shape.cut(prism)
+            # Top-outer corner
+            w = Part.makePolygon([
+                Vector(seg_start, outer_y, barrel_z_top),
+                Vector(seg_start, outer_y + dy, barrel_z_top),
+                Vector(seg_start, outer_y, barrel_z_top - chamfer),
+                Vector(seg_start, outer_y, barrel_z_top)])
+            prism = Part.Face(w).extrude(Vector(seg_length, 0, 0))
+            shape = shape.cut(prism)
 
             strut_width = knuckle_radius
             if strut_z_min is not None and strut_z_min < barrel_z_bottom:
