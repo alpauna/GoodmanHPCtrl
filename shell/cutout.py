@@ -985,14 +985,17 @@ def knuckle_hinge(shape, wall, wall_coord, a_start, a_end,
                 Vector(wall_coord, seg_start, barrel_z_bottom)])
             prism = Part.Face(w).extrude(Vector(0, seg_length, 0))
             shape = shape.cut(prism)
-            # Top wall-side corner
-            w = Part.makePolygon([
-                Vector(wall_coord, seg_start, barrel_z_top),
-                Vector(wall_coord + dx, seg_start, barrel_z_top),
-                Vector(wall_coord, seg_start, barrel_z_top - chamfer),
-                Vector(wall_coord, seg_start, barrel_z_top)])
-            prism = Part.Face(w).extrude(Vector(0, seg_length, 0))
-            shape = shape.cut(prism)
+            # Top wall-side corner — skip for top-side knuckles so the
+            # upper edge stays square for a solid connection to the wall
+            # reinforcement and upward strut
+            if side != "top":
+                w = Part.makePolygon([
+                    Vector(wall_coord, seg_start, barrel_z_top),
+                    Vector(wall_coord + dx, seg_start, barrel_z_top),
+                    Vector(wall_coord, seg_start, barrel_z_top - chamfer),
+                    Vector(wall_coord, seg_start, barrel_z_top)])
+                prism = Part.Face(w).extrude(Vector(0, seg_length, 0))
+                shape = shape.cut(prism)
 
             # 3. Vertical strut down to shell floor
             strut_width = knuckle_radius  # half the buildup width

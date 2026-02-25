@@ -122,6 +122,12 @@ class GoodmanHP {
     uint32_t getCoolTransitionRemainingMs() const;
     uint32_t getCoolCntPendingRemainingMs() const;
 
+    // COOL→HEAT transition (RV switch sequencing)
+    bool isHeatTransitionActive() const;
+    bool isHeatCntPendingActive() const;
+    uint32_t getHeatTransitionRemainingMs() const;
+    uint32_t getHeatCntPendingRemainingMs() const;
+
     // Configurable defrost parameters
     void setDefrostMinRuntimeMs(uint32_t ms);
     uint32_t getDefrostMinRuntimeMs() const;
@@ -172,6 +178,7 @@ class GoodmanHP {
     uint32_t _heatRuntimeMs;
     uint32_t _heatRuntimeLastTick;
     uint32_t _heatRuntimeLastLogMs;
+    uint32_t _dftOffStartTick;        // When DFT first went off (0 = DFT is on)
     bool _softwareDefrost;
     uint32_t _defrostStartTick;
     uint32_t _defrostLastCondCheckTick;
@@ -200,6 +207,11 @@ class GoodmanHP {
     uint32_t _coolTransitionStart;
     bool _coolCntPending;             // Phase 2: RV on, waiting CNT short cycle
     uint32_t _coolCntPendingStart;
+    // COOL→HEAT mode transition (RV switch sequencing)
+    bool _heatTransition;             // Phase 1: CNT off, pressure equalization before RV switch
+    uint32_t _heatTransitionStart;
+    bool _heatCntPending;             // Phase 2: RV off, waiting CNT short cycle
+    uint32_t _heatCntPendingStart;
     // State validation timer
     bool _stateValidationActive;
     uint32_t _stateValidationStart;
@@ -223,6 +235,7 @@ class GoodmanHP {
     void accumulateHeatRuntime();
     void checkDefrostNeeded();
     void checkCoolTransition();
+    void checkHeatTransition();
     void validateOutputStates();
     void startSoftwareDefrost();
     void stopSoftwareDefrost();

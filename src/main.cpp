@@ -212,7 +212,7 @@ ProjectInfo proj = {
   5400000,            // heatRuntimeThresholdMs: 90 min default
   false,              // softwareDefrost: not active
   30000,              // stateValidationMs: 30s default
-  10000,              // inputDelayMs: 10s default
+  2000,               // inputDelayMs: 2s default
   600,                // apFallbackSeconds: 10 minutes
   "",                 // apPassword: empty = auto-generate
   "",                 // ftpPassword: empty = default "admin"
@@ -497,26 +497,21 @@ void connectToWifi() {
 
 
 void onCheckInputQueue(){
-  for(auto& m : _isrEvent){
-    while(InISR){
-      vTaskDelay(pdMS_TO_TICKS(1));
-      yield();
-    }
-    InputPin * pin = m.second;
-    pin->verifiedAt();
+  // Poll all input pins directly (ISR not attached to GPIOs)
+  for (auto& pair : hpController.getInputMap()) {
+    InputPin* pin = pair.second;
+    if (pin == nullptr) continue;
 
-    // Read live GPIO to determine pending direction
     bool liveActive = pin->readLiveState();
 
-    // Only start delay if the live state differs from confirmed state
-    if (liveActive != pin->isActive()) {
-      Serial.printf("Input %s change detected (%s), validating in %lums\n",
-                     pin->getName().c_str(), liveActive ? "active" : "inactive",
-                     pin->getDelay());
+    // Only start delay if live state differs from confirmed state and no pending validation
+    if (liveActive != pin->isActive() && pin->getPendingState() < 0) {
+      Log.info("InputPin", "%s change detected (%s), validating in %lums",
+               pin->getName().c_str(), liveActive ? "active" : "inactive",
+               pin->getDelay());
       pin->setPendingState(liveActive ? 1 : 0);
-      pin->getTask()->restartDelayed( pin->getTask()->getInterval() );
+      pin->getTask()->restartDelayed(pin->getTask()->getInterval());
     }
-    _isrEvent.erase(m.first);
   }
 }
 

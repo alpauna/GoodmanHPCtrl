@@ -449,7 +449,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.heatRuntimeThresholdMs = 5400000;
         proj.softwareDefrost = false;
         proj.stateValidationMs = 30000;
-        proj.inputDelayMs = 10000;
+        proj.inputDelayMs = 2000;
         Serial.println("Config migration: old lowTemp format detected, will migrate on next save");
     } else {
         proj.lowTempThreshold = heatpump["lowTemp"]["threshold"] | 20.0f;
@@ -464,7 +464,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.heatRuntimeThresholdMs = heatpump["defrost"]["heatRuntimeThresholdMs"] | 5400000;
         proj.softwareDefrost = heatpump["defrost"]["active"] | false;
         proj.stateValidationMs = heatpump["stateValidation"]["delayMs"] | 30000;
-        proj.inputDelayMs = heatpump["inputDelay"]["ms"] | 10000;
+        proj.inputDelayMs = heatpump["inputDelay"]["ms"] | 2000;
     }
     Serial.printf("Read heatpump: lowTemp=%.1fF highSuct=%.1fF rvFail=%d rvSC=%lu cntSC=%lu defrostMin=%lu defrostExit=%.1fF\n",
                   proj.lowTempThreshold, proj.highSuctionTempThreshold, proj.rvFail,

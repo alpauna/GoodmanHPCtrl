@@ -59,6 +59,7 @@ class InputPin{
     bool isActive();
     bool readLiveState();     // Read live GPIO state (bypasses debounce)
     void setPendingState(int8_t state);  // Set expected state for validation (-1/0/1)
+    int8_t getPendingState();
     void setDelay(uint32_t ms);
     uint32_t getDelay();
     void changedNow();

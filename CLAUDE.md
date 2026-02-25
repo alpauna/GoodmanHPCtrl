@@ -105,9 +105,11 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
   - **DFT emergency defrost**: DFT input triggers the same unified 3-phase defrost cycle from HEAT mode. Uses the same `_softwareDefrost` path as automatic defrost.
   - **LPS fault protection**: When LPS input goes LOW (low refrigerant pressure), immediately shuts down CNT if running and blocks CNT activation. If in HEAT mode (Y active, O not active), turns on W for auxiliary heat. Auto-recovers when LPS goes HIGH (W turned off). Publishes fault events via `LPSFaultCallback`. `lpsFault` field included in `goodman/state` MQTT payload.
   - **Low ambient temperature protection**: When AMBIENT_TEMP drops below configurable threshold (default 20°F), enters `LOW_TEMP` state: shuts down CNT, turns off FAN and RV. Turns on W (auxiliary heat) only if not in COOL mode (O active). W is never turned on in COOL mode. Blocks CNT activation and state updates while active. Auto-recovers when temp rises above threshold. `lowTemp` field included in `goodman/state` MQTT payload.
-  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `restoreSoftwareDefrost()`, `isDefrostTransitionActive()`, `isDefrostCntPendingActive()`, `isDefrostExitingActive()`, `getDefrostTransitionRemainingMs()`, `getDefrostCntPendingRemainingMs()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `setLowTempThreshold()`, `getLowTempThreshold()`, `setDefrostMinRuntimeMs()`, `getDefrostMinRuntimeMs()`, `setDefrostExitTempF()`, `getDefrostExitTempF()`, `setHeatRuntimeThresholdMs()`, `getHeatRuntimeThresholdMs()`
+  - **State validation delay**: After any state transition, holds the new state for a configurable period (default 30s) before allowing another normal-priority change. OFF and ERROR bypass the timer (high priority). HEAT, COOL, DEFROST, LOW_TEMP are gated. LOW_TEMP output protection (CNT/FAN/RV off) is immediate but state label deferred until validation completes. Dashboard "State Hold" pill with countdown. Configurable via `heatpump.stateValidation.delayMs` (0–300s, live)
+  - **Output state validation**: Every 10s, `validateOutputStates()` verifies outputs against a table-driven expected-state map. Global invariants: W off when O active, CNT off during faults. Per-state table with auto-correction. Logs errors on mismatch, "State check OK" every 30s when clean. Skips during transitions/lockout/override
+  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `restoreSoftwareDefrost()`, `isDefrostTransitionActive()`, `isDefrostCntPendingActive()`, `isDefrostExitingActive()`, `getDefrostTransitionRemainingMs()`, `getDefrostCntPendingRemainingMs()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `setLowTempThreshold()`, `getLowTempThreshold()`, `setDefrostMinRuntimeMs()`, `getDefrostMinRuntimeMs()`, `setDefrostExitTempF()`, `getDefrostExitTempF()`, `setHeatRuntimeThresholdMs()`, `getHeatRuntimeThresholdMs()`, `isStateValidating()`, `getStateValidationRemainingMs()`, `setStateValidationMs()`, `getStateValidationMs()`
 - **OutPin** (`OutPin.h/cpp`): Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
-- **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, debouncing via delayed verification (circular buffer queue checked by `_tGetInputs`), and callback on change.
+- **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, and confirmed-state debouncing. `isActive()` returns the debounced/validated state (not live GPIO). On pin change: ISR queues event → `_tGetInputs` (500ms) reads live GPIO and starts a configurable delay task (default 10s) → after delay, GPIO is re-read to validate the pin is still in the expected state. Mismatches are discarded as false triggers and logged as warnings. Both activation and deactivation go through the full delay. Configurable via `heatpump.inputDelay.ms` (0–60s, live). Methods: `readLiveState()` (bypass debounce), `setDelay(ms)`, `getDelay()`, `setPendingState()`.
 - **TempSensor** (`TempSensor.h/cpp`): Temperature sensor wrapper with encapsulated state and callbacks. Supports OneWire (via `update()`) and external sources like MCP9600 I2C thermocouple (via `updateValue()`):
   - Properties: `description`, `deviceAddress`, `value`, `previous`, `valid`
   - Callbacks: `setUpdateCallback()`, `setChangeCallback()`
@@ -163,6 +165,8 @@ struct ProjectInfo {
     float defrostExitTempF;      // Condenser temp cutoff to end defrost in F (default 60.0)
     uint32_t heatRuntimeThresholdMs; // Heat runtime threshold to trigger defrost in ms (default 5400000 = 90 min)
     bool softwareDefrost;        // Persisted software defrost state (survives reboot)
+    uint32_t stateValidationMs;  // State validation delay in ms (default 30000 = 30s)
+    uint32_t inputDelayMs;       // Input pin validation delay in ms (default 10000 = 10s)
     uint32_t apFallbackSeconds;  // WiFi disconnect time before AP fallback (default 600 = 10 min)
     String apPassword;           // AP mode password override (empty = auto-generate at runtime)
     uint32_t tempHistoryIntervalSec; // Temp history capture interval in seconds (30-300, default 120)
@@ -217,7 +221,9 @@ JSON config stored on SD card at `/config.txt` (Arduino SD library, SPI interfac
     "lowTemp": { "threshold": 20.0 },
     "highSuctionTemp": { "threshold": 140.0, "rvFail": false },
     "shortCycle": { "rv": 30000, "cnt": 30000 },
-    "defrost": { "minRuntimeMs": 180000, "exitTempF": 60.0, "heatRuntimeThresholdMs": 5400000, "active": false }
+    "defrost": { "minRuntimeMs": 180000, "exitTempF": 60.0, "heatRuntimeThresholdMs": 5400000, "active": false },
+    "stateValidation": { "delayMs": 30000 },
+    "inputDelay": { "ms": 10000 }
   },
   "tempHistory": { "intervalSec": 120 },
   "ui": { "theme": "dark" },
@@ -291,7 +297,7 @@ enum AC_STATE { OFF, COOL, HEAT, DEFROST, ERROR, LOW_TEMP }
 
 ### Control Flow Example
 
-Y input pin ISR fires → change queued in circular buffer → `_tGetInputs` calls `onCheckInputQueue()` → `onInput()` callback → uses `hpController.getOutput("CNT")` to activate/deactivate CNT output relay (with 3s delay on activation).
+Y input pin ISR fires → change queued in `_isrEvent` map → `_tGetInputs` (500ms) calls `onCheckInputQueue()` → reads live GPIO, starts validation delay task (default 10s) → after delay, `Callback()` re-reads GPIO to confirm → if validated, updates `_confirmedActive` and fires `onInput()` callback → `GoodmanHP::update()` reads `isActive()` (confirmed state) and activates CNT output relay (with 3s delay on activation). If GPIO reverts during the delay, the change is discarded as a false trigger.
 
 ### GoodmanHP Initialization
 

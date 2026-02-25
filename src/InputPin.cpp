@@ -116,6 +116,10 @@ void InputPin::setPendingState(int8_t state) {
   _pendingState = state;
 }
 
+int8_t InputPin::getPendingState() {
+  return _pendingState;
+}
+
 void InputPin::setDelay(uint32_t ms) {
   if (_tsk) _tsk->setInterval(ms);
 }

@@ -18,6 +18,7 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _heatRuntimeMs(0)
     , _heatRuntimeLastTick(0)
     , _heatRuntimeLastLogMs(0)
+    , _dftOffStartTick(0)
     , _softwareDefrost(false)
     , _defrostStartTick(0)
     , _defrostLastCondCheckTick(0)
@@ -45,6 +46,10 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _coolTransitionStart(0)
     , _coolCntPending(false)
     , _coolCntPendingStart(0)
+    , _heatTransition(false)
+    , _heatTransitionStart(0)
+    , _heatCntPending(false)
+    , _heatCntPendingStart(0)
     , _stateValidationActive(false)
     , _stateValidationStart(0)
     , _stateValidationMs(30000)
@@ -197,6 +202,7 @@ void GoodmanHP::update() {
     updateState();
     checkDefrostNeeded();
     checkCoolTransition();
+    checkHeatTransition();
     validateOutputStates();
 }
 
@@ -524,7 +530,7 @@ void GoodmanHP::checkYAndActivateCNT() {
             Log.info("HP", "Y dropped during defrost exit, exit cancelled");
         }
     } else if (yActive && _yWasActive && !_cntActivated) {
-        if (_lpsFault || _lowTemp || _compressorOverTemp || _suctionLowTemp || _rvFail || _softwareDefrost || _defrostExiting || _coolTransition || _coolCntPending) return;
+        if (_lpsFault || _lowTemp || _compressorOverTemp || _suctionLowTemp || _rvFail || _softwareDefrost || _defrostExiting || _coolTransition || _coolCntPending || _heatTransition || _heatCntPending) return;
         // Check if CNT was off for less than 5 minutes - if so, enforce short cycle delay
         uint32_t offElapsed = millis() - cnt->getOffTick();
         if (cnt->getOffTick() > 0 && offElapsed < 5UL * 60 * 1000) {
@@ -629,7 +635,17 @@ void GoodmanHP::updateState() {
                     Log.info("HP", "RV already ON for COOL mode");
                 }
             } else if (!_defrostExiting) {
-                if (newState == State::HEAT || newState == State::OFF) {
+                if (newState == State::HEAT && oldState == State::COOL && rv->isOn()) {
+                    // COOL→HEAT: sequenced transition like defrost
+                    OutPin* cnt = getOutput("CNT");
+                    OutPin* fan = getOutput("FAN");
+                    if (cnt != nullptr && cnt->isOn()) { cnt->turnOff(); _cntActivated = false; }
+                    if (fan != nullptr) fan->turnOff();
+                    _heatTransition = true;
+                    _heatTransitionStart = millis();
+                    _heatCntPending = false;
+                    Log.info("HP", "Starting HEAT transition (%lu s RV short cycle)", _rvShortCycleMs / 1000UL);
+                } else if (newState == State::HEAT || newState == State::OFF) {
                     rv->turnOff();
                     Log.info("HP", "RV turned OFF for %s mode",
                              newState == State::HEAT ? "HEAT" : "OFF");
@@ -863,6 +879,28 @@ uint32_t GoodmanHP::getCoolCntPendingRemainingMs() const {
     return _cntShortCycleMs - elapsed;
 }
 
+bool GoodmanHP::isHeatTransitionActive() const {
+    return _heatTransition;
+}
+
+bool GoodmanHP::isHeatCntPendingActive() const {
+    return _heatCntPending;
+}
+
+uint32_t GoodmanHP::getHeatTransitionRemainingMs() const {
+    if (!_heatTransition) return 0;
+    uint32_t elapsed = millis() - _heatTransitionStart;
+    if (elapsed >= _rvShortCycleMs) return 0;
+    return _rvShortCycleMs - elapsed;
+}
+
+uint32_t GoodmanHP::getHeatCntPendingRemainingMs() const {
+    if (!_heatCntPending) return 0;
+    uint32_t elapsed = millis() - _heatCntPendingStart;
+    if (elapsed >= _cntShortCycleMs) return 0;
+    return _cntShortCycleMs - elapsed;
+}
+
 void GoodmanHP::checkCoolTransition() {
     if (!_coolTransition && !_coolCntPending) return;
 
@@ -920,14 +958,70 @@ void GoodmanHP::checkCoolTransition() {
     }
 }
 
+void GoodmanHP::checkHeatTransition() {
+    if (!_heatTransition && !_heatCntPending) return;
+
+    // Abort if state changed away from HEAT (fault or LOW_TEMP took over)
+    if (_state != State::HEAT) {
+        _heatTransition = false;
+        _heatCntPending = false;
+        Log.info("HP", "HEAT transition cancelled (state: %s)", getStateString());
+        return;
+    }
+
+    // Abort if Y dropped
+    if (!isYActive()) {
+        OutPin* rv = getOutput("RV");
+        OutPin* cnt = getOutput("CNT");
+        OutPin* fan = getOutput("FAN");
+        if (rv != nullptr && rv->isOn()) rv->turnOff();
+        if (cnt != nullptr) { cnt->turnOff(); _cntActivated = false; }
+        if (fan != nullptr) fan->turnOff();
+        _heatTransition = false;
+        _heatCntPending = false;
+        Log.info("HP", "HEAT transition cancelled (Y dropped)");
+        return;
+    }
+
+    uint32_t now = millis();
+
+    // Phase 1: Pressure equalization (CNT+FAN off, RV still on from COOL, wait RV SC)
+    if (_heatTransition) {
+        if (now - _heatTransitionStart >= _rvShortCycleMs) {
+            _heatTransition = false;
+            Log.info("HP", "HEAT Phase 1 complete, RV off, waiting %lu s CNT short cycle",
+                     _cntShortCycleMs / 1000UL);
+            OutPin* rv = getOutput("RV");
+            if (rv != nullptr) rv->turnOff();
+            _heatCntPending = true;
+            _heatCntPendingStart = now;
+        }
+        return;
+    }
+
+    // Phase 2: RV off, waiting CNT short cycle
+    if (_heatCntPending) {
+        if (now - _heatCntPendingStart >= _cntShortCycleMs) {
+            _heatCntPending = false;
+            Log.info("HP", "HEAT Phase 2 complete, CNT+FAN on — HEAT mode active");
+            OutPin* cnt = getOutput("CNT");
+            OutPin* fan = getOutput("FAN");
+            if (cnt != nullptr) {
+                cnt->turnOn();
+                _cntActivated = true;
+            }
+            if (fan != nullptr) fan->turnOn();
+        }
+    }
+}
+
 void GoodmanHP::validateOutputStates() {
     uint32_t now = millis();
     if (now - _lastValidateTick < STATE_VALIDATE_MS) return;
     _lastValidateTick = now;
 
-    // Skip during transitions — those manage their own output states
-    if (_defrostTransition || _defrostCntPending || _defrostExiting ||
-        _coolTransition || _coolCntPending || _startupLockout || _manualOverride) return;
+    // Skip only during startup lockout and manual override
+    if (_startupLockout || _manualOverride) return;
 
     // Skip if LOW_TEMP outputs are protected but state label is deferred
     if (_lowTemp && _state != State::LOW_TEMP) return;
@@ -981,44 +1075,67 @@ void GoodmanHP::validateOutputStates() {
     int8_t expFAN = -1, expCNT = -1, expRV = -1, expW = -1;
     const char* row = "UNKNOWN";
 
-    switch (_state) {
-        case State::OFF:
-            row = "OFF"; expFAN = 0; expCNT = 0; expRV = 0; expW = 0;
-            break;
+    // === TRANSITION PHASE ROWS (checked first, override per-state) ===
+    if (_coolTransition) {
+        // HEAT→COOL Phase 1: CNT+FAN off, RV still off (from HEAT), pressure equalization
+        row = "COOL Trans Ph1"; expFAN = 0; expCNT = 0; expRV = 0; expW = 0;
+    } else if (_coolCntPending) {
+        // HEAT→COOL Phase 2: RV on, CNT off (waiting short cycle)
+        row = "COOL Trans Ph2"; expFAN = 0; expCNT = 0; expRV = 1; expW = 0;
+    } else if (_heatTransition) {
+        // COOL→HEAT Phase 1: CNT+FAN off, RV still on (from COOL), pressure equalization
+        row = "HEAT Trans Ph1"; expFAN = 0; expCNT = 0; expRV = 1; expW = 0;
+    } else if (_heatCntPending) {
+        // COOL→HEAT Phase 2: RV off, CNT off (waiting short cycle)
+        row = "HEAT Trans Ph2"; expFAN = 0; expCNT = 0; expRV = 0; expW = 0;
+    } else if (_defrostTransition && !_defrostExiting) {
+        // Defrost entry Phase 1: all off, pressure equalization
+        row = "DEFROST Ph1"; expFAN = 0; expCNT = 0; expRV = 0; expW = 0;
+    } else if (_defrostCntPending && !_defrostExiting) {
+        // Defrost entry Phase 2: RV+W on, CNT off (waiting short cycle)
+        row = "DEFROST Ph2"; expFAN = 0; expCNT = 0; expRV = 1; expW = 1;
+    } else if (_defrostTransition && _defrostExiting) {
+        // Defrost exit Phase 1: CNT+FAN off, RV+W stay on
+        row = "DFX Exit Ph1"; expFAN = 0; expCNT = 0; expRV = 1; expW = 1;
+    } else if (_defrostCntPending && _defrostExiting) {
+        // Defrost exit Phase 2: RV+W off, CNT off
+        row = "DFX Exit Ph2"; expFAN = 0; expCNT = 0; expRV = 0; expW = 0;
+    } else {
+        // === STEADY-STATE ROWS ===
+        switch (_state) {
+            case State::OFF:
+                row = "OFF"; expFAN = 0; expCNT = 0; expRV = 0; expW = 0;
+                break;
 
-        case State::COOL:
-            row = "COOL"; expRV = 1; expW = 0;
-            // FAN should match CNT (both on when running)
-            if (cnt != nullptr && cnt->isOn()) expFAN = 1;
-            break;
+            case State::COOL:
+                row = "COOL"; expRV = 1; expW = 0;
+                if (cnt != nullptr && cnt->isOn()) expFAN = 1;
+                break;
 
-        case State::HEAT:
-            row = _rvFail ? "HEAT+rvFail" : "HEAT";
-            expRV = 0;
-            expW = _rvFail && isYActive() && !isOActive() ? 1 : 0;
-            if (_rvFail) expCNT = 0;  // CNT blocked during rvFail
-            // FAN should match CNT when running
-            if (cnt != nullptr && cnt->isOn()) expFAN = 1;
-            break;
+            case State::HEAT:
+                row = _rvFail ? "HEAT+rvFail" : "HEAT";
+                expRV = 0;
+                expW = _rvFail && isYActive() && !isOActive() ? 1 : 0;
+                if (_rvFail) expCNT = 0;
+                if (cnt != nullptr && cnt->isOn()) expFAN = 1;
+                break;
 
-        case State::DEFROST:
-            // Phase 3 (active defrost): FAN off, CNT on, RV on, W on
-            if (_softwareDefrost) {
-                row = "DEFROST Ph3"; expFAN = 0; expRV = 1; expW = 1;
-            }
-            break;
+            case State::DEFROST:
+                if (_softwareDefrost) {
+                    row = "DEFROST Ph3"; expFAN = 0; expRV = 1; expW = 1;
+                }
+                break;
 
-        case State::ERROR:
-            row = "ERROR"; expCNT = 0;
-            // W on only if Y&&!O
-            expW = (isYActive() && !isOActive()) ? 1 : -1;
-            break;
+            case State::ERROR:
+                row = "ERROR"; expCNT = 0;
+                expW = (isYActive() && !isOActive()) ? 1 : -1;
+                break;
 
-        case State::LOW_TEMP:
-            row = "LOW_TEMP"; expFAN = 0; expCNT = 0; expRV = 0;
-            // W gated by enableW checkbox + Y&&!O
-            if (!(_lowTempEnableW && isYActive() && !isOActive())) expW = 0;
-            break;
+            case State::LOW_TEMP:
+                row = "LOW_TEMP"; expFAN = 0; expCNT = 0; expRV = 0;
+                if (!(_lowTempEnableW && isYActive() && !isOActive())) expW = 0;
+                break;
+        }
     }
 
     // Check and auto-correct each output against expected table value
@@ -1248,15 +1365,21 @@ void GoodmanHP::accumulateHeatRuntime() {
         return;
     }
 
-    // DFT off means temps > 32°F — no ice on coils, clear runtime
-    if (!isDFTActive() && _heatRuntimeMs > 0 && !_softwareDefrost) {
-        Log.info("HP", "DFT off (temps > 32F), resetting heat runtime (%lu min accumulated)", _heatRuntimeMs / 60000UL);
-        resetHeatRuntime();
-        _heatRuntimeLastTick = now;
-        return;
+    // DFT off means temps > 32°F — no ice on coils, clear runtime after 30s debounce
+    if (!isDFTActive() && !_softwareDefrost) {
+        if (_dftOffStartTick == 0) {
+            _dftOffStartTick = now;
+        } else if (_heatRuntimeMs > 0 && now - _dftOffStartTick >= 30000UL) {
+            Log.info("HP", "DFT off for 30s (temps > 32F), resetting heat runtime (%lu min accumulated)", _heatRuntimeMs / 60000UL);
+            resetHeatRuntime();
+            _heatRuntimeLastTick = now;
+            return;
+        }
+    } else {
+        _dftOffStartTick = 0;  // DFT back on or defrost active, reset debounce
     }
 
-    // Only accumulate in HEAT mode when CNT is on, DFT is active (closed at 32°F),
+    // Only accumulate in HEAT mode when CNT is on, DFT is active (coils cold enough for ice),
     // and not currently in software defrost
     OutPin* cnt = getOutput("CNT");
     if (_state == State::HEAT && cnt != nullptr && cnt->isOn() && !_softwareDefrost && isDFTActive()) {
@@ -1267,7 +1390,7 @@ void GoodmanHP::accumulateHeatRuntime() {
         uint32_t logInterval = 5UL * 60 * 1000;
         if (_heatRuntimeMs / logInterval > _heatRuntimeLastLogMs / logInterval) {
             _heatRuntimeLastLogMs = _heatRuntimeMs;
-            Log.info("HP", "Heat runtime accumulated: %lu min (DFT active)", _heatRuntimeMs / 60000UL);
+            Log.info("HP", "Heat runtime accumulated: %lu min", _heatRuntimeMs / 60000UL);
         }
     }
 
@@ -1518,6 +1641,8 @@ String GoodmanHP::setManualOverride(bool on) {
         _defrostExiting = false;
         _coolTransition = false;
         _coolCntPending = false;
+        _heatTransition = false;
+        _heatCntPending = false;
     } else if (!on && _manualOverride) {
         _manualOverride = false;
         // Turn all outputs off and let state machine resume
@@ -1567,6 +1692,7 @@ String GoodmanHP::forceDefrost() {
     if (_softwareDefrost) return "Defrost already active";
     if (_defrostExiting) return "Defrost exit transition active";
     if (_coolTransition || _coolCntPending) return "COOL mode transition in progress";
+    if (_heatTransition || _heatCntPending) return "HEAT mode transition in progress";
     if (_state != State::HEAT) return "Must be in HEAT mode (current: " + String(getStateString()) + ")";
     if (_lpsFault) return "LPS fault active";
     if (_compressorOverTemp) return "Compressor over-temp active";

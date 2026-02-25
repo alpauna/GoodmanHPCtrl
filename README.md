@@ -101,6 +101,28 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - Auto-recovers when temperature rises above threshold
   - Threshold is configurable via `lowTemp.threshold` in SD card config
 
+- **Input Pin Validation Delay** — All 4 input pins (LPS, DFT, Y, O) use a configurable debounce/validation delay (default 10 seconds) to prevent false triggers from electrical noise or transient signals:
+  - When an ISR detects a pin change, the new state is recorded and a validation timer starts
+  - After the delay expires, the GPIO is re-read to confirm the pin is still in the expected state
+  - If the pin has reverted to its original state, the change is discarded as a false trigger and logged as a warning
+  - `isActive()` returns the confirmed/debounced state, not the live GPIO — the state machine only sees validated inputs
+  - Both activation (pin going HIGH) and deactivation (pin going LOW) go through the full delay
+  - Configurable via `heatpump.inputDelay.ms` in config JSON (0–60 seconds, live — changes apply immediately to all input pins)
+
+- **State Validation Delay** — After any state transition (e.g., OFF→HEAT, HEAT→COOL), the system holds the new state for a configurable period (default 30 seconds) before allowing another normal-priority state change. This prevents rapid state cycling:
+  - **HIGH priority** states (OFF, ERROR) bypass the validation timer entirely
+  - **NORMAL priority** states (HEAT, COOL, DEFROST, LOW_TEMP) are gated — blocked until the timer expires
+  - LOW_TEMP has special handling: output protection (CNT/FAN/RV off, W management) is applied immediately, but the state label is deferred until validation completes
+  - Dashboard shows a "State Hold" pill (blue) with countdown during validation
+  - Configurable via `heatpump.stateValidation.delayMs` in config JSON (0–300 seconds, live)
+
+- **Output State Validation** — Every 10 seconds, `validateOutputStates()` verifies all relay outputs match the expected state for the current operating mode using a table-driven approach:
+  - **Global invariants** enforced first: W must never be on when O is active; CNT must be off during any blocking fault (priority: compressor overtemp > suction low temp > LPS fault > low temp > RV fail)
+  - **Per-state table** defines expected output values: OFF=all off, COOL=RV on/W off, HEAT=RV off, DEFROST Ph3=RV+W on/FAN off, ERROR=CNT off, LOW_TEMP=CNT+FAN+RV off
+  - Mismatches are logged as errors and auto-corrected
+  - Skipped during transitions (defrost phases, COOL transition, startup lockout, manual override)
+  - Logs "State check OK" at info level every 30 seconds when all outputs are correct
+
 - **Automatic Defrost (3-Phase Sequencing)** — After a configurable heat runtime threshold (default 90 minutes, range 30–90 min) of accumulated CNT runtime in HEAT mode while DFT is active (coil temp ≤ 32°F, indicating icing conditions), initiates a 3-phase software defrost cycle for safe pressure equalization and output sequencing:
 
   **Phase 1 — Pressure Equalization** (`defrostTransition`):
@@ -181,7 +203,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | Class | Purpose |
 |-------|---------|
 | `GoodmanHP` | Central controller with pin maps, temp sensors, and state machine |
-| `InputPin` | Digital/analog input with ISR, debouncing, callbacks |
+| `InputPin` | Digital/analog input with ISR, configurable validation delay, confirmed-state debouncing, callbacks |
 | `OutPin` | Output relay with delay, PWM support, state tracking, hardware state validation |
 | `TempSensor` | Temperature sensor with callbacks; supports OneWire (DS18B20), I2C (MCP9600), and SPI (MAX6675) |
 | `Config` | SD card and JSON configuration management |
@@ -526,6 +548,8 @@ This prompts for system name, MQTT prefix, WiFi, and MQTT credentials, then writ
 - `heatpump.highSuctionTemp.threshold` — Suction temp (°F) above which RV fail is detected during defrost (default: 140.0)
 - `heatpump.shortCycle.rv` — Phase 1 pressure equalization delay in ms (default: 30000)
 - `heatpump.shortCycle.cnt` — Phase 2 CNT short cycle delay in ms (default: 30000)
+- `heatpump.stateValidation.delayMs` — State validation hold time in ms after state changes; prevents rapid cycling (default: 30000 = 30s, range: 0–300s, live)
+- `heatpump.inputDelay.ms` — Input pin validation delay in ms; re-reads GPIO after delay to confirm state change (default: 10000 = 10s, range: 0–60s, live)
 - `heatpump.defrost.minRuntimeMs` — Minimum Phase 3 runtime in ms before checking exit conditions (default: 180000 = 3 min)
 - `heatpump.defrost.exitTempF` — Condenser temp (°F) at which Phase 3 exits (default: 60.0)
 - `heatpump.defrost.heatRuntimeThresholdMs` — Accumulated HEAT runtime in ms before triggering defrost (default: 5400000 = 90 min, range: 30–90 min via config page)
@@ -938,6 +962,8 @@ Returns the full controller state as JSON. Used by the dashboard for real-time p
   "defrostCntPending": false,
   "defrostCntPendingRemainSec": 0,
   "defrostExiting": false,
+  "stateValidating": false,
+  "stateValidationRemainSec": 0,
   "manualOverride": false,
   "manualOverrideRemainSec": 0,
   "temps": { "AMBIENT_TEMP": 48.1, "COMPRESSOR_TEMP": 72.5, "SUCTION_TEMP": 65.2, "CONDENSER_TEMP": 38.7, "LIQUID_TEMP": 185.3 },
@@ -964,6 +990,8 @@ Returns the full controller state as JSON. Used by the dashboard for real-time p
 | `defrostCntPending` | bool | Whether Phase 2 (CNT hold) is active — entry or exit |
 | `defrostCntPendingRemainSec` | number | Seconds remaining in Phase 2 (0 when inactive) |
 | `defrostExiting` | bool | Whether a defrost exit transition is in progress (reverse 3-phase) |
+| `stateValidating` | bool | Whether the state validation hold timer is active (blocking normal-priority transitions) |
+| `stateValidationRemainSec` | number | Seconds remaining in state validation hold (0 when inactive) |
 | `manualOverride` | bool | Whether manual override (pin control page) is active |
 | `manualOverrideRemainSec` | number | Seconds remaining in manual override (0 when inactive) |
 | `cpuLoad0` | number | CPU load percentage for Core 0 (WiFi/protocol stack) |
@@ -1071,6 +1099,7 @@ Full controller state, published on every state transition, fault event, and com
   "shortCycleProtection": false,
   "rvFail": false,
   "highSuctionTemp": false,
+  "stateValidating": false,
   "manualOverride": false
 }
 ```
@@ -1094,6 +1123,7 @@ Full controller state, published on every state transition, fault event, and com
 | `shortCycleProtection` | bool | Whether short-cycle protection delay is active on CNT |
 | `rvFail` | bool | Whether RV fail (high suction temp during defrost) is latched |
 | `highSuctionTemp` | bool | Whether suction temp is above threshold during defrost |
+| `stateValidating` | bool | Whether the state validation hold timer is active |
 | `manualOverride` | bool | Whether manual override is active from pin control page |
 | `apMode` | bool | Whether the device is in AP fallback mode |
 

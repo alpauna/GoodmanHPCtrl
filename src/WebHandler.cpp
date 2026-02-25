@@ -541,6 +541,10 @@ void WebHandler::setupRoutes() {
         doc["coolTransitionRemainSec"] = _hpController->getCoolTransitionRemainingMs() / 1000;
         doc["coolCntPending"] = _hpController->isCoolCntPendingActive();
         doc["coolCntPendingRemainSec"] = _hpController->getCoolCntPendingRemainingMs() / 1000;
+        doc["heatTransition"] = _hpController->isHeatTransitionActive();
+        doc["heatTransitionRemainSec"] = _hpController->getHeatTransitionRemainingMs() / 1000;
+        doc["heatCntPending"] = _hpController->isHeatCntPendingActive();
+        doc["heatCntPendingRemainSec"] = _hpController->getHeatCntPendingRemainingMs() / 1000;
         doc["stateValidating"] = _hpController->isStateValidating();
         doc["stateValidationRemainSec"] = _hpController->getStateValidationRemainingMs() / 1000;
         doc["manualOverride"] = _hpController->isManualOverrideActive();
@@ -738,6 +742,8 @@ void WebHandler::setupRoutes() {
             doc["defrostExiting"] = _hpController->isDefrostExitingActive();
             doc["coolTransition"] = _hpController->isCoolTransitionActive();
             doc["coolCntPending"] = _hpController->isCoolCntPendingActive();
+            doc["heatTransition"] = _hpController->isHeatTransitionActive();
+            doc["heatCntPending"] = _hpController->isHeatCntPendingActive();
 
             // Countdown timers (seconds)
             doc["startupLockout"] = _hpController->isStartupLockoutActive();
@@ -746,6 +752,8 @@ void WebHandler::setupRoutes() {
             doc["defrostCntPendingRemainSec"] = _hpController->getDefrostCntPendingRemainingMs() / 1000;
             doc["coolTransitionRemainSec"] = _hpController->getCoolTransitionRemainingMs() / 1000;
             doc["coolCntPendingRemainSec"] = _hpController->getCoolCntPendingRemainingMs() / 1000;
+            doc["heatTransitionRemainSec"] = _hpController->getHeatTransitionRemainingMs() / 1000;
+            doc["heatCntPendingRemainSec"] = _hpController->getHeatCntPendingRemainingMs() / 1000;
 
             // Protection flags
             doc["lpsFault"] = _hpController->isLPSFaultActive();
@@ -1798,7 +1806,7 @@ void WebHandler::setupRoutes() {
         }
 
         uint32_t hrtMin = data["heatRuntimeThresholdMin"] | (int)(proj->heatRuntimeThresholdMs / 60000);
-        if (hrtMin < 30) hrtMin = 30;
+        if (hrtMin < 1) hrtMin = 1;
         if (hrtMin > 90) hrtMin = 90;
         uint32_t hrtMs = hrtMin * 60000UL;
         if (hrtMs != proj->heatRuntimeThresholdMs) {

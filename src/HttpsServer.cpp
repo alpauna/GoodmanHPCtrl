@@ -485,7 +485,7 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     }
 
     uint32_t hrtMin = data["heatRuntimeThresholdMin"] | (int)(proj->heatRuntimeThresholdMs / 60000);
-    if (hrtMin < 30) hrtMin = 30;
+    if (hrtMin < 1) hrtMin = 1;
     if (hrtMin > 90) hrtMin = 90;
     uint32_t hrtMs = hrtMin * 60000UL;
     if (hrtMs != proj->heatRuntimeThresholdMs) {
