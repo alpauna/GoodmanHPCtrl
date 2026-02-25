@@ -162,12 +162,12 @@ for i, clip_y in enumerate(CLIP_Y_POSITIONS):
     print_volume(result, f"After snap pocket at Y={clip_y}")
 
 # === 10. Countersunk M2 screw mount in front-right corner ===
-SCREW_X = -1.0    # inset from right wall
-SCREW_Y = -27.5   # embeds into front wall (IY_F=-29.48)
+SCREW_X = NX_R - 1.5   # in wall corner, 1.5mm from right outer face
+SCREW_Y = NY_F + 1.5   # in wall corner, 1.5mm from front outer face
 MATING_Z = 35.0   # same Z as left hinged wall top (BOT_RIM_Z)
 SCREW_GAP = 0.2   # gap between top and bottom pillars for secure clamping
 BOTTOM_R = 2.5    # bottom pillar radius (must match bottom shell)
-TOP_R = BOTTOM_R * 3.0  # 7.5mm — doubled from 3.75mm
+TOP_R = 1.5       # slim corner cove (was 7.5mm)
 SCREW_PILLAR_Z = TOP_RIM_Z + 0.5              # 35.5 — cove bottom sits just below shelf
 
 result = coved_corner_countersink(result, SCREW_X, SCREW_Y,
@@ -219,18 +219,15 @@ print(f"  Left wall interior (X={NX_L+1:.1f}, Y={gap_y:.1f}): Z={[f'{z:.2f}' for
 
 # M2 boss verification (probes in interior where boss extends)
 print("M2 boss verification:")
-# Probe interior side (-X from center): should be solid boss material
-verify_solid(result, SCREW_X - 3.0, SCREW_Y,
-             SCREW_PILLAR_Z - 1, CEIL_Z, "boss interior (-X)")
-# Probe interior side (+Y from center)
-verify_solid(result, SCREW_X, SCREW_Y + 3.0,
-             SCREW_PILLAR_Z - 1, CEIL_Z, "boss interior (+Y)")
+# Probe wall side (+X from center): should be solid wall/boss material
+verify_solid(result, SCREW_X + 1.0, SCREW_Y,
+             SCREW_PILLAR_Z - 1, CEIL_Z, "boss wall-side (+X)")
+# Probe wall side (-Y from center)
+verify_solid(result, SCREW_X, SCREW_Y - 1.0,
+             SCREW_PILLAR_Z - 1, CEIL_Z, "boss wall-side (-Y)")
 # Screw hole center: should be OPEN (clearance drilled)
 zs = z_probe(result, SCREW_X, SCREW_Y)
 print(f"  screw center: Z={[f'{z:.2f}' for z in zs]}")
-# Boss extent at 45° into interior
-zs = z_probe(result, SCREW_X - 4.0, SCREW_Y + 4.0)
-print(f"  boss 45° interior (X={SCREW_X-4:.0f},Y={SCREW_Y+4:.0f}): Z={[f'{z:.2f}' for z in zs]}")
 
 # TC mount
 pil_x = bb.XMin + 35

@@ -117,8 +117,8 @@ for i, clip_y in enumerate(CLIP_Y_POSITIONS):
     print_volume(result, f"8.{i+1}. After snap clip at Y={clip_y}")
 
 # === 9. M2 screw post in front-right corner (matches top shell) ===
-SCREW_X = -1.0
-SCREW_Y = -27.5   # embeds into front wall (IY_F=-29.48)
+SCREW_X = NX_R - 1.5   # in wall corner, 1.5mm from right outer face
+SCREW_Y = NY_F + 1.5   # in wall corner, 1.5mm from front outer face
 MATING_Z = 35.0   # same Z as left hinged wall top (BOT_RIM_Z)
 BOTTOM_R = 2.5
 SCREW_POST_H = MATING_Z - FLOOR_Z  # floor up to mating line
@@ -187,7 +187,7 @@ from cutout import z_probe, verify_solid
 # Probe inner cut zone on front wall near post: between IY_F and NMY_F
 for px, py, label in [
     (0.0, -30.5, "front inner cut (X=0, Y=-30.5)"),      # center of inner cut zone
-    (SCREW_X, -30.0, "post edge Y (X=-1, Y=-30)"),        # post Y edge
+    (SCREW_X, -30.0, f"post edge Y (X={SCREW_X:.1f}, Y=-30)"),  # post Y edge
     (0.0, -29.9, "just inside IY_F (X=0, Y=-29.9)"),      # near inner boundary
     (0.0, -31.0, "tongue body (X=0, Y=-31.0)"),            # should be SOLID (tongue)
 ]:
