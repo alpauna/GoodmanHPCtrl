@@ -969,27 +969,25 @@ def knuckle_hinge(shape, wall, wall_coord, a_start, a_end,
                     Vector(wall_coord, seg_start, barrel_z_bottom))
             shape = shape.fuse(block)
 
-            # 2b. Chamfer outer corners of buildup
+            # 2b. Chamfer wall-side corners of buildup (inside, nearest pivot)
             if wall == 'left':
-                outer_x = wall_coord - buildup_width
-                dx = chamfer
+                dx = -chamfer  # toward barrel center
             else:
-                outer_x = wall_coord + buildup_width
-                dx = -chamfer
-            # Bottom-outer corner
+                dx = chamfer
+            # Bottom wall-side corner
             w = Part.makePolygon([
-                Vector(outer_x, seg_start, barrel_z_bottom),
-                Vector(outer_x + dx, seg_start, barrel_z_bottom),
-                Vector(outer_x, seg_start, barrel_z_bottom + chamfer),
-                Vector(outer_x, seg_start, barrel_z_bottom)])
+                Vector(wall_coord, seg_start, barrel_z_bottom),
+                Vector(wall_coord + dx, seg_start, barrel_z_bottom),
+                Vector(wall_coord, seg_start, barrel_z_bottom + chamfer),
+                Vector(wall_coord, seg_start, barrel_z_bottom)])
             prism = Part.Face(w).extrude(Vector(0, seg_length, 0))
             shape = shape.cut(prism)
-            # Top-outer corner
+            # Top wall-side corner
             w = Part.makePolygon([
-                Vector(outer_x, seg_start, barrel_z_top),
-                Vector(outer_x + dx, seg_start, barrel_z_top),
-                Vector(outer_x, seg_start, barrel_z_top - chamfer),
-                Vector(outer_x, seg_start, barrel_z_top)])
+                Vector(wall_coord, seg_start, barrel_z_top),
+                Vector(wall_coord + dx, seg_start, barrel_z_top),
+                Vector(wall_coord, seg_start, barrel_z_top - chamfer),
+                Vector(wall_coord, seg_start, barrel_z_top)])
             prism = Part.Face(w).extrude(Vector(0, seg_length, 0))
             shape = shape.cut(prism)
 
@@ -1041,27 +1039,25 @@ def knuckle_hinge(shape, wall, wall_coord, a_start, a_end,
                     Vector(seg_start, wall_coord, barrel_z_bottom))
             shape = shape.fuse(block)
 
-            # 2b. Chamfer outer corners of buildup
+            # 2b. Chamfer wall-side corners of buildup (inside, nearest pivot)
             if wall == 'front':
-                outer_y = wall_coord - buildup_width
-                dy = chamfer
+                dy = -chamfer  # toward barrel center
             else:
-                outer_y = wall_coord + buildup_width
-                dy = -chamfer
-            # Bottom-outer corner
+                dy = chamfer
+            # Bottom wall-side corner
             w = Part.makePolygon([
-                Vector(seg_start, outer_y, barrel_z_bottom),
-                Vector(seg_start, outer_y + dy, barrel_z_bottom),
-                Vector(seg_start, outer_y, barrel_z_bottom + chamfer),
-                Vector(seg_start, outer_y, barrel_z_bottom)])
+                Vector(seg_start, wall_coord, barrel_z_bottom),
+                Vector(seg_start, wall_coord + dy, barrel_z_bottom),
+                Vector(seg_start, wall_coord, barrel_z_bottom + chamfer),
+                Vector(seg_start, wall_coord, barrel_z_bottom)])
             prism = Part.Face(w).extrude(Vector(seg_length, 0, 0))
             shape = shape.cut(prism)
-            # Top-outer corner
+            # Top wall-side corner
             w = Part.makePolygon([
-                Vector(seg_start, outer_y, barrel_z_top),
-                Vector(seg_start, outer_y + dy, barrel_z_top),
-                Vector(seg_start, outer_y, barrel_z_top - chamfer),
-                Vector(seg_start, outer_y, barrel_z_top)])
+                Vector(seg_start, wall_coord, barrel_z_top),
+                Vector(seg_start, wall_coord + dy, barrel_z_top),
+                Vector(seg_start, wall_coord, barrel_z_top - chamfer),
+                Vector(seg_start, wall_coord, barrel_z_top)])
             prism = Part.Face(w).extrude(Vector(seg_length, 0, 0))
             shape = shape.cut(prism)
 
