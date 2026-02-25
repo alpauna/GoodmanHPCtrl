@@ -937,8 +937,11 @@ def knuckle_hinge(shape, wall, wall_coord, a_start, a_end,
     barrel_z_bottom = cz - knuckle_radius
     barrel_z_top = cz + knuckle_radius
 
-    # Chamfer size for outer buildup corners (slightly > R(sqrt2-1) for clearance)
-    chamfer = knuckle_radius * 0.45
+    # Chamfer size for wall-side buildup corners
+    if side == "top":
+        chamfer = knuckle_radius       # full R for maximum pivot clearance
+    else:
+        chamfer = knuckle_radius * 0.45  # slightly > R(sqrt2-1) for clearance
 
     # Select which knuckle indices this side gets
     if side == "bottom":
