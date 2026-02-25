@@ -162,12 +162,12 @@ for i, clip_y in enumerate(CLIP_Y_POSITIONS):
     print_volume(result, f"After snap pocket at Y={clip_y}")
 
 # === 10. Countersunk M2 screw mount in front-right corner ===
-SCREW_X = NX_R - 1.5   # in wall corner, 1.5mm from right outer face
-SCREW_Y = NY_F + 1.5   # in wall corner, 1.5mm from front outer face
+SCREW_X = NMX_R + 0.5   # offset so cove extends 1.5mm past interior right wall
+SCREW_Y = NMY_F - 0.5   # offset so cove extends 1.5mm past interior front wall
 MATING_Z = 35.0   # same Z as left hinged wall top (BOT_RIM_Z)
 SCREW_GAP = 0.2   # gap between top and bottom pillars for secure clamping
 BOTTOM_R = 2.5    # bottom pillar radius (must match bottom shell)
-TOP_R = 1.5       # slim corner cove (was 7.5mm)
+TOP_R = 2.0       # 1.5mm visible protrusion, 0.8mm wall around clearance hole
 SCREW_PILLAR_Z = TOP_RIM_Z + 0.5              # 35.5 — cove bottom sits just below shelf
 
 result = coved_corner_countersink(result, SCREW_X, SCREW_Y,

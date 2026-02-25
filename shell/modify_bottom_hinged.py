@@ -117,8 +117,8 @@ for i, clip_y in enumerate(CLIP_Y_POSITIONS):
     print_volume(result, f"8.{i+1}. After snap clip at Y={clip_y}")
 
 # === 9. M2 screw post in front-right corner (matches top shell) ===
-SCREW_X = NX_R - 1.5   # in wall corner, 1.5mm from right outer face
-SCREW_Y = NY_F + 1.5   # in wall corner, 1.5mm from front outer face
+SCREW_X = NMX_R + 0.5   # matches top shell cove center
+SCREW_Y = NMY_F - 0.5   # matches top shell cove center
 MATING_Z = 35.0   # same Z as left hinged wall top (BOT_RIM_Z)
 BOTTOM_R = 2.5
 SCREW_POST_H = MATING_Z - FLOOR_Z  # floor up to mating line
