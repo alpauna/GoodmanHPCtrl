@@ -170,9 +170,10 @@ BOTTOM_R = 2.5    # bottom pillar radius (must match bottom shell)
 TOP_R = 2.0       # 1.5mm visible protrusion, 0.8mm wall around clearance hole
 SCREW_PILLAR_Z = TOP_RIM_Z                     # 35.0 — cove bottom at mating surface
 
+RECESS_DEPTH = CEIL_Z - SCREW_PILLAR_Z - 1.5   # leave 1.5mm solid above mating edge
 result = coved_corner_countersink(result, SCREW_X, SCREW_Y,
                                   z_bottom=SCREW_PILLAR_Z, z_outer=CEIL_Z,
-                                  radius=TOP_R, recess_depth=10.0,
+                                  radius=TOP_R, recess_depth=RECESS_DEPTH,
                                   clearance_radius=1.2,
                                   wall_x=NX_R, wall_y=NY_F)
 print_volume(result, "After M2 coved corner countersink (front-right)")
