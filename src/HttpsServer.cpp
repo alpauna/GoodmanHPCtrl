@@ -236,6 +236,8 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["rvFail"] = proj->rvFail;
         doc["rvShortCycleSec"] = proj->rvShortCycleMs / 1000;
         doc["cntShortCycleSec"] = proj->cntShortCycleMs / 1000;
+        doc["stateValidationSec"] = proj->stateValidationMs / 1000;
+        doc["inputDelaySec"] = proj->inputDelayMs / 1000;
         doc["defrostMinRuntimeSec"] = proj->defrostMinRuntimeMs / 1000;
         doc["defrostExitTempF"] = proj->defrostExitTempF;
         doc["heatRuntimeThresholdMin"] = proj->heatRuntimeThresholdMs / 60000;
@@ -449,6 +451,24 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     if (cntSC != proj->cntShortCycleMs) {
         proj->cntShortCycleMs = cntSC;
         ctx->hpController->setCntShortCycleMs(cntSC);
+    }
+
+    uint32_t svSec = data["stateValidationSec"] | (int)(proj->stateValidationMs / 1000);
+    if (svSec > 300) svSec = 300;
+    uint32_t svMs = svSec * 1000UL;
+    if (svMs != proj->stateValidationMs) {
+        proj->stateValidationMs = svMs;
+        ctx->hpController->setStateValidationMs(svMs);
+    }
+
+    uint32_t idSec = data["inputDelaySec"] | (int)(proj->inputDelayMs / 1000);
+    if (idSec > 60) idSec = 60;
+    uint32_t idMs = idSec * 1000UL;
+    if (idMs != proj->inputDelayMs) {
+        proj->inputDelayMs = idMs;
+        for (auto& pair : ctx->hpController->getInputMap()) {
+            if (pair.second != nullptr) pair.second->setDelay(idMs);
+        }
     }
 
     uint32_t dfMinSec = data["defrostMinRuntimeSec"] | (int)(proj->defrostMinRuntimeMs / 1000);

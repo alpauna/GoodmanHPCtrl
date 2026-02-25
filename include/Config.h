@@ -37,6 +37,8 @@ struct ProjectInfo {
     float defrostExitTempF;              // Condenser temp cutoff to end defrost (default 60.0°F)
     uint32_t heatRuntimeThresholdMs;     // Heat runtime threshold to trigger defrost in ms (default 5400000 = 90 min)
     bool softwareDefrost;                // Persisted software defrost state (survives reboot)
+    uint32_t stateValidationMs;          // State validation delay in ms (default 30000 = 30s)
+    uint32_t inputDelayMs;               // Input pin debounce/validation delay in ms (default 10000 = 10s)
     uint32_t apFallbackSeconds;  // WiFi disconnect time before AP fallback (default 600 = 10 min)
     String apPassword;           // AP mode password override (empty = auto-generate)
     String ftpPassword;          // FTP server password (empty = default "admin")

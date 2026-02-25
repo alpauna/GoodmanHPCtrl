@@ -104,6 +104,7 @@ void MQTTHandler::publishState() {
     doc["rvFail"] = _controller->isRvFailActive();
     doc["highSuctionTemp"] = _controller->isHighSuctionTempActive();
     doc["manualOverride"] = _controller->isManualOverrideActive();
+    doc["stateValidating"] = _controller->isStateValidating();
 
     char buf[512];
     size_t len = serializeJson(doc, buf, sizeof(buf));

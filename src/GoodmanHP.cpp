@@ -45,6 +45,10 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _coolTransitionStart(0)
     , _coolCntPending(false)
     , _coolCntPendingStart(0)
+    , _stateValidationActive(false)
+    , _stateValidationStart(0)
+    , _stateValidationMs(30000)
+    , _lastValidationLogTick(0)
     , _manualOverride(false)
     , _manualOverrideStart(0)
     , _startupLockout(true)
@@ -217,6 +221,7 @@ void GoodmanHP::checkLPSFault() {
             w->turnOn();
             Log.info("HP", "W turned ON for ERROR state (HEAT mode)");
         }
+        startStateValidation();
         if (_lpsFaultCb) _lpsFaultCb(true);
         if (_stateChangeCb) _stateChangeCb(State::ERROR, oldState);
     } else if (isLPSActive() && _lpsFault) {
@@ -248,20 +253,16 @@ void GoodmanHP::checkAmbientTemp() {
 
     if (temp < _lowTempThreshold && !_lowTemp) {
         _lowTemp = true;
-        State oldState = _state;
-        _state = State::LOW_TEMP;
-        Log.warn("HP", "Low ambient temp %.1fF < %.1fF threshold, entering LOW_TEMP state",
+        Log.warn("HP", "Low ambient temp %.1fF < %.1fF threshold, LOW_TEMP protection active",
                  temp, _lowTempThreshold);
 
-        // Shut down CNT if running
+        // Immediate output protection (safety — always applied)
         OutPin* cnt = getOutput("CNT");
         if (cnt != nullptr && cnt->isOn()) {
             cnt->turnOff();
             _cntActivated = false;
             Log.warn("HP", "CNT shut down due to low ambient temp");
         }
-
-        // Turn off FAN and RV
         OutPin* fan = getOutput("FAN");
         if (fan != nullptr) fan->turnOff();
         OutPin* rv = getOutput("RV");
@@ -282,9 +283,29 @@ void GoodmanHP::checkAmbientTemp() {
             if (aux != nullptr) aux->turnOn();
         }
 
-        if (_stateChangeCb) _stateChangeCb(State::LOW_TEMP, oldState);
+        // Gate state label change by validation timer
+        if (canTransitionToNormalState()) {
+            State oldState = _state;
+            _state = State::LOW_TEMP;
+            startStateValidation();
+            Log.info("HP", "State: %s -> LOW_TEMP (validation: %lus)",
+                     oldState == State::OFF ? "OFF" : oldState == State::HEAT ? "HEAT" :
+                     oldState == State::COOL ? "COOL" : "OTHER", _stateValidationMs / 1000UL);
+            if (_stateChangeCb) _stateChangeCb(State::LOW_TEMP, oldState);
+        }
     } else if (temp < _lowTempThreshold && _lowTemp) {
-        // Already in LOW_TEMP — continuously manage W based on 3 gates:
+        // Re-check deferred state label if outputs are protected but state not yet LOW_TEMP
+        if (_state != State::LOW_TEMP && canTransitionToNormalState()) {
+            State oldState = _state;
+            _state = State::LOW_TEMP;
+            startStateValidation();
+            Log.info("HP", "State: %s -> LOW_TEMP (deferred, validation: %lus)",
+                     oldState == State::OFF ? "OFF" : oldState == State::HEAT ? "HEAT" :
+                     oldState == State::COOL ? "COOL" : "OTHER", _stateValidationMs / 1000UL);
+            if (_stateChangeCb) _stateChangeCb(State::LOW_TEMP, oldState);
+        }
+
+        // Continuously manage W based on 3 gates:
         // (1) LOW_TEMP active, (2) W checkbox, (3) Y active + O not active
         OutPin* w = getOutput("W");
         if (w != nullptr) {
@@ -561,13 +582,23 @@ void GoodmanHP::updateState() {
     }
 
     if (newState != _state) {
+        // Gate normal-priority transitions by validation timer
+        if (newState != State::OFF && newState != State::ERROR) {
+            if (!canTransitionToNormalState()) {
+                return;  // Block HEAT/COOL/DEFROST until validation completes
+            }
+        }
+
         State oldState = _state;
-        Log.info("HP", "State changed: %s -> %s", getStateString(),
+        Log.info("HP", "State: %s -> %s (validation: %lus)",
+                 getStateString(),
                  newState == State::OFF ? "OFF" :
                  newState == State::COOL ? "COOL" :
                  newState == State::HEAT ? "HEAT" :
-                 newState == State::DEFROST ? "DEFROST" : "ERROR");
+                 newState == State::DEFROST ? "DEFROST" : "ERROR",
+                 _stateValidationMs / 1000UL);
         _state = newState;
+        startStateValidation();
 
         if (_stateChangeCb) {
             _stateChangeCb(newState, oldState);
@@ -898,6 +929,22 @@ void GoodmanHP::validateOutputStates() {
     if (_defrostTransition || _defrostCntPending || _defrostExiting ||
         _coolTransition || _coolCntPending || _startupLockout || _manualOverride) return;
 
+    // Skip if LOW_TEMP outputs are protected but state label is deferred
+    if (_lowTemp && _state != State::LOW_TEMP) return;
+
+    // Log state validation progress during hold (debug-level)
+    if (_stateValidationActive) {
+        OutPin* cntL = getOutput("CNT"); OutPin* fanL = getOutput("FAN");
+        OutPin* wL = getOutput("W"); OutPin* rvL = getOutput("RV");
+        Log.debug("HP", "State validation active: %s [FAN=%s CNT=%s RV=%s W=%s] [Y=%d O=%d LPS=%d DFT=%d]",
+                 getStateString(),
+                 fanL && fanL->isPinOn() ? "ON" : "OFF",
+                 cntL && cntL->isPinOn() ? "ON" : "OFF",
+                 rvL && rvL->isPinOn() ? "ON" : "OFF",
+                 wL && wL->isPinOn() ? "ON" : "OFF",
+                 isYActive(), isOActive(), isLPSActive(), isDFTActive());
+    }
+
     OutPin* cnt = getOutput("CNT");
     OutPin* fan = getOutput("FAN");
     OutPin* w   = getOutput("W");
@@ -913,129 +960,98 @@ void GoodmanHP::validateOutputStates() {
         corrected = true;
     }
 
-    // CNT must be OFF when any blocking condition is active
+    // === FAULT PRIORITY TABLE: CNT must be OFF during any blocking fault ===
+    // Priority: 1=compressorOverTemp, 2=suctionLowTemp(COOL), 3=lpsFault, 4=lowTemp, latched=rvFail
     if (cnt != nullptr && cnt->isOn()) {
-        if (_lpsFault) {
-            Log.error("HP", "STATE CHECK: CNT on during LPS fault — forcing OFF");
-            cnt->turnOff(); _cntActivated = false; corrected = true;
-        } else if (_lowTemp) {
-            Log.error("HP", "STATE CHECK: CNT on during LOW_TEMP — forcing OFF");
-            cnt->turnOff(); _cntActivated = false; corrected = true;
-        } else if (_compressorOverTemp) {
-            Log.error("HP", "STATE CHECK: CNT on during compressor overtemp — forcing OFF");
-            cnt->turnOff(); _cntActivated = false; corrected = true;
-        } else if (_suctionLowTemp) {
-            Log.error("HP", "STATE CHECK: CNT on during suction low temp — forcing OFF");
-            cnt->turnOff(); _cntActivated = false; corrected = true;
-        } else if (_rvFail && !_softwareDefrost) {
-            Log.error("HP", "STATE CHECK: CNT on during RV fail — forcing OFF");
+        const char* faultName = nullptr;
+        if (_compressorOverTemp)          faultName = "compressor overtemp";
+        else if (_suctionLowTemp)         faultName = "suction low temp";
+        else if (_lpsFault)               faultName = "LPS fault";
+        else if (_lowTemp)                faultName = "LOW_TEMP";
+        else if (_rvFail && !_softwareDefrost) faultName = "RV fail";
+
+        if (faultName) {
+            Log.error("HP", "STATE CHECK: CNT on during %s — forcing OFF", faultName);
             cnt->turnOff(); _cntActivated = false; corrected = true;
         }
     }
 
-    // === PER-STATE VALIDATION ===
+    // === TABLE-DRIVEN PER-STATE VALIDATION ===
+    // Expected outputs: -1=don't care, 0=OFF, 1=ON
+    int8_t expFAN = -1, expCNT = -1, expRV = -1, expW = -1;
+    const char* row = "UNKNOWN";
 
     switch (_state) {
         case State::OFF:
-            if (cnt != nullptr && cnt->isOn()) {
-                Log.error("HP", "STATE CHECK: CNT on in OFF — forcing OFF");
-                cnt->turnOff(); _cntActivated = false; corrected = true;
-            }
-            if (fan != nullptr && fan->isOn()) {
-                Log.error("HP", "STATE CHECK: FAN on in OFF — forcing OFF");
-                fan->turnOff(); corrected = true;
-            }
-            if (w != nullptr && w->isOn()) {
-                Log.error("HP", "STATE CHECK: W on in OFF — forcing OFF");
-                w->turnOff(); corrected = true;
-            }
-            if (rv != nullptr && rv->isOn()) {
-                Log.error("HP", "STATE CHECK: RV on in OFF — forcing OFF");
-                rv->turnOff(); corrected = true;
-            }
+            row = "OFF"; expFAN = 0; expCNT = 0; expRV = 0; expW = 0;
             break;
 
         case State::COOL:
-            // RV must be ON
-            if (rv != nullptr && !rv->isOn()) {
-                Log.error("HP", "STATE CHECK: RV off in COOL — forcing ON");
-                rv->turnOn(); corrected = true;
-            }
-            // W must be OFF
-            if (w != nullptr && w->isOn()) {
-                Log.error("HP", "STATE CHECK: W on in COOL — forcing OFF");
-                w->turnOff(); corrected = true;
-            }
-            // FAN should match CNT (both on or FAN on for cooling during fault)
-            if (cnt != nullptr && cnt->isOn() && fan != nullptr && !fan->isOn()) {
-                Log.error("HP", "STATE CHECK: FAN off while CNT on in COOL — forcing ON");
-                fan->turnOn(); corrected = true;
-            }
+            row = "COOL"; expRV = 1; expW = 0;
+            // FAN should match CNT (both on when running)
+            if (cnt != nullptr && cnt->isOn()) expFAN = 1;
             break;
 
         case State::HEAT:
-            // RV must be OFF
-            if (rv != nullptr && rv->isOn()) {
-                Log.error("HP", "STATE CHECK: RV on in HEAT — forcing OFF");
-                rv->turnOff(); corrected = true;
-            }
-            // W only allowed if _rvFail
-            if (w != nullptr && w->isOn() && !_rvFail) {
-                Log.error("HP", "STATE CHECK: W on in HEAT without RV fail — forcing OFF");
-                w->turnOff(); corrected = true;
-            }
-            // FAN should be on if CNT is on
-            if (cnt != nullptr && cnt->isOn() && fan != nullptr && !fan->isOn()) {
-                Log.error("HP", "STATE CHECK: FAN off while CNT on in HEAT — forcing ON");
-                fan->turnOn(); corrected = true;
-            }
+            row = _rvFail ? "HEAT+rvFail" : "HEAT";
+            expRV = 0;
+            expW = _rvFail && isYActive() && !isOActive() ? 1 : 0;
+            if (_rvFail) expCNT = 0;  // CNT blocked during rvFail
+            // FAN should match CNT when running
+            if (cnt != nullptr && cnt->isOn()) expFAN = 1;
             break;
 
         case State::DEFROST:
-            // Phase 3 (active defrost): CNT on, FAN off, W on, RV on
+            // Phase 3 (active defrost): FAN off, CNT on, RV on, W on
             if (_softwareDefrost) {
-                if (rv != nullptr && !rv->isOn()) {
-                    Log.error("HP", "STATE CHECK: RV off during active defrost — forcing ON");
-                    rv->turnOn(); corrected = true;
-                }
-                if (w != nullptr && !w->isOn()) {
-                    Log.error("HP", "STATE CHECK: W off during active defrost — forcing ON");
-                    w->turnOn(); corrected = true;
-                }
-                if (fan != nullptr && fan->isOn()) {
-                    Log.error("HP", "STATE CHECK: FAN on during active defrost — forcing OFF");
-                    fan->turnOff(); corrected = true;
-                }
+                row = "DEFROST Ph3"; expFAN = 0; expRV = 1; expW = 1;
             }
             break;
 
         case State::ERROR:
-            // CNT must be OFF
-            if (cnt != nullptr && cnt->isOn()) {
-                Log.error("HP", "STATE CHECK: CNT on in ERROR — forcing OFF");
-                cnt->turnOff(); _cntActivated = false; corrected = true;
-            }
+            row = "ERROR"; expCNT = 0;
+            // W on only if Y&&!O
+            expW = (isYActive() && !isOActive()) ? 1 : -1;
             break;
 
         case State::LOW_TEMP:
-            // CNT OFF, FAN OFF, RV OFF
-            if (cnt != nullptr && cnt->isOn()) {
-                Log.error("HP", "STATE CHECK: CNT on in LOW_TEMP — forcing OFF");
-                cnt->turnOff(); _cntActivated = false; corrected = true;
-            }
-            if (fan != nullptr && fan->isOn()) {
-                Log.error("HP", "STATE CHECK: FAN on in LOW_TEMP — forcing OFF");
-                fan->turnOff(); corrected = true;
-            }
-            if (rv != nullptr && rv->isOn()) {
-                Log.error("HP", "STATE CHECK: RV on in LOW_TEMP — forcing OFF");
-                rv->turnOff(); corrected = true;
-            }
+            row = "LOW_TEMP"; expFAN = 0; expCNT = 0; expRV = 0;
+            // W gated by enableW checkbox + Y&&!O
+            if (!(_lowTempEnableW && isYActive() && !isOActive())) expW = 0;
             break;
     }
 
-    if (corrected && _stateChangeCb) {
-        _stateChangeCb(_state, _state);
+    // Check and auto-correct each output against expected table value
+    struct { OutPin* pin; int8_t expected; const char* name; } checks[] = {
+        {fan, expFAN, "FAN"}, {cnt, expCNT, "CNT"}, {rv, expRV, "RV"}, {w, expW, "W"}
+    };
+
+    for (auto& c : checks) {
+        if (c.pin == nullptr || c.expected == -1) continue;
+        bool isOn = c.pin->isPinOn();
+        bool shouldBeOn = (c.expected == 1);
+        if (isOn != shouldBeOn) {
+            Log.error("HP", "STATE CHECK: %s %s in %s — forcing %s",
+                      c.name, isOn ? "on" : "off", row, shouldBeOn ? "ON" : "OFF");
+            if (shouldBeOn) c.pin->turnOn(); else c.pin->turnOff();
+            if (strcmp(c.name, "CNT") == 0 && !shouldBeOn) _cntActivated = false;
+            corrected = true;
+        }
+    }
+
+    if (corrected) {
+        if (_stateChangeCb) _stateChangeCb(_state, _state);
+        // Reset throttle so next clean pass logs sooner
+        _lastValidationLogTick = now;
+    } else if (now - _lastValidationLogTick >= 30000UL) {
+        // Throttled info every 30s when outputs are correct
+        _lastValidationLogTick = now;
+        Log.info("HP", "State check OK: %s [FAN=%s CNT=%s RV=%s W=%s]",
+                 getStateString(),
+                 fan && fan->isPinOn() ? "ON" : "OFF",
+                 cnt && cnt->isPinOn() ? "ON" : "OFF",
+                 rv && rv->isPinOn() ? "ON" : "OFF",
+                 w && w->isPinOn() ? "ON" : "OFF");
     }
 }
 
@@ -1158,6 +1174,52 @@ void GoodmanHP::setLowTempEnableAux(bool enable) {
 
 bool GoodmanHP::getLowTempEnableAux() const {
     return _lowTempEnableAux;
+}
+
+bool GoodmanHP::isStateValidating() const {
+    return _stateValidationActive;
+}
+
+uint32_t GoodmanHP::getStateValidationRemainingMs() const {
+    if (!_stateValidationActive) return 0;
+    uint32_t elapsed = millis() - _stateValidationStart;
+    if (elapsed >= _stateValidationMs) return 0;
+    return _stateValidationMs - elapsed;
+}
+
+void GoodmanHP::setStateValidationMs(uint32_t ms) {
+    _stateValidationMs = ms;
+    Log.info("HP", "State validation delay set to %lu ms", ms);
+}
+
+uint32_t GoodmanHP::getStateValidationMs() const {
+    return _stateValidationMs;
+}
+
+bool GoodmanHP::canTransitionToNormalState() {
+    if (!_stateValidationActive) return true;
+    uint32_t now = millis();
+    uint32_t elapsed = now - _stateValidationStart;
+    if (elapsed >= _stateValidationMs) {
+        _stateValidationActive = false;
+        Log.info("HP", "State validation complete: %s confirmed", getStateString());
+        return true;
+    }
+    uint32_t remaining = (_stateValidationMs - elapsed) / 1000UL;
+    Log.debug("HP", "State validation blocked: transition (%lus remaining)", remaining);
+    // Throttled info-level log every 30s
+    if (now - _lastValidationLogTick >= 30000UL) {
+        _lastValidationLogTick = now;
+        Log.info("HP", "State validation hold: %s (%lus remaining)", getStateString(), remaining);
+    }
+    return false;
+}
+
+void GoodmanHP::startStateValidation() {
+    if (_stateValidationMs == 0) return;  // Disabled
+    _stateValidationActive = true;
+    _stateValidationStart = millis();
+    _lastValidationLogTick = millis();
 }
 
 void GoodmanHP::restoreSoftwareDefrost() {

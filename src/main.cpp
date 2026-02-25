@@ -211,6 +211,8 @@ ProjectInfo proj = {
   60.0f,              // defrostExitTempF: 60°F default
   5400000,            // heatRuntimeThresholdMs: 90 min default
   false,              // softwareDefrost: not active
+  30000,              // stateValidationMs: 30s default
+  10000,              // inputDelayMs: 10s default
   600,                // apFallbackSeconds: 10 minutes
   "",                 // apPassword: empty = auto-generate
   "",                 // ftpPassword: empty = default "admin"
@@ -502,21 +504,20 @@ void onCheckInputQueue(){
     }
     InputPin * pin = m.second;
     pin->verifiedAt();
-   
-    //auto isInActiveMap = activePins.find(pin->getName());
-    if(pin->isActive()){
-      Serial.printf("Activating pin: %s\n", pin->getName());
-      //remove from activePins as it is not active any longer.
-      pin->activeNow();
+
+    // Read live GPIO to determine pending direction
+    bool liveActive = pin->readLiveState();
+
+    // Only start delay if the live state differs from confirmed state
+    if (liveActive != pin->isActive()) {
+      Serial.printf("Input %s change detected (%s), validating in %lums\n",
+                     pin->getName().c_str(), liveActive ? "active" : "inactive",
+                     pin->getDelay());
+      pin->setPendingState(liveActive ? 1 : 0);
       pin->getTask()->restartDelayed( pin->getTask()->getInterval() );
-    }else{
-      Serial.printf("Deactivated pin: %s\n", pin->getName());
-      pin->getTask()->disable();
-      pin->inactiveNow();
-      pin->fireCallback();
     }
     _isrEvent.erase(m.first);
-  }  
+  }
 }
 
 unsigned char * acc_data_all;
@@ -657,6 +658,7 @@ void setup() {
       hpController.setDefrostMinRuntimeMs(proj.defrostMinRuntimeMs);
       hpController.setDefrostExitTempF(proj.defrostExitTempF);
       hpController.setHeatRuntimeThresholdMs(proj.heatRuntimeThresholdMs);
+      hpController.setStateValidationMs(proj.stateValidationMs);
       if (proj.rvFail) hpController.setRvFail();  // Restore latched state
       if (proj.softwareDefrost) hpController.restoreSoftwareDefrost();  // Resume defrost after reboot
       // Apply temp history capture interval from config
@@ -856,10 +858,10 @@ void setup() {
 
   if (!_safeMode) {
     // Add input pins to GoodmanHP controller
-    hpController.addInput("LPS", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _lpsPin, "LPS", "LPS", onInput));
-    hpController.addInput("DFT", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _dftPin, "DFT", "DFT", onInput));
-    hpController.addInput("Y", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _yPin, "Y", "OT-NO", onInput));
-    hpController.addInput("O", new InputPin(&ts, 3000, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _oPin, "O", "OT-NC", onInput));
+    hpController.addInput("LPS", new InputPin(&ts, proj.inputDelayMs, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _lpsPin, "LPS", "LPS", onInput));
+    hpController.addInput("DFT", new InputPin(&ts, proj.inputDelayMs, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _dftPin, "DFT", "DFT", onInput));
+    hpController.addInput("Y", new InputPin(&ts, proj.inputDelayMs, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _yPin, "Y", "OT-NO", onInput));
+    hpController.addInput("O", new InputPin(&ts, proj.inputDelayMs, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _oPin, "O", "OT-NC", onInput));
 
     // Add output pins to GoodmanHP controller
     hpController.addOutput("FAN", new OutPin(&ts, 0, _fanPin, "FAN", "FAN", onOutpin));

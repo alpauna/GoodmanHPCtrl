@@ -541,6 +541,8 @@ void WebHandler::setupRoutes() {
         doc["coolTransitionRemainSec"] = _hpController->getCoolTransitionRemainingMs() / 1000;
         doc["coolCntPending"] = _hpController->isCoolCntPendingActive();
         doc["coolCntPendingRemainSec"] = _hpController->getCoolCntPendingRemainingMs() / 1000;
+        doc["stateValidating"] = _hpController->isStateValidating();
+        doc["stateValidationRemainSec"] = _hpController->getStateValidationRemainingMs() / 1000;
         doc["manualOverride"] = _hpController->isManualOverrideActive();
         doc["manualOverrideRemainSec"] = _hpController->getManualOverrideRemainingMs() / 1000;
         doc["cpuLoad0"] = getCpuLoadCore0();
@@ -753,6 +755,8 @@ void WebHandler::setupRoutes() {
             doc["rvFail"] = _hpController->isRvFailActive();
             doc["highSuctionTemp"] = _hpController->isHighSuctionTempActive();
             doc["heatRuntimeMin"] = _hpController->getHeatRuntimeMs() / 60000;
+            doc["stateValidating"] = _hpController->isStateValidating();
+            doc["stateValidationRemainSec"] = _hpController->getStateValidationRemainingMs() / 1000;
 
             JsonArray inputs = doc["inputs"].to<JsonArray>();
             for (auto& pair : _hpController->getInputMap()) {
@@ -1006,6 +1010,8 @@ void WebHandler::setupRoutes() {
                 doc["defrostMinRuntimeSec"] = proj->defrostMinRuntimeMs / 1000;
                 doc["defrostExitTempF"] = proj->defrostExitTempF;
                 doc["heatRuntimeThresholdMin"] = proj->heatRuntimeThresholdMs / 60000;
+                doc["stateValidationSec"] = proj->stateValidationMs / 1000;
+                doc["inputDelaySec"] = proj->inputDelayMs / 1000;
                 doc["apFallbackMinutes"] = proj->apFallbackSeconds / 60;
                 doc["apPassword"] = proj->apPassword;
                 doc["maxLogSize"] = proj->maxLogSize;
@@ -1798,6 +1804,25 @@ void WebHandler::setupRoutes() {
         if (hrtMs != proj->heatRuntimeThresholdMs) {
             proj->heatRuntimeThresholdMs = hrtMs;
             _hpController->setHeatRuntimeThresholdMs(hrtMs);
+        }
+
+        uint32_t svSec = data["stateValidationSec"] | (int)(proj->stateValidationMs / 1000);
+        if (svSec > 300) svSec = 300;
+        uint32_t svMs = svSec * 1000UL;
+        if (svMs != proj->stateValidationMs) {
+            proj->stateValidationMs = svMs;
+            _hpController->setStateValidationMs(svMs);
+        }
+
+        // Input delay (live — update all input pin tasks)
+        uint32_t idSec = data["inputDelaySec"] | (int)(proj->inputDelayMs / 1000);
+        if (idSec > 60) idSec = 60;
+        uint32_t idMs = idSec * 1000UL;
+        if (idMs != proj->inputDelayMs) {
+            proj->inputDelayMs = idMs;
+            for (auto& pair : _hpController->getInputMap()) {
+                if (pair.second != nullptr) pair.second->setDelay(idMs);
+            }
         }
 
         // Clear RV Fail

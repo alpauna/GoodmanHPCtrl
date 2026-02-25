@@ -28,6 +28,8 @@ class InputPin{
     InputResistorType _pullupType;
     uint16_t _preValue;
     uint16_t _value;
+    bool _confirmedActive;    // Debounced/validated pin state
+    int8_t _pendingState;     // -1=none, 0=pending inactive, 1=pending active
     u_int32_t _changedAtTick;
     u_int32_t _verifiedAtTick;
     u_int32_t _lastActiveTick;
@@ -55,6 +57,10 @@ class InputPin{
     uint32_t lastActiveAt();
     uint32_t lastInactiveAt();
     bool isActive();
+    bool readLiveState();     // Read live GPIO state (bypasses debounce)
+    void setPendingState(int8_t state);  // Set expected state for validation (-1/0/1)
+    void setDelay(uint32_t ms);
+    uint32_t getDelay();
     void changedNow();
     void verifiedNow();
     void activeNow();

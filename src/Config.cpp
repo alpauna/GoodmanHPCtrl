@@ -448,6 +448,8 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.defrostExitTempF = 60.0f;
         proj.heatRuntimeThresholdMs = 5400000;
         proj.softwareDefrost = false;
+        proj.stateValidationMs = 30000;
+        proj.inputDelayMs = 10000;
         Serial.println("Config migration: old lowTemp format detected, will migrate on next save");
     } else {
         proj.lowTempThreshold = heatpump["lowTemp"]["threshold"] | 20.0f;
@@ -461,6 +463,8 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.defrostExitTempF = heatpump["defrost"]["exitTempF"] | 60.0f;
         proj.heatRuntimeThresholdMs = heatpump["defrost"]["heatRuntimeThresholdMs"] | 5400000;
         proj.softwareDefrost = heatpump["defrost"]["active"] | false;
+        proj.stateValidationMs = heatpump["stateValidation"]["delayMs"] | 30000;
+        proj.inputDelayMs = heatpump["inputDelay"]["ms"] | 10000;
     }
     Serial.printf("Read heatpump: lowTemp=%.1fF highSuct=%.1fF rvFail=%d rvSC=%lu cntSC=%lu defrostMin=%lu defrostExit=%.1fF\n",
                   proj.lowTempThreshold, proj.highSuctionTempThreshold, proj.rvFail,
@@ -630,6 +634,10 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     hpDefrost["exitTempF"] = proj.defrostExitTempF;
     hpDefrost["heatRuntimeThresholdMs"] = proj.heatRuntimeThresholdMs;
     hpDefrost["active"] = proj.softwareDefrost;
+    JsonObject hpStateVal = heatpump["stateValidation"].to<JsonObject>();
+    hpStateVal["delayMs"] = proj.stateValidationMs;
+    JsonObject hpInputDelay = heatpump["inputDelay"].to<JsonObject>();
+    hpInputDelay["ms"] = proj.inputDelayMs;
 
     JsonObject tempHistObj = doc["tempHistory"].to<JsonObject>();
     tempHistObj["intervalSec"] = proj.tempHistoryIntervalSec;
@@ -767,6 +775,10 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     hpDefrost["exitTempF"] = proj.defrostExitTempF;
     hpDefrost["heatRuntimeThresholdMs"] = proj.heatRuntimeThresholdMs;
     hpDefrost["active"] = proj.softwareDefrost;
+    JsonObject hpStateValUpd = heatpump["stateValidation"].to<JsonObject>();
+    hpStateValUpd["delayMs"] = proj.stateValidationMs;
+    JsonObject hpInputDelayUpd = heatpump["inputDelay"].to<JsonObject>();
+    hpInputDelayUpd["ms"] = proj.inputDelayMs;
 
     JsonObject tempHistObj = doc["tempHistory"].to<JsonObject>();
     tempHistObj["intervalSec"] = proj.tempHistoryIntervalSec;

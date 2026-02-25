@@ -130,6 +130,12 @@ class GoodmanHP {
     void setHeatRuntimeThresholdMs(uint32_t ms);
     uint32_t getHeatRuntimeThresholdMs() const;
 
+    // State validation timer (prevents rapid state cycling)
+    bool isStateValidating() const;
+    uint32_t getStateValidationRemainingMs() const;
+    void setStateValidationMs(uint32_t ms);
+    uint32_t getStateValidationMs() const;
+
     // Manual override for pin control page
     bool isManualOverrideActive() const;
     uint32_t getManualOverrideRemainingMs() const;
@@ -194,6 +200,12 @@ class GoodmanHP {
     uint32_t _coolTransitionStart;
     bool _coolCntPending;             // Phase 2: RV on, waiting CNT short cycle
     uint32_t _coolCntPendingStart;
+    // State validation timer
+    bool _stateValidationActive;
+    uint32_t _stateValidationStart;
+    uint32_t _stateValidationMs;  // default 30000
+    uint32_t _lastValidationLogTick;
+
     bool _manualOverride;
     uint32_t _manualOverrideStart;
     bool _startupLockout;
@@ -214,6 +226,8 @@ class GoodmanHP {
     void validateOutputStates();
     void startSoftwareDefrost();
     void stopSoftwareDefrost();
+    bool canTransitionToNormalState();
+    void startStateValidation();
 
     uint32_t _lastValidateTick;
 
