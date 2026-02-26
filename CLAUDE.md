@@ -118,8 +118,9 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
     - `addressToString(uint8_t*)` — Convert DeviceAddress to hex string
     - `stringToAddress(String&, uint8_t*)` — Parse hex string to DeviceAddress
     - `printAddress(uint8_t*)` — Print address to Serial in hex format
-    - `discoverSensors(DallasTemperature*, TempSensorMap&, updateCb, changeCb)` — Enumerate OneWire bus and populate TempSensorMap
+    - `discoverSensors(DallasTemperature*, TempSensorMap&, updateCb, changeCb)` — Enumerate OneWire bus and populate TempSensorMap. Logs via Logger (ONEWIRE tag) instead of Serial
     - `getDefaultDescription(uint8_t index)` — Returns sensor name by index (COMPRESSOR_TEMP, SUCTION_TEMP, AMBIENT_TEMP, CONDENSER_TEMP)
+  - **OneWire auto-merge**: After `loadTempConfig()`, `setup()` enumerates the OneWire bus and merges any devices whose address is not already in the config-loaded TempSensorMap. New sensors get the first available default name. Logged as `[INFO] [MAIN] OneWire: new sensor <name> (<addr>)`. If no OneWire devices are found on the bus, a warning is logged: `[WARN] [MAIN] OneWire: no devices found on GPIO <pin>`
 
 ### GPIO Pin Mapping (ESP32-S3)
 

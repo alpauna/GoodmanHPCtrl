@@ -17,7 +17,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 ## Features
 
 - **Relay control** — 4 output pins (FAN, Contactor, W-Heat, Reversing Valve) driven by 4 input signals (Low Pressure Switch, Defrost, Y-Cool, O-Heat)
-- **Temperature monitoring** — 4 OneWire (Dallas DS18B20) sensors (compressor, suction, ambient, condenser) + liquid line thermocouple with auto-detection priority: MAX6675 SPI > MAX31850K OneWire > MCP9600 I2C
+- **Temperature monitoring** — 4 OneWire (Dallas DS18B20) sensors (compressor, suction, ambient, condenser) + liquid line thermocouple with auto-detection priority: MAX6675 SPI > MAX31850K OneWire > MCP9600 I2C. OneWire sensors discovered on the bus are automatically merged with saved config on boot — new devices get default names and appear immediately without a config reset
 - **Remote access** — REST API, WebSocket, and MQTT for monitoring and control
 - **HTTPS/SSL** — Self-signed ECC P-256 certificate on port 443 for secure `/config`, `/update`, and `/ftp` endpoints. Graceful fallback to HTTP-only if no certs found on SD card
 - **Dark/light theme** — Configurable dark/light theme with shared `theme.css` stylesheet. Persisted to SD card config, cached in localStorage for flash-free page loads. Instant preview on config page
