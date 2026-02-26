@@ -1220,6 +1220,7 @@ If the MCP9600 stops responding after flashing firmware that performed bare I2C 
 |---|-------------|----------|----------|
 | [1](bugs/1.md) | Defrost exit turns on CNT+FAN with Y inactive — compressor runs without indoor airflow. `_defrostStartTick=0` causes false 15-min timeout when Y drops during Phase 1/2, triggering exit sequence that turns on compressor without checking Y. Suction temp peaked at 148°F. | Critical | `028e568` |
 | [2](bugs/2.md) | Manual override bypasses startup lockout — CNT can be turned ON 69 seconds after reboot during 180s lockout period. `setManualOverride()` and `setManualOutput()` did not check `_startupLockout`. Short cycle condition had redundant AND making it ineffective after 30s. | High | `6f0871c` |
+| [3](bugs/3.md) | Config-loaded sensors marked `valid=true` on boot with stale cached `last-value: 0`. `checkAmbientTemp()` sees 0.0°F < threshold and triggers false LOW_TEMP protection on every reboot — shutting down CNT, turning on W for ~10s until real OneWire data arrives. 77 false triggers across 263 reboots in first 18-day deployment. | High | `d49d2e8` |
 
 ## Dependencies
 
