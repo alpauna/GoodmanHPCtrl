@@ -432,7 +432,10 @@ void WebHandler::setupRoutes() {
                     const SensorRangeMap& ranges = _config->getSensorRanges();
                     auto rit = ranges.find(m.first);
                     if (rit != ranges.end()) {
-                        json += ",\"range\":{\"min\":" + String(rit->second.min) + ",\"max\":" + String(rit->second.max) + "}";
+                        json += ",\"range\":{\"min\":" + String(rit->second.min) + ",\"max\":" + String(rit->second.max);
+                        if (!isnan(rit->second.thresholdMin)) json += ",\"thresholdMin\":" + String(rit->second.thresholdMin);
+                        if (!isnan(rit->second.thresholdMax)) json += ",\"thresholdMax\":" + String(rit->second.thresholdMax);
+                        json += "}";
                     }
                 }
                 json += "}";
@@ -881,7 +884,10 @@ void WebHandler::setupRoutes() {
         bool first = true;
         for (const auto& kv : _config->getSensorRanges()) {
             if (!first) json += ",";
-            json += "\"" + kv.first + "\":{\"min\":" + String(kv.second.min) + ",\"max\":" + String(kv.second.max) + "}";
+            json += "\"" + kv.first + "\":{\"min\":" + String(kv.second.min) + ",\"max\":" + String(kv.second.max);
+            if (!isnan(kv.second.thresholdMin)) json += ",\"thresholdMin\":" + String(kv.second.thresholdMin);
+            if (!isnan(kv.second.thresholdMax)) json += ",\"thresholdMax\":" + String(kv.second.thresholdMax);
+            json += "}";
             first = false;
         }
         json += "}";
@@ -904,7 +910,9 @@ void WebHandler::setupRoutes() {
                 request->send(400, "application/json", "{\"error\":\"min must be less than max for " + String(kv.key().c_str()) + "\"}");
                 return;
             }
-            ranges[kv.key().c_str()] = {min, max};
+            float tMin = kv.value()["thresholdMin"].isNull() ? NAN : kv.value()["thresholdMin"].as<float>();
+            float tMax = kv.value()["thresholdMax"].isNull() ? NAN : kv.value()["thresholdMax"].as<float>();
+            ranges[kv.key().c_str()] = {min, max, tMin, tMax};
         }
 
         ProjectInfo* proj = _config->getProjectInfo();

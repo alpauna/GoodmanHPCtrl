@@ -544,6 +544,8 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         SensorRange r;
         r.min = kv.value()["min"] | 0.0f;
         r.max = kv.value()["max"] | 100.0f;
+        r.thresholdMin = kv.value()["thresholdMin"].isNull() ? NAN : kv.value()["thresholdMin"].as<float>();
+        r.thresholdMax = kv.value()["thresholdMax"].isNull() ? NAN : kv.value()["thresholdMax"].as<float>();
         _sensorRanges[kv.key().c_str()] = r;
     }
 
@@ -587,7 +589,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     };
     for (auto& mp : config) {
         if (_sensorRanges.count(mp.first) == 0) {
-            SensorRange r = {0, 100};  // generic default
+            SensorRange r = {0, 100, NAN, NAN};  // generic default, no thresholds
             for (const auto& dr : defaultRanges) {
                 if (mp.first == dr.name) {
                     r.min = dr.min;
@@ -737,6 +739,8 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
         JsonObject r = rangesObj[kv.first].to<JsonObject>();
         r["min"] = kv.second.min;
         r["max"] = kv.second.max;
+        if (!isnan(kv.second.thresholdMin)) r["thresholdMin"] = kv.second.thresholdMin;
+        if (!isnan(kv.second.thresholdMax)) r["thresholdMax"] = kv.second.thresholdMax;
     }
 
     String output;
@@ -883,6 +887,8 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
         JsonObject r = rangesUpd[kv.first].to<JsonObject>();
         r["min"] = kv.second.min;
         r["max"] = kv.second.max;
+        if (!isnan(kv.second.thresholdMin)) r["thresholdMin"] = kv.second.thresholdMin;
+        if (!isnan(kv.second.thresholdMax)) r["thresholdMax"] = kv.second.thresholdMax;
     }
 
     // Write back

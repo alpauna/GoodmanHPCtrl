@@ -18,6 +18,8 @@ typedef std::map<String, I2CDeviceInfo> I2CDeviceMap;
 struct SensorRange {
     float min;
     float max;
+    float thresholdMin;  // NAN = not set
+    float thresholdMax;  // NAN = not set
 };
 typedef std::map<String, SensorRange> SensorRangeMap;
 

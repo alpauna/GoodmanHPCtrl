@@ -167,7 +167,7 @@ button:hover{background:#45a049;}
 <button type='submit'>Save</button>
 </form>
 <fieldset id='s-ranges'><legend>Sensor Display Ranges <span class='tag tag-live'>live</span></legend>
-<p style='color:var(--text-secondary);font-size:13px;margin:0 0 10px;'>Min/max values for arc gauge displays (&deg;F)</p>
+<p style='color:var(--text-secondary);font-size:13px;margin:0 0 10px;'>Arc gauge range and error thresholds (&deg;F). Leave threshold blank for no limit.</p>
 <div id='sensorRanges'>Loading...</div>
 <button type='button' class='btn-sm' onclick='saveRanges()'>Save Ranges</button>
 <span id='rangeStatus' style='margin-left:8px;font-size:13px;'></span>
@@ -312,13 +312,29 @@ fetch('/sensors/ranges').then(r=>r.json()).then(d=>{
 var c=document.getElementById('sensorRanges');c.innerHTML='';
 var names=Object.keys(d).sort();
 if(names.length===0){c.textContent='No sensors configured';return;}
+// Header row
+var hdr=document.createElement('div');hdr.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12px;color:var(--text-secondary);';
+var h1=document.createElement('span');h1.style.cssText='min-width:140px;';h1.textContent='Sensor';
+var h2=document.createElement('span');h2.style.cssText='width:80px;text-align:center;';h2.textContent='Min';
+var h3=document.createElement('span');h3.style.cssText='width:20px;';
+var h4=document.createElement('span');h4.style.cssText='width:80px;text-align:center;';h4.textContent='Max';
+var h5=document.createElement('span');h5.style.cssText='width:12px;';
+var h6=document.createElement('span');h6.style.cssText='width:80px;text-align:center;';h6.textContent='Thresh Min';
+var h7=document.createElement('span');h7.style.cssText='width:80px;text-align:center;';h7.textContent='Thresh Max';
+hdr.appendChild(h1);hdr.appendChild(h2);hdr.appendChild(h3);hdr.appendChild(h4);hdr.appendChild(h5);hdr.appendChild(h6);hdr.appendChild(h7);
+c.appendChild(hdr);
 names.forEach(function(n){
 var row=document.createElement('div');row.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px;';
 var lbl=document.createElement('span');lbl.style.cssText='min-width:140px;font-size:13px;color:var(--text);';lbl.textContent=n;
 var mn=document.createElement('input');mn.type='number';mn.step='1';mn.style.cssText='width:80px;padding:6px;';mn.id='range_min_'+n;mn.value=d[n].min;
-var sep=document.createElement('span');sep.textContent='to';sep.style.cssText='color:var(--text-secondary);font-size:13px;';
+var sep=document.createElement('span');sep.textContent='to';sep.style.cssText='color:var(--text-secondary);font-size:13px;width:20px;text-align:center;';
 var mx=document.createElement('input');mx.type='number';mx.step='1';mx.style.cssText='width:80px;padding:6px;';mx.id='range_max_'+n;mx.value=d[n].max;
-row.appendChild(lbl);row.appendChild(mn);row.appendChild(sep);row.appendChild(mx);
+var gap=document.createElement('span');gap.style.cssText='width:12px;';
+var tMn=document.createElement('input');tMn.type='number';tMn.step='1';tMn.style.cssText='width:80px;padding:6px;';tMn.id='range_tmin_'+n;tMn.placeholder='none';
+if(d[n].thresholdMin!=null)tMn.value=d[n].thresholdMin;
+var tMx=document.createElement('input');tMx.type='number';tMx.step='1';tMx.style.cssText='width:80px;padding:6px;';tMx.id='range_tmax_'+n;tMx.placeholder='none';
+if(d[n].thresholdMax!=null)tMx.value=d[n].thresholdMax;
+row.appendChild(lbl);row.appendChild(mn);row.appendChild(sep);row.appendChild(mx);row.appendChild(gap);row.appendChild(tMn);row.appendChild(tMx);
 c.appendChild(row);
 });
 }).catch(()=>{document.getElementById('sensorRanges').textContent='Error loading ranges';});
@@ -332,7 +348,12 @@ var n=mn.id.replace('range_min_','');
 var mx=document.getElementById('range_max_'+n);
 var minV=parseFloat(mn.value),maxV=parseFloat(mx.value);
 if(isNaN(minV)||isNaN(maxV)||minV>=maxV){err=true;return;}
-d[n]={min:minV,max:maxV};
+var obj={min:minV,max:maxV};
+var tMn=document.getElementById('range_tmin_'+n);
+var tMx=document.getElementById('range_tmax_'+n);
+if(tMn.value!=='')obj.thresholdMin=parseFloat(tMn.value);
+if(tMx.value!=='')obj.thresholdMax=parseFloat(tMx.value);
+d[n]=obj;
 });
 var st=document.getElementById('rangeStatus');
 if(err){st.textContent='Error: min must be less than max';st.style.color='#e74c3c';return;}
