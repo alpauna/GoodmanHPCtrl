@@ -15,6 +15,12 @@ struct I2CDeviceInfo {
 };
 typedef std::map<String, I2CDeviceInfo> I2CDeviceMap;
 
+struct SensorRange {
+    float min;
+    float max;
+};
+typedef std::map<String, SensorRange> SensorRangeMap;
+
 struct ProjectInfo {
     String name;
     String createdOnDate;
@@ -128,6 +134,10 @@ class Config {
     const I2CDeviceMap& getI2CDevices() const { return _i2cDevices; }
     void setI2CDevice(const String& addr, const String& driver, const String& role);
 
+    // Sensor display ranges (min/max for arc gauges)
+    SensorRangeMap& getSensorRanges() { return _sensorRanges; }
+    const SensorRangeMap& getSensorRanges() const { return _sensorRanges; }
+
     // Callback setter for temp sensor discovery
     typedef void (*TempSensorDiscoveryCallback)(TempSensorMap& config);
     void setTempSensorDiscoveryCallback(TempSensorDiscoveryCallback cb) { _tempDiscoveryCb = cb; }
@@ -152,6 +162,9 @@ class Config {
 
     // I2C device assignments (persisted in sensors.i2c JSON section)
     I2CDeviceMap _i2cDevices;
+
+    // Sensor display ranges (persisted in sensors.ranges JSON section)
+    SensorRangeMap _sensorRanges;
 
     // ProjectInfo pointer for WebHandler access
     ProjectInfo* _proj;

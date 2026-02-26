@@ -537,6 +537,16 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         }
     }
 
+    // Load sensor display ranges
+    _sensorRanges.clear();
+    JsonObject ranges = doc["sensors"]["ranges"];
+    for (JsonPair kv : ranges) {
+        SensorRange r;
+        r.min = kv.value()["min"] | 0.0f;
+        r.max = kv.value()["max"] | 100.0f;
+        _sensorRanges[kv.key().c_str()] = r;
+    }
+
     clearConfig(config);
     for (JsonPair sensors_temp_item : doc["sensors"]["temp"].as<JsonObject>()) {
         const char* key = sensors_temp_item.key().c_str();
@@ -565,6 +575,30 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
              sensor->getValue());
     }
     _configFile.close();
+
+    // Apply default sensor ranges for any sensor missing a range entry
+    struct DefaultRange { const char* name; float min; float max; };
+    static const DefaultRange defaultRanges[] = {
+        {"COMPRESSOR_TEMP", 50, 300},
+        {"SUCTION_TEMP", 20, 80},
+        {"AMBIENT_TEMP", -20, 120},
+        {"CONDENSER_TEMP", 30, 150},
+        {"LIQUID_TEMP", 60, 250}
+    };
+    for (auto& mp : config) {
+        if (_sensorRanges.count(mp.first) == 0) {
+            SensorRange r = {0, 100};  // generic default
+            for (const auto& dr : defaultRanges) {
+                if (mp.first == dr.name) {
+                    r.min = dr.min;
+                    r.max = dr.max;
+                    break;
+                }
+            }
+            _sensorRanges[mp.first] = r;
+        }
+    }
+
     return true;
 }
 
@@ -696,6 +730,14 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     max6675Obj["cs"] = proj.max6675Cs;
     max6675Obj["do"] = proj.max6675Do;
     max6675Obj["enabled"] = proj.max6675Enabled;
+
+    // Write sensor display ranges
+    JsonObject rangesObj = sensors["ranges"].to<JsonObject>();
+    for (auto& kv : _sensorRanges) {
+        JsonObject r = rangesObj[kv.first].to<JsonObject>();
+        r["min"] = kv.second.min;
+        r["max"] = kv.second.max;
+    }
 
     String output;
     serializeJson(doc, _configFile);
@@ -834,6 +876,14 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     max6675Upd["cs"] = proj.max6675Cs;
     max6675Upd["do"] = proj.max6675Do;
     max6675Upd["enabled"] = proj.max6675Enabled;
+
+    // Write sensor display ranges
+    JsonObject rangesUpd = sensors["ranges"].to<JsonObject>();
+    for (auto& kv : _sensorRanges) {
+        JsonObject r = rangesUpd[kv.first].to<JsonObject>();
+        r["min"] = kv.second.min;
+        r["max"] = kv.second.max;
+    }
 
     // Write back
     file = SD.open(filename, FILE_WRITE);

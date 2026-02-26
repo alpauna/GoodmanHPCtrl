@@ -56,7 +56,7 @@ button:hover{background:#45a049;}
 <a href='#' class='reboot' onclick="if(confirm('Reboot device?')){var x=new XMLHttpRequest();x.open('POST','/reboot');x.onload=function(){alert(x.status===200?'Rebooting...':'Failed')};x.send()};return false">Reboot</a>
 </div></nav>
 <div class='sec-nav'><button class='sec-burger' onclick='this.nextElementSibling.classList.toggle("open")'>&#9776;</button><div class='sec-drop'>
-<a href='#s-sys'>System</a><a href='#s-look'>Appearance</a><a href='#s-auth'>Password</a><a href='#s-session'>Session</a><a href='#s-wifi'>WiFi</a><a href='#s-mqtt'>MQTT</a><a href='#s-tz'>Timezone</a><a href='#s-hp'>Heatpump</a><a href='#s-df'>Defrost</a><a href='#s-poll'>Polling</a><a href='#s-disp'>Display</a><a href='#s-tc'>MAX6675</a><a href='#s-log'>Logging</a><a href='#s-ftppw'>FTP Password</a><a href='#s-ftp'>FTP</a><a href='#s-sd'>SD Card</a>
+<a href='#s-sys'>System</a><a href='#s-look'>Appearance</a><a href='#s-auth'>Password</a><a href='#s-session'>Session</a><a href='#s-wifi'>WiFi</a><a href='#s-mqtt'>MQTT</a><a href='#s-tz'>Timezone</a><a href='#s-hp'>Heatpump</a><a href='#s-df'>Defrost</a><a href='#s-poll'>Polling</a><a href='#s-disp'>Display</a><a href='#s-tc'>MAX6675</a><a href='#s-log'>Logging</a><a href='#s-ranges'>Ranges</a><a href='#s-ftppw'>FTP Password</a><a href='#s-ftp'>FTP</a><a href='#s-sd'>SD Card</a>
 </div></div>
 <div class='container'>
 <h1>Configuration</h1>
@@ -166,6 +166,12 @@ button:hover{background:#45a049;}
 </fieldset>
 <button type='submit'>Save</button>
 </form>
+<fieldset id='s-ranges'><legend>Sensor Display Ranges <span class='tag tag-live'>live</span></legend>
+<p style='color:var(--text-secondary);font-size:13px;margin:0 0 10px;'>Min/max values for arc gauge displays (&deg;F)</p>
+<div id='sensorRanges'>Loading...</div>
+<button type='button' class='btn-sm' onclick='saveRanges()'>Save Ranges</button>
+<span id='rangeStatus' style='margin-left:8px;font-size:13px;'></span>
+</fieldset>
 <fieldset id='s-ftp'><legend>FTP Server</legend>
 <div id='ftpStatus'>Loading...</div>
 <button class='btn-sm' onclick='ftpControl(10)'>10 min</button>
@@ -301,6 +307,40 @@ el.textContent='Type: '+d.type+' | Total: '+d.totalMB+' MB | Used: '+d.usedMB+' 
 }).catch(()=>{document.getElementById('sdInfo').textContent='Error loading SD info';});
 }
 loadSDInfo();
+function loadRanges(){
+fetch('/sensors/ranges').then(r=>r.json()).then(d=>{
+var c=document.getElementById('sensorRanges');c.innerHTML='';
+var names=Object.keys(d).sort();
+if(names.length===0){c.textContent='No sensors configured';return;}
+names.forEach(function(n){
+var row=document.createElement('div');row.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px;';
+var lbl=document.createElement('span');lbl.style.cssText='min-width:140px;font-size:13px;color:var(--text);';lbl.textContent=n;
+var mn=document.createElement('input');mn.type='number';mn.step='1';mn.style.cssText='width:80px;padding:6px;';mn.id='range_min_'+n;mn.value=d[n].min;
+var sep=document.createElement('span');sep.textContent='to';sep.style.cssText='color:var(--text-secondary);font-size:13px;';
+var mx=document.createElement('input');mx.type='number';mx.step='1';mx.style.cssText='width:80px;padding:6px;';mx.id='range_max_'+n;mx.value=d[n].max;
+row.appendChild(lbl);row.appendChild(mn);row.appendChild(sep);row.appendChild(mx);
+c.appendChild(row);
+});
+}).catch(()=>{document.getElementById('sensorRanges').textContent='Error loading ranges';});
+}
+loadRanges();
+function saveRanges(){
+var inputs=document.querySelectorAll('[id^=range_min_]');
+var d={};var err=false;
+inputs.forEach(function(mn){
+var n=mn.id.replace('range_min_','');
+var mx=document.getElementById('range_max_'+n);
+var minV=parseFloat(mn.value),maxV=parseFloat(mx.value);
+if(isNaN(minV)||isNaN(maxV)||minV>=maxV){err=true;return;}
+d[n]={min:minV,max:maxV};
+});
+var st=document.getElementById('rangeStatus');
+if(err){st.textContent='Error: min must be less than max';st.style.color='#e74c3c';return;}
+fetch('/sensors/ranges',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r=>r.json()).then(r=>{
+st.textContent=r.message||r.error||'Saved';
+st.style.color=r.error?'#e74c3c':'#27ae60';
+}).catch(e=>{st.textContent='Error: '+e;st.style.color='#e74c3c';});
+}
 var _maxPinIds=['max6675Clk','max6675Cs','max6675Do'];
 var _maxPins=[3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,38,39,40,41,42,43,44,45,46,47,48];
 var _jtagMap={39:'TCK',40:'TDO',41:'TDI',42:'TMS'};

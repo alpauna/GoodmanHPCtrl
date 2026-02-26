@@ -428,6 +428,13 @@ void WebHandler::setupRoutes() {
                 json += ",\"value\":" + String(m.second->getValue());
                 json += ",\"previous\":" + String(m.second->getPrevious());
                 json += ",\"valid\":\"" + String(m.second->isValid() ? "true" : "false") + "\"";
+                if (_config) {
+                    const SensorRangeMap& ranges = _config->getSensorRanges();
+                    auto rit = ranges.find(m.first);
+                    if (rit != ranges.end()) {
+                        json += ",\"range\":{\"min\":" + String(rit->second.min) + ",\"max\":" + String(rit->second.max) + "}";
+                    }
+                }
                 json += "}";
             }
             firstTime = false;
@@ -863,6 +870,53 @@ void WebHandler::setupRoutes() {
         request->send(400, "application/json", "{\"error\":\"Invalid request\"}");
     });
     _server.addHandler(pinsPostHandler);
+
+    // Sensor display ranges (for arc gauge displays)
+    _server.on("/sensors/ranges", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!_config) {
+            request->send(500, "application/json", "{\"error\":\"Config not available\"}");
+            return;
+        }
+        String json = "{";
+        bool first = true;
+        for (const auto& kv : _config->getSensorRanges()) {
+            if (!first) json += ",";
+            json += "\"" + kv.first + "\":{\"min\":" + String(kv.second.min) + ",\"max\":" + String(kv.second.max) + "}";
+            first = false;
+        }
+        json += "}";
+        request->send(200, "application/json", json);
+    });
+
+    auto* sensorRangesPostHandler = new AsyncCallbackJsonWebHandler("/sensors/ranges", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+        if (!checkAuth(request)) return;
+        if (!_config) {
+            request->send(500, "application/json", "{\"error\":\"Config not available\"}");
+            return;
+        }
+        JsonObject data = json.as<JsonObject>();
+        SensorRangeMap& ranges = _config->getSensorRanges();
+
+        for (JsonPair kv : data) {
+            float min = kv.value()["min"] | 0.0f;
+            float max = kv.value()["max"] | 100.0f;
+            if (min >= max) {
+                request->send(400, "application/json", "{\"error\":\"min must be less than max for " + String(kv.key().c_str()) + "\"}");
+                return;
+            }
+            ranges[kv.key().c_str()] = {min, max};
+        }
+
+        ProjectInfo* proj = _config->getProjectInfo();
+        TempSensorMap& tempMap = _hpController->getTempSensorMap();
+        bool saved = _config->updateConfig("/config.txt", tempMap, *proj);
+        if (saved) {
+            request->send(200, "application/json", "{\"message\":\"Ranges updated\"}");
+        } else {
+            request->send(500, "application/json", "{\"error\":\"Failed to save config\"}");
+        }
+    });
+    _server.addHandler(sensorRangesPostHandler);
 
     // Sensor assignment endpoint
     auto* sensorAssignHandler = new AsyncCallbackJsonWebHandler("/sensors/assign", [this](AsyncWebServerRequest *request, JsonVariant &json) {
