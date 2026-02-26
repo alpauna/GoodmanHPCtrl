@@ -1,4 +1,5 @@
 #include "TempSensor.h"
+#include "Logger.h"
 #include <Wire.h>
 
 TempSensor::TempSensor()
@@ -218,12 +219,13 @@ void TempSensor::discoverSensors(DallasTemperature* sensors, TempSensorMap& temp
         return;
     }
 
-    Serial.print("Locating devices...");
     sensors->begin();
-    Serial.print("Found ");
     uint8_t oneWCount = sensors->getDeviceCount();
-    Serial.print(oneWCount, DEC);
-    Serial.println(" devices.");
+    if (oneWCount == 0) {
+        Log.warn("ONEWIRE", "No OneWire devices discovered");
+        return;
+    }
+    Log.info("ONEWIRE", "Discovered %d OneWire device(s)", oneWCount);
 
     for (uint8_t i = 0; i < oneWCount; i++) {
         String description = getDefaultDescription(i);
@@ -241,7 +243,7 @@ void TempSensor::discoverSensors(DallasTemperature* sensors, TempSensorMap& temp
         }
 
         if (!sensors->getAddress(sensor->getDeviceAddress(), i)) {
-            Serial.println("Unable to find address for Device");
+            Log.warn("ONEWIRE", "Unable to find address for device %d", i);
         }
 
         uint8_t family = sensor->getDeviceAddress()[0];
@@ -249,7 +251,7 @@ void TempSensor::discoverSensors(DallasTemperature* sensors, TempSensorMap& temp
                               (family == 0x28) ? "DS18B20" :
                               (family == 0x22) ? "DS1822" :
                               (family == 0x10) ? "DS18S20" : "unknown";
-        Serial.printf("Device %d: %s (%s) Address: %s\r\n",
+        Log.info("ONEWIRE", "Device %d: %s (%s) addr=%s",
             i, sensor->getDescription().c_str(), devType,
             addressToString(sensor->getDeviceAddress()).c_str());
     }

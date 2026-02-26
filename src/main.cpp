@@ -612,6 +612,12 @@ void setup() {
   acc_data_all = (unsigned char *) ps_malloc (n_elements * sizeof (unsigned char));
   sprintf((char *)acc_data_all, "Test %d", millis());
   sensors.begin();
+  uint8_t oneWireCount = sensors.getDeviceCount();
+  if (oneWireCount > 0) {
+    Log.info("MAIN", "OneWire: found %d device(s) on GPIO %d", oneWireCount, ONE_WIRE_BUS);
+  } else {
+    Log.warn("MAIN", "OneWire: no devices found on GPIO %d", ONE_WIRE_BUS);
+  }
 
   // Set XOR obfuscation key (used as fallback when eFuse HMAC is not available)
   // Use a fixed key from secrets.ini so passwords survive OTA updates
@@ -634,6 +640,50 @@ void setup() {
     TempSensorMap& tempSensors = hpController.getTempSensorMap();
     if(config.openConfigFile(_filename, tempSensors, proj)){
       config.loadTempConfig(_filename, tempSensors, proj);
+
+      // Merge newly discovered OneWire sensors not already in config
+      {
+        uint8_t busCount = sensors.getDeviceCount();
+        uint8_t added = 0;
+        for (uint8_t i = 0; i < busCount; i++) {
+          DeviceAddress busAddr;
+          if (!sensors.getAddress(busAddr, i)) continue;
+          String busAddrStr = TempSensor::addressToString(busAddr);
+
+          // Check if this address already exists in the map
+          bool found = false;
+          for (auto& pair : tempSensors) {
+            if (pair.second && TempSensor::addressToString(pair.second->getDeviceAddress()) == busAddrStr) {
+              found = true;
+              break;
+            }
+          }
+          if (found) continue;
+
+          // Find first unused default name
+          String name;
+          for (uint8_t idx = 0; idx < 20; idx++) {
+            String candidate = TempSensor::getDefaultDescription(idx);
+            if (tempSensors.count(candidate) == 0) {
+              name = candidate;
+              break;
+            }
+          }
+          if (name.isEmpty()) name = "SENSOR_" + String(i);
+
+          TempSensor* sensor = new TempSensor(name);
+          sensor->setDeviceAddress(busAddr);
+          sensor->setUpdateCallback(tempSensorUpdateCallback);
+          sensor->setChangeCallback(tempSensorChangeCallback);
+          tempSensors[name] = sensor;
+          added++;
+          Log.info("MAIN", "OneWire: new sensor %s (%s)", name.c_str(), busAddrStr.c_str());
+        }
+        if (added > 0) {
+          Log.info("MAIN", "OneWire: merged %d new sensor(s) with config", added);
+        }
+      }
+
       // Update global variables from config
       _WIFI_SSID = config.getWifiSSID();
       _WIFI_PASSWORD = config.getWifiPassword();
