@@ -567,7 +567,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
 
         sensor->setValue(last_value);
         sensor->setPrevious(sensor->getValue());
-        sensor->setValid(true);
+        sensor->setValid(false);  // Not valid until first real bus read
         sensor->setChangeCallback(tempSensorChangeCallback);
         sensor->setUpdateCallback(tempSensorUpdateCallback);
 

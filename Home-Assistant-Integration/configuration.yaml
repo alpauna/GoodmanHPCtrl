@@ -1,0 +1,219 @@
+# Home Assistant MQTT Configuration for Goodman Heat Pump Controller
+#
+# Copy this into your HA configuration.yaml (or use !include).
+# Adjust "goodman" prefix if your device uses a different mqttPrefix.
+# After adding, restart HA or reload MQTT entities from Developer Tools.
+
+mqtt:
+  # --- Temperature Sensors ---
+  sensor:
+    - name: "Goodman Compressor Temp"
+      unique_id: "goodman_compressor_temp"
+      state_topic: "goodman/temps"
+      value_template: "{{ value_json.COMPRESSOR_TEMP | default('') }}"
+      unit_of_measurement: "°F"
+      device_class: temperature
+      state_class: measurement
+
+    - name: "Goodman Suction Temp"
+      unique_id: "goodman_suction_temp"
+      state_topic: "goodman/temps"
+      value_template: "{{ value_json.SUCTION_TEMP | default('') }}"
+      unit_of_measurement: "°F"
+      device_class: temperature
+      state_class: measurement
+
+    - name: "Goodman Ambient Temp"
+      unique_id: "goodman_ambient_temp"
+      state_topic: "goodman/temps"
+      value_template: "{{ value_json.AMBIENT_TEMP | default('') }}"
+      unit_of_measurement: "°F"
+      device_class: temperature
+      state_class: measurement
+
+    - name: "Goodman Condenser Temp"
+      unique_id: "goodman_condenser_temp"
+      state_topic: "goodman/temps"
+      value_template: "{{ value_json.CONDENSER_TEMP | default('') }}"
+      unit_of_measurement: "°F"
+      device_class: temperature
+      state_class: measurement
+
+    - name: "Goodman Liquid Line Temp"
+      unique_id: "goodman_liquid_temp"
+      state_topic: "goodman/temps"
+      value_template: "{{ value_json.LIQUID_TEMP | default('') }}"
+      unit_of_measurement: "°F"
+      device_class: temperature
+      state_class: measurement
+
+    # --- Controller State ---
+    - name: "Goodman State"
+      unique_id: "goodman_state"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.state }}"
+      icon: mdi:hvac
+
+    # --- Heat Runtime ---
+    - name: "Goodman Heat Runtime"
+      unique_id: "goodman_heat_runtime"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.heatRuntimeMin }}"
+      unit_of_measurement: "min"
+      device_class: duration
+      state_class: measurement
+      icon: mdi:timer-outline
+
+  # --- Input Pins ---
+  binary_sensor:
+    - name: "Goodman Y Input"
+      unique_id: "goodman_input_y"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.inputs.Y }}"
+      payload_on: "True"
+      payload_off: "False"
+      icon: mdi:thermostat
+
+    - name: "Goodman O Input"
+      unique_id: "goodman_input_o"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.inputs.O }}"
+      payload_on: "True"
+      payload_off: "False"
+      icon: mdi:snowflake
+
+    - name: "Goodman LPS Input"
+      unique_id: "goodman_input_lps"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.inputs.LPS }}"
+      payload_on: "True"
+      payload_off: "False"
+      icon: mdi:gauge-low
+
+    - name: "Goodman DFT Input"
+      unique_id: "goodman_input_dft"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.inputs.DFT }}"
+      payload_on: "True"
+      payload_off: "False"
+      icon: mdi:snowflake-melt
+
+    # --- Output Relays ---
+    - name: "Goodman Fan Relay"
+      unique_id: "goodman_output_fan"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.outputs.FAN }}"
+      payload_on: "True"
+      payload_off: "False"
+      device_class: running
+      icon: mdi:fan
+
+    - name: "Goodman Contactor Relay"
+      unique_id: "goodman_output_cnt"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.outputs.CNT }}"
+      payload_on: "True"
+      payload_off: "False"
+      device_class: running
+      icon: mdi:electric-switch
+
+    - name: "Goodman W Heat Relay"
+      unique_id: "goodman_output_w"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.outputs.W }}"
+      payload_on: "True"
+      payload_off: "False"
+      device_class: running
+      icon: mdi:radiator
+
+    - name: "Goodman Reversing Valve"
+      unique_id: "goodman_output_rv"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.outputs.RV }}"
+      payload_on: "True"
+      payload_off: "False"
+      device_class: running
+      icon: mdi:valve
+
+    - name: "Goodman Aux Heat Relay"
+      unique_id: "goodman_output_aux"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.outputs.AUX }}"
+      payload_on: "True"
+      payload_off: "False"
+      device_class: running
+      icon: mdi:radiator
+
+    # --- Fault Flags ---
+    - name: "Goodman LPS Fault"
+      unique_id: "goodman_lps_fault"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.lpsFault }}"
+      payload_on: "True"
+      payload_off: "False"
+      device_class: problem
+
+    - name: "Goodman Compressor Over Temp"
+      unique_id: "goodman_compressor_overtemp"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.compressorOverTemp }}"
+      payload_on: "True"
+      payload_off: "False"
+      device_class: problem
+
+    - name: "Goodman Suction Low Temp"
+      unique_id: "goodman_suction_low_temp"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.suctionLowTemp }}"
+      payload_on: "True"
+      payload_off: "False"
+      device_class: problem
+
+    - name: "Goodman RV Fail"
+      unique_id: "goodman_rv_fail"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.rvFail }}"
+      payload_on: "True"
+      payload_off: "False"
+      device_class: problem
+
+    - name: "Goodman High Suction Temp"
+      unique_id: "goodman_high_suction_temp"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.highSuctionTemp }}"
+      payload_on: "True"
+      payload_off: "False"
+      device_class: problem
+
+    # --- Protection/Status Flags ---
+    - name: "Goodman Low Temp Protection"
+      unique_id: "goodman_low_temp"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.lowTemp }}"
+      payload_on: "True"
+      payload_off: "False"
+      icon: mdi:thermometer-alert
+
+    - name: "Goodman Defrost Active"
+      unique_id: "goodman_defrost"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.defrost }}"
+      payload_on: "True"
+      payload_off: "False"
+      icon: mdi:snowflake-melt
+
+    - name: "Goodman Manual Override"
+      unique_id: "goodman_manual_override"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.manualOverride }}"
+      payload_on: "True"
+      payload_off: "False"
+      icon: mdi:hand-back-right
+
+    - name: "Goodman State Validating"
+      unique_id: "goodman_state_validating"
+      state_topic: "goodman/state"
+      value_template: "{{ value_json.stateValidating }}"
+      payload_on: "True"
+      payload_off: "False"
+      icon: mdi:timer-sand
