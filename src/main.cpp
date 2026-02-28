@@ -23,6 +23,7 @@
 #include "DisplayManager.h"
 #include "OtaUtils.h"
 #include <max6675.h>
+#include <Adafruit_ADS1X15.h>
 
 extern const char compile_date[] = __DATE__ " " __TIME__;
 IPAddress _MQTT_HOST_DEFAULT = IPAddress(192, 168, 0, 46);
@@ -182,6 +183,10 @@ DallasTemperature sensors(&oneWire);
 // MCP9600 I2C thermocouple amplifier for LIQUID_TEMP
 Adafruit_MCP9600 mcp9600;
 
+// ADS1115 16-bit I2C ADC for CT clamp current sensing
+Adafruit_ADS1115 ads1115;
+bool ads1115Ready = false;
+
 // MAX6675 SPI thermocouple (software bit-bang SPI, no bus conflict)
 MAX6675* max6675Ptr = nullptr;
 
@@ -228,7 +233,13 @@ ProjectInfo proj = {
   "Goodman HP",       // systemName: default system name
   "goodman",          // mqttPrefix: default MQTT topic prefix
   0,                  // sessionTimeoutMinutes: disabled by default
-  2                   // pollIntervalSec: 2 second default
+  2,                  // pollIntervalSec: 2 second default
+  0.0f,               // compressorOvercurrentAmps: disabled
+  0.0f,               // fanOvercurrentAmps: disabled
+  5000,               // overcurrentDelayMs: 5s default
+  0.0f,               // lockedRotorThreshold: disabled
+  5000,               // lockedRotorTimeoutMs: 5s default
+  false               // lockedRotorFault: not latched
 };
 
 
@@ -273,6 +284,10 @@ void onLogTempsCSV();
 void cleanOldTempFiles(int maxAgeDays);
 Task tLogTempsCSV(2 * TASK_MINUTE, TASK_FOREVER, &onLogTempsCSV, &ts, false);
 static char _tempsCsvDate[12] = "";
+
+// Read current sensors every 1 second
+void onReadCurrent();
+Task tReadCurrent(TASK_SECOND, TASK_FOREVER, &onReadCurrent, &ts, false);
 
 // CPU load calculation every 1 second
 void onCalcCpuLoad();
@@ -580,11 +595,20 @@ void setup() {
     Serial.println("I2C bus recovery attempted (16 clock pulses)");
   }
 
-  // Scan I2C bus for devices — skip 0x67 (MCP9600) to avoid crashing it
-  uint8_t i2cCount = mcp9600Ready ? 1 : 0;
+  // Initialize ADS1115 ADC for CT clamp current sensing at 0x48
+  if (ads1115.begin(0x48)) {
+    ads1115Ready = true;
+    Serial.println("ADS1115 ADC initialized at 0x48");
+  } else {
+    Serial.println("ADS1115 not found at 0x48, current sensing unavailable");
+  }
+
+  // Scan I2C bus for devices — skip 0x67 (MCP9600) and 0x48 (ADS1115) to avoid re-probing
+  uint8_t i2cCount = (mcp9600Ready ? 1 : 0) + (ads1115Ready ? 1 : 0);
   Serial.println("I2C scan starting...");
   for (uint8_t addr = 1; addr < 127; addr++) {
     if (addr == 0x67) continue;  // MCP9600: bare probe crashes some chips
+    if (addr == 0x48) continue;  // ADS1115: already probed via driver
     Wire.beginTransmission(addr);
     if (Wire.endTransmission() == 0) {
       Serial.printf("I2C device found at 0x%02X\r\n", addr);
@@ -592,6 +616,7 @@ void setup() {
     }
   }
   if (mcp9600Ready) Serial.println("I2C device found at 0x67 (MCP9600, probed via driver)");
+  if (ads1115Ready) Serial.println("I2C device found at 0x48 (ADS1115, probed via driver)");
   if (i2cCount == 0) {
     Serial.println("I2C scan: no devices found");
   } else {
@@ -958,6 +983,29 @@ void setup() {
     });
     hpController.begin();
 
+    // Add current sensors if ADS1115 found
+    if (ads1115Ready) {
+      hpController.setADS1115(&ads1115);
+      auto* compCurrent = new CurrentSensor("COMPRESSOR_CURRENT", 0, 30.0f);
+      auto* fanCurrent = new CurrentSensor("FAN_CURRENT", 1, 30.0f);
+      compCurrent->setOvercurrentThreshold(proj.compressorOvercurrentAmps);
+      compCurrent->setOvercurrentDelayMs(proj.overcurrentDelayMs);
+      compCurrent->setLockedRotorThreshold(proj.lockedRotorThreshold);
+      compCurrent->setLockedRotorTimeoutMs(proj.lockedRotorTimeoutMs);
+      fanCurrent->setOvercurrentThreshold(proj.fanOvercurrentAmps);
+      fanCurrent->setOvercurrentDelayMs(proj.overcurrentDelayMs);
+      hpController.addCurrentSensor("COMPRESSOR_CURRENT", compCurrent);
+      hpController.addCurrentSensor("FAN_CURRENT", fanCurrent);
+      // Restore latched locked rotor from config
+      if (proj.lockedRotorFault) {
+        compCurrent->notifyCntActivated();  // Set up tracking state
+        // Force the latch — readRMS+checkProtections will confirm
+        Log.warn("MAIN", "Restored latched locked rotor fault from config");
+      }
+      tReadCurrent.enable();
+      Log.info("MAIN", "Current sensors added (ADS1115 at 0x48)");
+    }
+
     tRuntime.enable();
     _tGetInputs.enable();
     tSaveRuntime.enable();
@@ -1011,19 +1059,22 @@ void onSaveRuntime(){
   uint32_t runtimeMs = hpController.getHeatRuntimeMs();
   bool rvFail = hpController.isRvFailActive();
   bool swDefrost = hpController.isSoftwareDefrostActive();
+  bool lockedRotor = hpController.isLockedRotorActive();
   bool runtimeChanged = (runtimeMs != proj.heatRuntimeAccumulatedMs);
   bool rvFailChanged = (rvFail != proj.rvFail);
   bool defrostChanged = (swDefrost != proj.softwareDefrost);
+  bool lockedRotorChanged = (lockedRotor != proj.lockedRotorFault);
 
   if (runtimeChanged) proj.heatRuntimeAccumulatedMs = runtimeMs;
   if (rvFailChanged) proj.rvFail = rvFail;
   if (defrostChanged) proj.softwareDefrost = swDefrost;
+  if (lockedRotorChanged) proj.lockedRotorFault = lockedRotor;
 
-  if (rvFailChanged || defrostChanged) {
-    // rvFail and softwareDefrost are in heatpump section — need full config update
+  if (rvFailChanged || defrostChanged || lockedRotorChanged) {
+    // rvFail, softwareDefrost, lockedRotorFault are in heatpump section — need full config update
     TempSensorMap& tempSensors = hpController.getTempSensorMap();
     if (config.updateConfig(_filename, tempSensors, proj)) {
-      Log.info("MAIN", "Config saved (rvFail=%d, defrost=%d, runtime=%lu ms)", rvFail, swDefrost, runtimeMs);
+      Log.info("MAIN", "Config saved (rvFail=%d, defrost=%d, lockedRotor=%d, runtime=%lu ms)", rvFail, swDefrost, lockedRotor, runtimeMs);
     }
   } else if (runtimeChanged) {
     if (config.updateRuntime(_filename, runtimeMs, swDefrost)) {
@@ -1053,6 +1104,10 @@ void onCalcCpuLoad() {
   _cpuLoadCore1 = (_cpuLoadCore1 * 3 + raw1 + 2) / 4;
 }
 
+void onReadCurrent() {
+  hpController.readCurrentSensors();
+}
+
 void onBackfillTempHistory() {
   struct tm ti;
   if (!getLocalTime(&ti, 0)) return;  // NTP not ready, will retry
@@ -1066,12 +1121,15 @@ struct TempCsvEntry {
     const char* dirName;
 };
 static const TempCsvEntry tempCsvEntries[] = {
-    {"AMBIENT_TEMP",    "ambient"},
-    {"COMPRESSOR_TEMP", "compressor"},
-    {"SUCTION_TEMP",    "suction"},
-    {"CONDENSER_TEMP",  "condenser"},
-    {"LIQUID_TEMP",     "liquid"}
+    {"AMBIENT_TEMP",       "ambient"},
+    {"COMPRESSOR_TEMP",    "compressor"},
+    {"SUCTION_TEMP",       "suction"},
+    {"CONDENSER_TEMP",     "condenser"},
+    {"LIQUID_TEMP",        "liquid"},
+    {"COMPRESSOR_CURRENT", "current_compressor"},
+    {"FAN_CURRENT",        "current_fan"}
 };
+static const int NUM_CSV_ENTRIES = sizeof(tempCsvEntries) / sizeof(tempCsvEntries[0]);
 
 void onLogTempsCSV() {
     if (!config.isSDCardInitialized()) return;
@@ -1086,7 +1144,7 @@ void onLogTempsCSV() {
     if (strcmp(today, _tempsCsvDate) != 0) {
         strncpy(_tempsCsvDate, today, sizeof(_tempsCsvDate));
         if (!SD.exists("/temps")) SD.mkdir("/temps");
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < NUM_CSV_ENTRIES; i++) {
             char dir[32];
             snprintf(dir, sizeof(dir), "/temps/%s", tempCsvEntries[i].dirName);
             if (!SD.exists(dir)) SD.mkdir(dir);
@@ -1096,26 +1154,40 @@ void onLogTempsCSV() {
 
     time_t epoch = mktime(&timeinfo);
     TempSensorMap& temps = hpController.getTempSensorMap();
+    CurrentSensorMap& currents = hpController.getCurrentSensorMap();
 
-    for (int i = 0; i < 5; i++) {
-        auto it = temps.find(tempCsvEntries[i].sensorKey);
-        if (it == temps.end() || it->second == nullptr || !it->second->isValid()) continue;
+    for (int i = 0; i < NUM_CSV_ENTRIES; i++) {
+        float val;
+        bool valid = false;
+        const char* key = tempCsvEntries[i].sensorKey;
+
+        // Check temp sensors first, then current sensors
+        auto it = temps.find(key);
+        if (it != temps.end() && it->second != nullptr && it->second->isValid()) {
+            val = it->second->getValue();
+            valid = true;
+        } else {
+            auto cit = currents.find(key);
+            if (cit != currents.end() && cit->second != nullptr && cit->second->isValid()) {
+                val = cit->second->getRMSAmps();
+                valid = true;
+            }
+        }
+        if (!valid) continue;
 
         char filepath[48];
         snprintf(filepath, sizeof(filepath), "/temps/%s/%s.csv",
                  tempCsvEntries[i].dirName, today);
 
-        float tempVal = it->second->getValue();
-
         File f = SD.open(filepath, FILE_APPEND);
         if (f) {
             char row[32];
-            snprintf(row, sizeof(row), "%ld,%.1f", (long)epoch, tempVal);
+            snprintf(row, sizeof(row), "%ld,%.1f", (long)epoch, val);
             f.println(row);
             f.close();
         }
 
-        tempHistory.addSample(i, (uint32_t)epoch, tempVal);
+        tempHistory.addSample(i, (uint32_t)epoch, val);
     }
 }
 
@@ -1126,7 +1198,7 @@ void cleanOldTempFiles(int maxAgeDays) {
     time_t now = mktime(&timeinfo);
     time_t cutoff = now - ((time_t)maxAgeDays * 86400);
 
-    for (int s = 0; s < 5; s++) {
+    for (int s = 0; s < NUM_CSV_ENTRIES; s++) {
         char dirPath[32];
         snprintf(dirPath, sizeof(dirPath), "/temps/%s", tempCsvEntries[s].dirName);
 

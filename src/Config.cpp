@@ -450,6 +450,12 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.softwareDefrost = false;
         proj.stateValidationMs = 30000;
         proj.inputDelayMs = 2000;
+        proj.compressorOvercurrentAmps = 0;
+        proj.fanOvercurrentAmps = 0;
+        proj.overcurrentDelayMs = 5000;
+        proj.lockedRotorThreshold = 0;
+        proj.lockedRotorTimeoutMs = 5000;
+        proj.lockedRotorFault = false;
         Serial.println("Config migration: old lowTemp format detected, will migrate on next save");
     } else {
         proj.lowTempThreshold = heatpump["lowTemp"]["threshold"] | 20.0f;
@@ -465,6 +471,14 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.softwareDefrost = heatpump["defrost"]["active"] | false;
         proj.stateValidationMs = heatpump["stateValidation"]["delayMs"] | 30000;
         proj.inputDelayMs = heatpump["inputDelay"]["ms"] | 2000;
+        // Current monitoring
+        JsonObject hpCurrent = heatpump["current"];
+        proj.compressorOvercurrentAmps = hpCurrent["compressorOvercurrentAmps"] | 0.0f;
+        proj.fanOvercurrentAmps = hpCurrent["fanOvercurrentAmps"] | 0.0f;
+        proj.overcurrentDelayMs = hpCurrent["overcurrentDelayMs"] | 5000;
+        proj.lockedRotorThreshold = hpCurrent["lockedRotorThreshold"] | 0.0f;
+        proj.lockedRotorTimeoutMs = hpCurrent["lockedRotorTimeoutMs"] | 5000;
+        proj.lockedRotorFault = hpCurrent["lockedRotorFault"] | false;
     }
     Serial.printf("Read heatpump: lowTemp=%.1fF highSuct=%.1fF rvFail=%d rvSC=%lu cntSC=%lu defrostMin=%lu defrostExit=%.1fF\n",
                   proj.lowTempThreshold, proj.highSuctionTempThreshold, proj.rvFail,
@@ -825,6 +839,14 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     hpStateValUpd["delayMs"] = proj.stateValidationMs;
     JsonObject hpInputDelayUpd = heatpump["inputDelay"].to<JsonObject>();
     hpInputDelayUpd["ms"] = proj.inputDelayMs;
+    // Current monitoring
+    JsonObject hpCurrentUpd = heatpump["current"].to<JsonObject>();
+    hpCurrentUpd["compressorOvercurrentAmps"] = proj.compressorOvercurrentAmps;
+    hpCurrentUpd["fanOvercurrentAmps"] = proj.fanOvercurrentAmps;
+    hpCurrentUpd["overcurrentDelayMs"] = proj.overcurrentDelayMs;
+    hpCurrentUpd["lockedRotorThreshold"] = proj.lockedRotorThreshold;
+    hpCurrentUpd["lockedRotorTimeoutMs"] = proj.lockedRotorTimeoutMs;
+    hpCurrentUpd["lockedRotorFault"] = proj.lockedRotorFault;
 
     JsonObject tempHistObj = doc["tempHistory"].to<JsonObject>();
     tempHistObj["intervalSec"] = proj.tempHistoryIntervalSec;

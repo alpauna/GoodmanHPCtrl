@@ -7,6 +7,7 @@ GoodmanHP* GoodmanHP::_instance = nullptr;
 GoodmanHP::GoodmanHP(Scheduler *ts)
     : _ts(ts)
     , _sensors(nullptr)
+    , _ads1115(nullptr)
     , _state(State::OFF)
     , _yActiveStartTick(0)
     , _yWasActive(false)
@@ -166,6 +167,75 @@ void GoodmanHP::clearTempSensors() {
     _tempSensorMap.clear();
 }
 
+// --- Current sensor management ---
+
+void GoodmanHP::addCurrentSensor(const String& name, CurrentSensor* sensor) {
+    _currentSensorMap[name] = sensor;
+}
+
+CurrentSensor* GoodmanHP::getCurrentSensor(const String& name) {
+    auto it = _currentSensorMap.find(name);
+    if (it != _currentSensorMap.end()) return it->second;
+    return nullptr;
+}
+
+CurrentSensorMap& GoodmanHP::getCurrentSensorMap() {
+    return _currentSensorMap;
+}
+
+void GoodmanHP::readCurrentSensors() {
+    if (_ads1115 == nullptr) return;
+    for (auto& pair : _currentSensorMap) {
+        if (pair.second != nullptr) {
+            pair.second->readRMS(_ads1115);
+            pair.second->checkProtections();
+        }
+    }
+}
+
+bool GoodmanHP::isOvercurrentActive() const {
+    for (const auto& pair : _currentSensorMap) {
+        if (pair.second != nullptr && pair.second->isOvercurrent()) return true;
+    }
+    return false;
+}
+
+bool GoodmanHP::isLockedRotorActive() const {
+    for (const auto& pair : _currentSensorMap) {
+        if (pair.second != nullptr && pair.second->isLockedRotor()) return true;
+    }
+    return false;
+}
+
+void GoodmanHP::checkCurrentProtections() {
+    if (_currentSensorMap.empty()) return;
+
+    bool overcurrent = isOvercurrentActive();
+    bool lockedRotor = isLockedRotorActive();
+
+    if (!overcurrent && !lockedRotor) return;
+
+    OutPin* cnt = getOutput("CNT");
+    if (cnt != nullptr && cnt->isOn()) {
+        cnt->turnOff();
+        _cntActivated = false;
+        if (lockedRotor) {
+            Log.error("HP", "CNT shut down: locked rotor fault");
+        } else {
+            Log.error("HP", "CNT shut down: overcurrent protection");
+        }
+    }
+
+    // Turn on W for auxiliary heat if in HEAT mode (same pattern as LPS fault)
+    if (!isOActive() && isYActive()) {
+        OutPin* w = getOutput("W");
+        if (w != nullptr && !w->isOn()) {
+            w->turnOn();
+            Log.info("HP", "W turned ON (current fault, HEAT mode)");
+        }
+    }
+}
+
 void GoodmanHP::update() {
     // Startup lockout: keep all outputs OFF until sensors have stabilized
     if (_startupLockout) {
@@ -199,6 +269,7 @@ void GoodmanHP::update() {
     checkSuctionTemp();
     checkHighSuctionTemp();
     checkLPSFault();
+    checkCurrentProtections();
     checkAmbientTemp();
     checkYAndActivateCNT();
     accumulateHeatRuntime();
@@ -590,7 +661,7 @@ void GoodmanHP::checkYAndActivateCNT() {
             Log.info("HP", "Y dropped during defrost exit, exit cancelled");
         }
     } else if (yActive && _yWasActive && !_cntActivated) {
-        if (_lpsFault || _lowTemp || _compressorOverTemp || _suctionLowTemp || _rvFail || _softwareDefrost || _defrostExiting || _coolTransition || _coolCntPending || _heatTransition || _heatCntPending) return;
+        if (_lpsFault || _lowTemp || _compressorOverTemp || _suctionLowTemp || _rvFail || isOvercurrentActive() || isLockedRotorActive() || _softwareDefrost || _defrostExiting || _coolTransition || _coolCntPending || _heatTransition || _heatCntPending) return;
         // Check if CNT was off for less than 5 minutes - if so, enforce short cycle delay
         uint32_t offElapsed = millis() - cnt->getOffTick();
         if (cnt->getOffTick() > 0 && offElapsed < 5UL * 60 * 1000) {
@@ -599,12 +670,16 @@ void GoodmanHP::checkYAndActivateCNT() {
             if (elapsed >= _cntShortCycleMs) {
                 cnt->turnOn();
                 _cntActivated = true;
+                CurrentSensor* compCurrent = getCurrentSensor("COMPRESSOR_CURRENT");
+                if (compCurrent) compCurrent->notifyCntActivated();
                 Log.info("HP", "Y active for 30s, CNT activated (short cycle protection)");
             }
         } else {
             // CNT off >= 5 min or never turned off - activate immediately
             cnt->turnOn();
             _cntActivated = true;
+            CurrentSensor* compCurrent = getCurrentSensor("COMPRESSOR_CURRENT");
+            if (compCurrent) compCurrent->notifyCntActivated();
             Log.info("HP", "Y active, CNT activated immediately (off > 5 min)");
         }
     }

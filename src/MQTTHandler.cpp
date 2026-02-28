@@ -105,6 +105,12 @@ void MQTTHandler::publishState() {
     doc["highSuctionTemp"] = _controller->isHighSuctionTempActive();
     doc["manualOverride"] = _controller->isManualOverrideActive();
     doc["stateValidating"] = _controller->isStateValidating();
+    doc["overcurrent"] = _controller->isOvercurrentActive();
+    doc["lockedRotor"] = _controller->isLockedRotorActive();
+    for (const auto& m : _controller->getCurrentSensorMap()) {
+        if (m.second != nullptr && m.second->isValid())
+            doc[m.first] = serialized(String(m.second->getRMSAmps(), 1));
+    }
 
     char buf[512];
     size_t len = serializeJson(doc, buf, sizeof(buf));

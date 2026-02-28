@@ -102,6 +102,9 @@ This will auto shut off after <span class='countdown' id='countdown'>30:00</span
 <tbody id='outputBody'></tbody>
 </table>
 
+<h2>Current Sensors</h2>
+<div id='currentReadings' style='margin-bottom:12px;font-size:14px'><span style='color:var(--text-muted)'>Loading...</span></div>
+
 <h2>OneWire Temperatures</h2>
 <table>
 <thead><tr><th>Address</th><th>Value</th><th>Assignment</th></tr></thead>
@@ -469,7 +472,9 @@ function renderFlags(d){
     {key:'coolTransition',label:'Cool Ph1 (RV SC)',cd:d.coolTransitionRemainSec,color:'blue'},
     {key:'coolCntPending',label:'Cool Ph2 (CNT SC)',cd:d.coolCntPendingRemainSec,color:'blue'},
     {key:'shortCycleActive',label:'CNT Short Cycle',cd:d.shortCycleRemainSec,color:'orange'},
-    {key:'stateValidating',label:'State Hold',cd:d.stateValidationRemainSec,color:'blue'}
+    {key:'stateValidating',label:'State Hold',cd:d.stateValidationRemainSec,color:'blue'},
+    {key:'overcurrent',label:'Overcurrent',color:'red'},
+    {key:'lockedRotor',label:'Locked Rotor',color:'red'}
   ];
   var h='';
   for(var i=0;i<flags.length;i++){
@@ -546,6 +551,16 @@ function refresh(){
       oh+='<tr><td class="pin">GPIO'+r.pin+'</td><td>'+r.name+sc+'</td><td><span class="v '+vc+'">'+vt+'</span></td><td>'+btnOn+' '+btnOff+'</td></tr>';
     }
     ob.innerHTML=oh;
+
+    // Current sensors
+    var cur=d.current||{};
+    var curEl=document.getElementById('currentReadings');
+    if(curEl){
+      var ch='';
+      if(cur.COMPRESSOR_CURRENT!==undefined) ch+='<span class="cur-val">Comp: '+parseFloat(cur.COMPRESSOR_CURRENT).toFixed(1)+' A</span> ';
+      if(cur.FAN_CURRENT!==undefined) ch+='<span class="cur-val">Fan: '+parseFloat(cur.FAN_CURRENT).toFixed(1)+' A</span>';
+      curEl.innerHTML=ch||'<span style="color:var(--text-muted)">No current sensors</span>';
+    }
 
     var now=new Date();
     var tstr=now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0')+':'+now.getSeconds().toString().padStart(2,'0');
