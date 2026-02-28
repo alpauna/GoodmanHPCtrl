@@ -23,6 +23,7 @@ class GoodmanHP {
     static constexpr float DEFROST_EXIT_F = 60.0f;
     static const uint32_t DEFROST_COND_CHECK_MS = 60UL * 1000;            // 1 min condenser recheck
     static constexpr float DEFAULT_LOW_TEMP_F = 20.0f;
+    static const uint32_t LOW_TEMP_VALIDATION_MS = 10UL * 60 * 1000;  // 10 min validation delay
 
     // High suction temp / RV fail detection during defrost
     static constexpr float DEFAULT_HIGH_SUCTION_TEMP_F = 140.0f;
@@ -95,6 +96,9 @@ class GoodmanHP {
     bool getLowTempEnableW() const;
     void setLowTempEnableAux(bool enable);
     bool getLowTempEnableAux() const;
+    bool isLowTempPendingEntry() const;
+    bool isLowTempPendingExit() const;
+    uint32_t getLowTempPendingRemainingMs() const;
 
     bool isStartupLockoutActive() const;
     uint32_t getStartupLockoutRemainingMs() const;
@@ -188,6 +192,9 @@ class GoodmanHP {
     float _lowTempThreshold;
     bool _lowTempEnableW;
     bool _lowTempEnableAux;
+    bool _lowTempPendingEntry;        // Temp below threshold, waiting validation
+    bool _lowTempPendingExit;         // Temp above threshold, waiting validation
+    uint32_t _lowTempPendingTick;     // millis() when pending timer started
     bool _compressorOverTemp;
     uint32_t _compressorOverTempStartTick;
     uint32_t _compressorOverTempLastCheckTick;

@@ -535,6 +535,9 @@ void WebHandler::setupRoutes() {
         doc["defrost"] = _hpController->isSoftwareDefrostActive();
         doc["lpsFault"] = _hpController->isLPSFaultActive();
         doc["lowTemp"] = _hpController->isLowTempActive();
+        doc["lowTempPendingEntry"] = _hpController->isLowTempPendingEntry();
+        doc["lowTempPendingExit"] = _hpController->isLowTempPendingExit();
+        doc["lowTempPendingRemainSec"] = _hpController->getLowTempPendingRemainingMs() / 1000;
         doc["compressorOverTemp"] = _hpController->isCompressorOverTempActive();
         doc["suctionLowTemp"] = _hpController->isSuctionLowTempActive();
         doc["startupLockout"] = _hpController->isStartupLockoutActive();
@@ -770,6 +773,9 @@ void WebHandler::setupRoutes() {
             // Protection flags
             doc["lpsFault"] = _hpController->isLPSFaultActive();
             doc["lowTemp"] = _hpController->isLowTempActive();
+            doc["lowTempPendingEntry"] = _hpController->isLowTempPendingEntry();
+            doc["lowTempPendingExit"] = _hpController->isLowTempPendingExit();
+            doc["lowTempPendingRemainSec"] = _hpController->getLowTempPendingRemainingMs() / 1000;
             doc["compressorOverTemp"] = _hpController->isCompressorOverTempActive();
             doc["suctionLowTemp"] = _hpController->isSuctionLowTempActive();
             doc["rvFail"] = _hpController->isRvFailActive();
@@ -2029,6 +2035,7 @@ bool WebHandler::beginSecure(const uint8_t* cert, size_t certLen, const uint8_t*
     _httpsCtx.delayedReboot = &_tDelayedReboot;
     _httpsCtx.rebootRateLimited = _rebootRateLimited;
     _httpsCtx.safeMode = _safeMode;
+    _httpsCtx.crashBootCount = _crashBootCount;
     _httpsCtx.timezone = &_timezone;
     _httpsCtx.ftpEnableCb = _ftpEnableCb;
     _httpsCtx.ftpDisableCb = _ftpDisableCb;

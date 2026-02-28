@@ -1097,6 +1097,9 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     doc["defrost"] = ctx->hpController->isSoftwareDefrostActive();
     doc["lpsFault"] = ctx->hpController->isLPSFaultActive();
     doc["lowTemp"] = ctx->hpController->isLowTempActive();
+    doc["lowTempPendingEntry"] = ctx->hpController->isLowTempPendingEntry();
+    doc["lowTempPendingExit"] = ctx->hpController->isLowTempPendingExit();
+    doc["lowTempPendingRemainSec"] = ctx->hpController->getLowTempPendingRemainingMs() / 1000;
     doc["compressorOverTemp"] = ctx->hpController->isCompressorOverTempActive();
     doc["suctionLowTemp"] = ctx->hpController->isSuctionLowTempActive();
     doc["startupLockout"] = ctx->hpController->isStartupLockoutActive();
@@ -1109,6 +1112,17 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     doc["defrostCntPending"] = ctx->hpController->isDefrostCntPendingActive();
     doc["defrostCntPendingRemainSec"] = ctx->hpController->getDefrostCntPendingRemainingMs() / 1000;
     doc["defrostExiting"] = ctx->hpController->isDefrostExitingActive();
+    doc["defrostElapsedSec"] = ctx->hpController->getDefrostElapsedMs() / 1000;
+    doc["coolTransition"] = ctx->hpController->isCoolTransitionActive();
+    doc["coolTransitionRemainSec"] = ctx->hpController->getCoolTransitionRemainingMs() / 1000;
+    doc["coolCntPending"] = ctx->hpController->isCoolCntPendingActive();
+    doc["coolCntPendingRemainSec"] = ctx->hpController->getCoolCntPendingRemainingMs() / 1000;
+    doc["heatTransition"] = ctx->hpController->isHeatTransitionActive();
+    doc["heatTransitionRemainSec"] = ctx->hpController->getHeatTransitionRemainingMs() / 1000;
+    doc["heatCntPending"] = ctx->hpController->isHeatCntPendingActive();
+    doc["heatCntPendingRemainSec"] = ctx->hpController->getHeatCntPendingRemainingMs() / 1000;
+    doc["stateValidating"] = ctx->hpController->isStateValidating();
+    doc["stateValidationRemainSec"] = ctx->hpController->getStateValidationRemainingMs() / 1000;
     doc["manualOverride"] = ctx->hpController->isManualOverrideActive();
     doc["manualOverrideRemainSec"] = ctx->hpController->getManualOverrideRemainingMs() / 1000;
     doc["cpuLoad0"] = getCpuLoadCore0();
@@ -1118,6 +1132,24 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     doc["wifiRSSI"] = WiFi.RSSI();
     doc["wifiIP"] = WiFi.localIP().toString();
     doc["apMode"] = _apModeActive;
+    doc["rebootRateLimited"] = ctx->rebootRateLimited ? *ctx->rebootRateLimited : false;
+    doc["safeMode"] = ctx->safeMode ? *ctx->safeMode : false;
+    doc["crashBootCount"] = ctx->crashBootCount ? *ctx->crashBootCount : 0;
+    {
+        esp_reset_reason_t reason = esp_reset_reason();
+        const char* rr = "UNKNOWN";
+        switch (reason) {
+            case ESP_RST_POWERON:  rr = "POWERON"; break;
+            case ESP_RST_SW:       rr = "SW_RESET"; break;
+            case ESP_RST_PANIC:    rr = "PANIC"; break;
+            case ESP_RST_INT_WDT:  rr = "INT_WDT"; break;
+            case ESP_RST_TASK_WDT: rr = "TASK_WDT"; break;
+            case ESP_RST_WDT:      rr = "WDT"; break;
+            case ESP_RST_BROWNOUT: rr = "BROWNOUT"; break;
+            default: break;
+        }
+        doc["resetReason"] = rr;
+    }
     doc["buildDate"] = compile_date;
     struct tm ti;
     if (getLocalTime(&ti, 0)) {

@@ -27,6 +27,9 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _lowTempThreshold(DEFAULT_LOW_TEMP_F)
     , _lowTempEnableW(true)
     , _lowTempEnableAux(true)
+    , _lowTempPendingEntry(false)
+    , _lowTempPendingExit(false)
+    , _lowTempPendingTick(0)
     , _compressorOverTemp(false)
     , _compressorOverTempStartTick(0)
     , _compressorOverTempLastCheckTick(0)
@@ -270,50 +273,107 @@ void GoodmanHP::checkAmbientTemp() {
     if (ambient == nullptr || !ambient->isValid()) return;
 
     float temp = ambient->getValue();
+    uint32_t now = millis();
 
-    if (temp < _lowTempThreshold && !_lowTemp) {
-        _lowTemp = true;
-        Log.warn("HP", "Low ambient temp %.1fF < %.1fF threshold, LOW_TEMP protection active",
-                 temp, _lowTempThreshold);
+    if (!_lowTemp) {
+        // --- NOT in LOW_TEMP: check for entry ---
+        if (temp < _lowTempThreshold) {
+            if (!_lowTempPendingEntry) {
+                // Start 10-minute entry validation timer
+                _lowTempPendingEntry = true;
+                _lowTempPendingTick = now;
+                Log.info("HP", "Ambient %.1fF < %.1fF, LOW_TEMP pending entry (10 min validation)",
+                         temp, _lowTempThreshold);
+            } else if (now - _lowTempPendingTick >= LOW_TEMP_VALIDATION_MS) {
+                // 10 minutes validated — enter LOW_TEMP
+                _lowTempPendingEntry = false;
+                _lowTemp = true;
+                Log.warn("HP", "Low ambient temp %.1fF validated for 10 min, LOW_TEMP protection active",
+                         temp);
 
-        // Immediate output protection (safety — always applied)
-        OutPin* cnt = getOutput("CNT");
-        if (cnt != nullptr && cnt->isOn()) {
-            cnt->turnOff();
-            _cntActivated = false;
-            Log.warn("HP", "CNT shut down due to low ambient temp");
+                // Immediate output protection
+                OutPin* cnt = getOutput("CNT");
+                if (cnt != nullptr && cnt->isOn()) {
+                    cnt->turnOff();
+                    _cntActivated = false;
+                    Log.warn("HP", "CNT shut down due to low ambient temp");
+                }
+                OutPin* fan = getOutput("FAN");
+                if (fan != nullptr) fan->turnOff();
+                OutPin* rv = getOutput("RV");
+                if (rv != nullptr) rv->turnOff();
+
+                // W requires all 3 gates: LOW_TEMP + checkbox + Y active (O acts like checkbox off)
+                if (_lowTempEnableW && isYActive() && !isOActive()) {
+                    OutPin* w = getOutput("W");
+                    if (w != nullptr) {
+                        w->turnOn();
+                        Log.info("HP", "W turned ON for LOW_TEMP mode (Y active)");
+                    }
+                }
+
+                // AUX only cares about LOW_TEMP + checkbox
+                if (_lowTempEnableAux) {
+                    OutPin* aux = getOutput("AUX");
+                    if (aux != nullptr) aux->turnOn();
+                }
+
+                // Gate state label change by validation timer
+                if (canTransitionToNormalState()) {
+                    State oldState = _state;
+                    _state = State::LOW_TEMP;
+                    startStateValidation();
+                    Log.info("HP", "State: %s -> LOW_TEMP (validation: %lus)",
+                             oldState == State::OFF ? "OFF" : oldState == State::HEAT ? "HEAT" :
+                             oldState == State::COOL ? "COOL" : "OTHER", _stateValidationMs / 1000UL);
+                    if (_stateChangeCb) _stateChangeCb(State::LOW_TEMP, oldState);
+                }
+            }
+            // Cancel any pending exit (shouldn't happen, but defensive)
+            _lowTempPendingExit = false;
+        } else {
+            // Temp back above threshold — cancel pending entry
+            if (_lowTempPendingEntry) {
+                _lowTempPendingEntry = false;
+                Log.info("HP", "Ambient %.1fF >= %.1fF, LOW_TEMP entry cancelled", temp, _lowTempThreshold);
+            }
         }
-        OutPin* fan = getOutput("FAN");
-        if (fan != nullptr) fan->turnOff();
-        OutPin* rv = getOutput("RV");
-        if (rv != nullptr) rv->turnOff();
+    } else {
+        // --- IN LOW_TEMP: manage outputs and check for exit ---
+        if (temp >= _lowTempThreshold) {
+            if (!_lowTempPendingExit) {
+                // Start 10-minute exit validation timer
+                _lowTempPendingExit = true;
+                _lowTempPendingTick = now;
+                Log.info("HP", "Ambient %.1fF >= %.1fF, LOW_TEMP pending exit (10 min validation)",
+                         temp, _lowTempThreshold);
+            } else if (now - _lowTempPendingTick >= LOW_TEMP_VALIDATION_MS) {
+                // 10 minutes validated — exit LOW_TEMP
+                _lowTempPendingExit = false;
+                _lowTemp = false;
+                Log.info("HP", "Ambient temp %.1fF validated above %.1fF for 10 min, exiting LOW_TEMP",
+                         temp, _lowTempThreshold);
 
-        // W requires all 3 gates: LOW_TEMP + checkbox + Y active (O acts like checkbox off)
-        if (_lowTempEnableW && isYActive() && !isOActive()) {
-            OutPin* w = getOutput("W");
-            if (w != nullptr) {
-                w->turnOn();
-                Log.info("HP", "W turned ON for LOW_TEMP mode (Y active)");
+                // Turn off W
+                OutPin* w = getOutput("W");
+                if (w != nullptr) w->turnOff();
+
+                // Turn off AUX signal output
+                OutPin* aux = getOutput("AUX");
+                if (aux != nullptr) aux->turnOff();
+
+                // Don't set _state here — let updateState() determine the correct state
+            }
+            // Cancel any pending entry (shouldn't happen, but defensive)
+            _lowTempPendingEntry = false;
+        } else {
+            // Temp dropped back below threshold — cancel pending exit
+            if (_lowTempPendingExit) {
+                _lowTempPendingExit = false;
+                Log.info("HP", "Ambient %.1fF < %.1fF, LOW_TEMP exit cancelled", temp, _lowTempThreshold);
             }
         }
 
-        // AUX only cares about LOW_TEMP + checkbox
-        if (_lowTempEnableAux) {
-            OutPin* aux = getOutput("AUX");
-            if (aux != nullptr) aux->turnOn();
-        }
-
-        // Gate state label change by validation timer
-        if (canTransitionToNormalState()) {
-            State oldState = _state;
-            _state = State::LOW_TEMP;
-            startStateValidation();
-            Log.info("HP", "State: %s -> LOW_TEMP (validation: %lus)",
-                     oldState == State::OFF ? "OFF" : oldState == State::HEAT ? "HEAT" :
-                     oldState == State::COOL ? "COOL" : "OTHER", _stateValidationMs / 1000UL);
-            if (_stateChangeCb) _stateChangeCb(State::LOW_TEMP, oldState);
-        }
-    } else if (temp < _lowTempThreshold && _lowTemp) {
         // Re-check deferred state label if outputs are protected but state not yet LOW_TEMP
         if (_state != State::LOW_TEMP && canTransitionToNormalState()) {
             State oldState = _state;
@@ -338,21 +398,6 @@ void GoodmanHP::checkAmbientTemp() {
                 Log.info("HP", "W turned OFF in LOW_TEMP");
             }
         }
-        return;
-    } else if (temp >= _lowTempThreshold && _lowTemp) {
-        _lowTemp = false;
-        Log.info("HP", "Ambient temp %.1fF >= %.1fF threshold, exiting LOW_TEMP state",
-                 temp, _lowTempThreshold);
-
-        // Turn off W
-        OutPin* w = getOutput("W");
-        if (w != nullptr) w->turnOff();
-
-        // Turn off AUX signal output
-        OutPin* aux = getOutput("AUX");
-        if (aux != nullptr) aux->turnOff();
-
-        // Don't set _state here — let updateState() determine the correct state
     }
 }
 
@@ -1311,6 +1356,21 @@ void GoodmanHP::setLowTempEnableAux(bool enable) {
 
 bool GoodmanHP::getLowTempEnableAux() const {
     return _lowTempEnableAux;
+}
+
+bool GoodmanHP::isLowTempPendingEntry() const {
+    return _lowTempPendingEntry;
+}
+
+bool GoodmanHP::isLowTempPendingExit() const {
+    return _lowTempPendingExit;
+}
+
+uint32_t GoodmanHP::getLowTempPendingRemainingMs() const {
+    if (!_lowTempPendingEntry && !_lowTempPendingExit) return 0;
+    uint32_t elapsed = millis() - _lowTempPendingTick;
+    if (elapsed >= LOW_TEMP_VALIDATION_MS) return 0;
+    return LOW_TEMP_VALIDATION_MS - elapsed;
 }
 
 bool GoodmanHP::isStateValidating() const {

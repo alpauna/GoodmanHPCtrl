@@ -27,6 +27,7 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 .pill.active{background:#ffebee;color:#c62828;}
 .pill.invalid{background:#fff3e0;color:#e65100;}
 .pill.warn{background:#fff3e0;color:#e65100;}
+.pill.pending{background:#e3f2fd;color:#1565c0;}
 .temp-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-light);}
 .temp-row:last-child{border-bottom:none;}
 .temp-name{color:var(--text-secondary);font-size:14px;}
@@ -194,7 +195,7 @@ function update(d){
   var ambValid=ts.AMBIENT_TEMP!==undefined;
   var compValid=ts.COMPRESSOR_TEMP!==undefined;
   var suctValid=ts.SUCTION_TEMP!==undefined;
-  var ltEl=document.getElementById('fLowTemp');if(ltEl){ltEl.textContent=!ambValid?'Ambient N/A':d.lowTemp?'Low Temp':'Temp Ok';ltEl.className='pill '+(!ambValid?'invalid':d.lowTemp?'active':'ok');}
+  var ltEl=document.getElementById('fLowTemp');if(ltEl){var ltText,ltClass;if(!ambValid){ltText='Ambient N/A';ltClass='invalid';}else if(d.lowTempPendingEntry){ltText='LT Entry '+d.lowTempPendingRemainSec+'s';ltClass='pending';}else if(d.lowTempPendingExit){ltText='LT Exit '+d.lowTempPendingRemainSec+'s';ltClass='pending';}else if(d.lowTemp){ltText='Low Temp';ltClass='active';}else{ltText='Temp Ok';ltClass='ok';}ltEl.textContent=ltText;ltEl.className='pill '+ltClass;}
   var cotEl=document.getElementById('fCompOT');if(cotEl){cotEl.textContent=!compValid?'Comp N/A':d.compressorOverTemp?'Comp OT':'Comp Ok';cotEl.className='pill '+(!compValid?'invalid':d.compressorOverTemp?'active':'ok');}
   var slEl=document.getElementById('fSuctLT');if(slEl){slEl.textContent=!suctValid?'Suct N/A':d.suctionLowTemp?'Suct LT':'Suct LT Ok';slEl.className='pill '+(!suctValid?'invalid':d.suctionLowTemp?'active':'ok');}
   var hsEl=document.getElementById('fHighSuct');

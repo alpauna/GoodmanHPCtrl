@@ -42,6 +42,7 @@ struct HttpsContext {
     String systemName;
     bool* rebootRateLimited;
     bool* safeMode;
+    uint32_t* crashBootCount;
     SessionManager* sessionMgr;
 };
 
