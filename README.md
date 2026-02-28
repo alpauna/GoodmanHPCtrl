@@ -60,7 +60,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - `COOL` — Y and O inputs active (cooling mode, RV on, W off)
   - `DEFROST` — DFT emergency defrost or software defrost cycle (W on)
   - `ERROR` — Fault condition active (LPS low pressure); CNT shut down, W follows Y in HEAT mode (Y active, O not active), state updates blocked until fault clears
-  - `LOW_TEMP` — Ambient temperature below threshold (default 20°F); compressor off, auxiliary heat (W) on, auto-recovers when temp rises
+  - `LOW_TEMP` — Ambient temperature below threshold (default 20°F) for 10 continuous minutes; compressor off, auxiliary heat (W) on, auto-recovers when temp stays above threshold for 10 minutes
 
 - **Output Control by State:**
   - **RV** (reversing valve): ON in COOL, OFF in HEAT/OFF
@@ -94,11 +94,12 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - Publishes fault events via MQTT (`goodman/fault` topic)
 
 - **Low Ambient Temperature Protection** — When AMBIENT_TEMP drops below the configurable threshold (default 20°F):
+  - **10-minute validation delay** in both directions: temp must stay below threshold for 10 continuous minutes before entering LOW_TEMP, and above threshold for 10 continuous minutes before exiting. If temp reverses during the validation window, the pending transition is cancelled. Prevents fluttering near the threshold
   - Enters `LOW_TEMP` state: shuts down CNT, turns off FAN and RV
   - Turns on W (auxiliary heat) in HEAT mode only
   - If thermostat switches to COOL mode (Y+O) while in LOW_TEMP, W is turned off — no heating or cooling operates below 20°F in COOL mode
   - Blocks all compressor activation (CNT) while ambient temp is too low
-  - Auto-recovers when temperature rises above threshold
+  - Auto-recovers when temperature stays above threshold for 10 minutes
   - Threshold is configurable via `lowTemp.threshold` in SD card config
 
 - **Input Pin Validation Delay** — All 4 input pins (LPS, DFT, Y, O) use a configurable debounce/validation delay (default 2 seconds) to prevent false triggers from electrical noise or transient signals:
@@ -225,7 +226,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | Compressor overtemp | COMPRESSOR_TEMP ≥ 240°F | Any mode | Temp < 190°F | ON | OFF | OFF | 1 (highest) |
 | Suction low temp | SUCTION_TEMP < 32°F | COOL mode only | Temp > 40°F | ON | OFF | OFF | 2 |
 | LPS fault | LPS input LOW | Any mode | LPS goes HIGH | OFF | OFF | ON* | 3 |
-| Low ambient temp | AMBIENT_TEMP < 20°F | Any mode | Temp ≥ 20°F | OFF | OFF | ON* | 4 |
+| Low ambient temp | AMBIENT_TEMP < 20°F for 10 min | Any mode | Temp ≥ 20°F for 10 min | OFF | OFF | ON* | 4 |
 | RV fail | SUCTION_TEMP ≥ 140°F during defrost | Defrost only | Manual clear via dashboard/config | ON | OFF | ON* | Latched |
 
 \* W on only in HEAT mode (Y active, O inactive); never activated in COOL mode (Y+O).
@@ -1154,7 +1155,10 @@ Full controller state, published on every state transition, fault event, and com
 | `defrostCntPending` | bool | Whether Phase 2 (CNT hold) is active — entry or exit |
 | `defrostExiting` | bool | Whether a defrost exit transition is in progress (distinguishes exit from entry) |
 | `lpsFault` | bool | Whether an LPS low-pressure fault is active |
-| `lowTemp` | bool | Whether ambient temperature is below the low-temp threshold |
+| `lowTemp` | bool | Whether LOW_TEMP protection is active (after 10-min validation) |
+| `lowTempPendingEntry` | bool | Whether temp is below threshold and awaiting 10-min entry validation |
+| `lowTempPendingExit` | bool | Whether temp is above threshold and awaiting 10-min exit validation |
+| `lowTempPendingRemainSec` | number | Seconds remaining in LOW_TEMP entry/exit validation (0 when inactive) |
 | `compressorOverTemp` | bool | Whether compressor temperature exceeds 240°F threshold |
 | `suctionLowTemp` | bool | Whether suction temperature is critically low in COOL mode (< 32°F) |
 | `startupLockout` | bool | Whether the 5-minute startup lockout is active |
