@@ -59,7 +59,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - `HEAT` — Y input active (heating mode, RV off, W off)
   - `COOL` — Y and O inputs active (cooling mode, RV on, W off)
   - `DEFROST` — DFT emergency defrost or software defrost cycle (W on)
-  - `ERROR` — Fault condition active (LPS low pressure); all outputs shut down, state updates blocked until fault clears
+  - `ERROR` — Fault condition active (LPS low pressure); CNT shut down, W follows Y in HEAT mode (Y active, O not active), state updates blocked until fault clears
   - `LOW_TEMP` — Ambient temperature below threshold (default 20°F); compressor off, auxiliary heat (W) on, auto-recovers when temp rises
 
 - **Output Control by State:**
@@ -89,7 +89,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - Immediately shuts down CNT if running
   - Sets state to `ERROR`, blocking all state updates
   - Blocks CNT activation while fault is active
-  - Turns on W (auxiliary heat) if in HEAT mode (Y active, O not active); W is never turned on in COOL mode
+  - W (auxiliary heat) continuously follows Y during active fault: ON when Y active and O not active (HEAT mode), OFF when Y drops or O active (COOL mode). W is never turned on in COOL mode
   - Auto-recovers when LPS goes HIGH; W turned off, short-cycle protection (30s delay) is enforced on CNT reactivation
   - Publishes fault events via MQTT (`goodman/fault` topic)
 
@@ -148,12 +148,12 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 - **Defrost Exit Transition (3-Phase)** — When defrost completes (condenser temp reached or timeout), the system performs a reverse 3-phase sequence to safely switch the reversing valve back to heat position before restarting the compressor:
 
   **Exit Phase 1 — Pressure Equalization** (`defrostTransition` + `defrostExiting`):
-  - CNT and FAN turned OFF, RV and W stay ON
+  - CNT, FAN, and W turned OFF immediately; RV stays ON
   - Duration: `heatpump.shortCycle.rv` (default 30s)
   - Allows system pressures to equalize after compressor stops
 
   **Exit Phase 2 — RV Switch + CNT Hold** (`defrostCntPending` + `defrostExiting`):
-  - RV and W turned OFF (RV switches back to heat position), CNT remains OFF
+  - RV turned OFF (switches back to heat position), CNT remains OFF
   - Duration: `heatpump.shortCycle.cnt` (default 30s)
   - Allows reversing valve to physically seat before compressor restarts
 

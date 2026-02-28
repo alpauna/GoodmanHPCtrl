@@ -1115,7 +1115,7 @@ void GoodmanHP::validateOutputStates() {
         // Defrost entry Phase 2: RV+W on, CNT off (waiting short cycle)
         row = "DEFROST Ph2"; expFAN = 0; expCNT = 0; expRV = 1; expW = 1;
     } else if (_defrostTransition && _defrostExiting) {
-        // Defrost exit Phase 1: CNT+FAN off, RV+W stay on
+        // Defrost exit Phase 1: CNT+FAN+W off, RV stays on
         row = "DFX Exit Ph1"; expFAN = 0; expCNT = 0; expRV = 1; expW = 0;
     } else if (_defrostCntPending && _defrostExiting) {
         // Defrost exit Phase 2: RV+W off, CNT off
@@ -1148,7 +1148,7 @@ void GoodmanHP::validateOutputStates() {
 
             case State::ERROR:
                 row = "ERROR"; expCNT = 0;
-                expW = (isYActive() && !isOActive()) ? 1 : -1;
+                expW = (isYActive() && !isOActive()) ? 1 : 0;
                 break;
 
             case State::LOW_TEMP:
