@@ -1118,7 +1118,7 @@ void GoodmanHP::validateOutputStates() {
         // Defrost exit Phase 1: CNT+FAN+W off, RV stays on
         row = "DFX Exit Ph1"; expFAN = 0; expCNT = 0; expRV = 1; expW = 0;
     } else if (_defrostCntPending && _defrostExiting) {
-        // Defrost exit Phase 2: RV+W off, CNT off
+        // Defrost exit Phase 2: RV off (W already off from exit start), CNT off
         row = "DFX Exit Ph2"; expFAN = 0; expCNT = 0; expRV = 0; expW = 0;
     } else {
         // === STEADY-STATE ROWS ===
@@ -1136,13 +1136,13 @@ void GoodmanHP::validateOutputStates() {
                 row = _rvFail ? "HEAT+rvFail" : "HEAT";
                 expRV = 0;
                 expW = _rvFail && isYActive() && !isOActive() ? 1 : 0;
-                if (_rvFail) expCNT = 0;
+                if (_rvFail) { expCNT = 0; expFAN = 1; }
                 if (cnt != nullptr && cnt->isOn()) expFAN = 1;
                 break;
 
             case State::DEFROST:
                 if (_softwareDefrost) {
-                    row = "DEFROST Ph3"; expFAN = 0; expRV = 1; expW = 1;
+                    row = "DEFROST Ph3"; expFAN = 0; expCNT = 1; expRV = 1; expW = 1;
                 }
                 break;
 
