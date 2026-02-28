@@ -56,6 +56,13 @@ void TempHistory::backfillFromSD() {
         return;
     }
 
+    // Clear any samples added before backfill to maintain chronological order
+    // (live samples may have been inserted before NTP sync + backfill)
+    for (int i = 0; i < MAX_SENSORS; i++) {
+        _head[i] = 0;
+        _count[i] = 0;
+    }
+
     struct tm timeinfo;
     if (!getLocalTime(&timeinfo, 0)) {
         Log.warn("THIST", "No NTP time, skipping backfill");
