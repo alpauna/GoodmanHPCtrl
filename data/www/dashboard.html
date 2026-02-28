@@ -101,8 +101,9 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <div class='grid'>
 <div class='indicator'><span class='dot off' id='dFAN'></span><span class='label'>FAN</span><span class='val' id='vFAN'>--</span></div>
 <div class='indicator'><span class='dot off' id='dCNT'></span><span class='label'>CNT</span><div class='sc-group'><span class='pill ok sc-pill' id='fShortCycle'>SC</span><span class='pill ok sc-pill' id='fCntDFH'>DFH</span><span class='sep'>|</span><span class='val' id='vCNT'>--</span></div></div>
-<div class='indicator'><span class='dot off' id='dW'></span><span class='label'>W</span><div class='sc-group'><span class='pill ok sc-pill' id='fWDFH'>DFH</span><span class='sep'>|</span><span class='val' id='vW'>--</span></div></div>
+<div class='indicator'><span class='dot off' id='dW'></span><span class='label'>W</span><span class='val' id='vW'>--</span></div>
 <div class='indicator'><span class='dot off' id='dRV'></span><span class='label'>RV</span><div class='sc-group'><span class='pill ok sc-pill' id='fRvDFH'>DFH</span><span class='sep'>|</span><span class='val' id='vRV'>--</span></div></div>
+<div class='indicator'><span class='dot off' id='dAUX'></span><span class='label'>AUX</span><span class='val' id='vAUX'>--</span></div>
 </div>
 </div>
 
@@ -202,7 +203,6 @@ function update(d){
   var rvBtn=document.getElementById('clearRvFailBtn');if(rvBtn)rvBtn.style.display=d.rvFail?'inline-block':'none';
   var shEl=document.getElementById('fStateHold');if(shEl){shEl.textContent=d.stateValidating&&d.stateValidationRemainSec>0?'State Hold: '+d.stateValidationRemainSec+'s':'State Hold';shEl.className='pill '+(d.stateValidating?'active':'ok');if(d.stateValidating)shEl.style.background='#e3f2fd',shEl.style.color='#1565c0';}
   setPill('fRvDFH',d.defrostTransition);
-  setPill('fWDFH',d.defrostTransition);
   setPill('fCntDFH',d.defrostCntPending);
 
   // Inputs
@@ -217,7 +217,7 @@ function update(d){
 
   // Outputs
   var outs=d.outputs||{};
-  var outKeys=['FAN','CNT','W','RV'];
+  var outKeys=['FAN','CNT','W','RV','AUX'];
   for(var i=0;i<outKeys.length;i++){
     var k=outKeys[i];
     var v=outs[k];

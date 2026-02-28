@@ -245,6 +245,20 @@ void GoodmanHP::checkLPSFault() {
         }
         if (_lpsFaultCb) _lpsFaultCb(false);
         // Don't set _state here — let updateState() determine the correct state
+    } else if (_lpsFault) {
+        // Continuously manage W during active LPS fault — updateState() is blocked
+        // W follows Y in HEAT mode (Y active, O not active), never in COOL
+        OutPin* w = getOutput("W");
+        if (w != nullptr) {
+            bool wShouldBeOn = isYActive() && !isOActive();
+            if (wShouldBeOn && !w->isOn()) {
+                w->turnOn();
+                Log.info("HP", "W turned ON for ERROR state (Y activated)");
+            } else if (!wShouldBeOn && w->isOn()) {
+                w->turnOff();
+                Log.info("HP", "W turned OFF for ERROR state (Y/O changed)");
+            }
+        }
     }
 }
 
@@ -1102,7 +1116,7 @@ void GoodmanHP::validateOutputStates() {
         row = "DEFROST Ph2"; expFAN = 0; expCNT = 0; expRV = 1; expW = 1;
     } else if (_defrostTransition && _defrostExiting) {
         // Defrost exit Phase 1: CNT+FAN off, RV+W stay on
-        row = "DFX Exit Ph1"; expFAN = 0; expCNT = 0; expRV = 1; expW = 1;
+        row = "DFX Exit Ph1"; expFAN = 0; expCNT = 0; expRV = 1; expW = 0;
     } else if (_defrostCntPending && _defrostExiting) {
         // Defrost exit Phase 2: RV+W off, CNT off
         row = "DFX Exit Ph2"; expFAN = 0; expCNT = 0; expRV = 0; expW = 0;
@@ -1430,16 +1444,14 @@ void GoodmanHP::checkDefrostNeeded() {
         return;
     }
 
-    // Exit Phase 1: Pressure equalization after defrost (CNT off, RV+W still on)
+    // Exit Phase 1: Pressure equalization after defrost (CNT+FAN+W off, RV still on)
     if (_defrostTransition && _defrostExiting) {
         if (now - _defrostTransitionStart >= _rvShortCycleMs) {
             _defrostTransition = false;
-            Log.info("HP", "Exit Phase 1 complete, RV+W off, waiting %lu s CNT short cycle",
+            Log.info("HP", "Exit Phase 1 complete, RV off, waiting %lu s CNT short cycle",
                      _cntShortCycleMs / 1000UL);
             OutPin* rv = getOutput("RV");
-            OutPin* w = getOutput("W");
             if (rv != nullptr) rv->turnOff();
-            if (w != nullptr) w->turnOff();
             _defrostCntPending = true;
             _defrostCntPendingStart = now;
         }
@@ -1601,12 +1613,14 @@ void GoodmanHP::stopSoftwareDefrost() {
     Log.info("HP", "Defrost complete, starting exit transition (%lu s pressure equalization)",
              _rvShortCycleMs / 1000UL);
 
-    // Turn off CNT and FAN only — RV and W stay on during exit Phase 1
+    // Turn off CNT, FAN, and W — only RV stays on during exit Phase 1
     if (cnt != nullptr) {
         cnt->turnOff();
         _cntActivated = false;
     }
     if (fan != nullptr) fan->turnOff();
+    OutPin* w = getOutput("W");
+    if (w != nullptr) w->turnOff();
 
     // Start exit transition (reuses _defrostTransition / _defrostCntPending flags)
     _defrostExiting = true;
