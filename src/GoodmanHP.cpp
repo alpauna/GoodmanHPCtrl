@@ -59,6 +59,7 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _stateValidationStart(0)
     , _stateValidationMs(30000)
     , _lastValidationLogTick(0)
+    , _ambientFallback(false)
     , _manualOverride(false)
     , _manualOverrideStart(0)
     , _startupLockout(true)
@@ -76,6 +77,20 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
         for (auto& mp : _tempSensorMap) {
             if (mp.second == nullptr) continue;
             mp.second->update(_sensors);
+        }
+        // ESP32 internal temp failsafe for ambient sensor
+        TempSensor* ambient = getTempSensor("AMBIENT_TEMP");
+        if (ambient != nullptr && !ambient->isValid()) {
+            float internalC = temperatureRead();
+            float internalF = internalC * 9.0f / 5.0f + 32.0f;
+            ambient->updateValue(internalF);
+            if (!_ambientFallback) {
+                _ambientFallback = true;
+                Log.warn("HP", "AMBIENT_TEMP sensor lost, using ESP32 internal temp (%.1fF) as failsafe", internalF);
+            }
+        } else if (_ambientFallback && ambient != nullptr && ambient->isValid()) {
+            _ambientFallback = false;
+            Log.info("HP", "AMBIENT_TEMP sensor restored, internal temp failsafe disabled");
         }
     }, ts, false);
 }
@@ -1219,6 +1234,10 @@ void GoodmanHP::checkRvHold() {
 
 bool GoodmanHP::isRvHoldActive() const {
     return _rvHoldActive;
+}
+
+bool GoodmanHP::isAmbientFallbackActive() const {
+    return _ambientFallback;
 }
 
 uint32_t GoodmanHP::getRvHoldRemainingMs() const {

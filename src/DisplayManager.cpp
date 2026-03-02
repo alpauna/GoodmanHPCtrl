@@ -327,6 +327,9 @@ void DisplayManager::drawPageProtections() {
     if (_hp->isLockedRotorActive()) {
         _display->setCursor(0, y); _display->print(F("* Locked Rotor")); y += 10; any = true;
     }
+    if (_hp->isAmbientFallbackActive()) {
+        _display->setCursor(0, y); _display->print(F("* Amb: Internal")); y += 10; any = true;
+    }
     if (_hp->isStartupLockoutActive()) {
         _display->setCursor(0, y);
         _display->printf("* Startup (%lus)", _hp->getStartupLockoutRemainingMs() / 1000);
