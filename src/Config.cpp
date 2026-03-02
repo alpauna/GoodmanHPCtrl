@@ -518,6 +518,24 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     if (proj.pollIntervalSec < 1) proj.pollIntervalSec = 1;
     if (proj.pollIntervalSec > 10) proj.pollIntervalSec = 10;
 
+    // Load weather ambient fallback settings
+    JsonObject weatherObj = doc["weather"];
+    const char* wSrc = weatherObj["source"];
+    proj.weatherSource = (wSrc != nullptr) ? String(wSrc) : "none";
+    const char* wTopic = weatherObj["mqttTopic"];
+    proj.weatherMqttTopic = (wTopic != nullptr) ? String(wTopic) : "";
+    const char* wApiKey = weatherObj["apiKey"];
+    proj.weatherApiKey = (wApiKey != nullptr && strlen(wApiKey) > 0) ? decryptPassword(String(wApiKey)) : "";
+    const char* wZip = weatherObj["zipCode"];
+    proj.weatherZipCode = (wZip != nullptr) ? String(wZip) : "";
+    const char* wCountry = weatherObj["country"];
+    proj.weatherCountry = (wCountry != nullptr && strlen(wCountry) > 0) ? String(wCountry) : "US";
+    proj.weatherStaleMinutes = weatherObj["staleMinutes"] | 30;
+    Serial.printf("Read weather: source=%s topic=%s zip=%s country=%s stale=%umin\n",
+                  proj.weatherSource.c_str(), proj.weatherMqttTopic.c_str(),
+                  proj.weatherZipCode.c_str(), proj.weatherCountry.c_str(),
+                  proj.weatherStaleMinutes);
+
     // Load admin password (encrypted same as WiFi/MQTT passwords)
     const char* adminPw = doc["admin"]["password"];
     String adminPwStr = (adminPw != nullptr && strlen(adminPw) > 0) ? String(adminPw) : "";
@@ -696,6 +714,17 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     JsonObject auth = doc["auth"].to<JsonObject>();
     auth["sessionTimeoutMinutes"] = proj.sessionTimeoutMinutes;
 
+    // Weather ambient fallback
+    JsonObject weatherObj = doc["weather"].to<JsonObject>();
+    weatherObj["source"] = proj.weatherSource.length() > 0 ? proj.weatherSource : "none";
+    weatherObj["mqttTopic"] = proj.weatherMqttTopic;
+    if (proj.weatherApiKey.length() > 0) {
+        weatherObj["apiKey"] = encryptPassword(proj.weatherApiKey);
+    }
+    weatherObj["zipCode"] = proj.weatherZipCode;
+    weatherObj["country"] = proj.weatherCountry.length() > 0 ? proj.weatherCountry : "US";
+    weatherObj["staleMinutes"] = proj.weatherStaleMinutes;
+
     JsonObject admin = doc["admin"].to<JsonObject>();
     admin["password"] = "";
     if (proj.ftpPassword.length() > 0) {
@@ -846,6 +875,19 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
 
     JsonObject auth = doc["auth"].to<JsonObject>();
     auth["sessionTimeoutMinutes"] = proj.sessionTimeoutMinutes;
+
+    // Weather ambient fallback
+    JsonObject weatherUpd = doc["weather"].to<JsonObject>();
+    weatherUpd["source"] = proj.weatherSource.length() > 0 ? proj.weatherSource : "none";
+    weatherUpd["mqttTopic"] = proj.weatherMqttTopic;
+    if (proj.weatherApiKey.length() > 0) {
+        weatherUpd["apiKey"] = encryptPassword(proj.weatherApiKey);
+    } else {
+        weatherUpd.remove("apiKey");
+    }
+    weatherUpd["zipCode"] = proj.weatherZipCode;
+    weatherUpd["country"] = proj.weatherCountry.length() > 0 ? proj.weatherCountry : "US";
+    weatherUpd["staleMinutes"] = proj.weatherStaleMinutes;
 
     JsonObject admin = doc["admin"].to<JsonObject>();
     admin["password"] = encryptPassword(_adminPasswordHash);

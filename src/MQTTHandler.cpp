@@ -59,6 +59,15 @@ void MQTTHandler::setController(GoodmanHP* controller) {
     _controller = controller;
 }
 
+void MQTTHandler::setWeatherTopic(const String& topic) {
+    String oldTopic = _weatherTopic;
+    _weatherTopic = topic;
+    if (_client.connected()) {
+        if (oldTopic.length() > 0) _client.unsubscribe(oldTopic.c_str());
+        if (topic.length() > 0) _client.subscribe(topic.c_str(), 0);
+    }
+}
+
 void MQTTHandler::publishTemps() {
     if (!_client.connected() || _controller == nullptr) return;
 
@@ -104,6 +113,8 @@ void MQTTHandler::publishState() {
     doc["rvFail"] = _controller->isRvFailActive();
     doc["highSuctionTemp"] = _controller->isHighSuctionTempActive();
     doc["ambientFallback"] = _controller->isAmbientFallbackActive();
+    static const char* ambSrcNames[] = {"sensor", "weather", "internal"};
+    doc["ambientSource"] = ambSrcNames[(int)_controller->getAmbientSource()];
     doc["manualOverride"] = _controller->isManualOverrideActive();
     doc["stateValidating"] = _controller->isStateValidating();
 
@@ -132,6 +143,11 @@ void MQTTHandler::onConnect(bool sessionPresent) {
     Log.info("MQTT", "IP: %s", WiFi.localIP().toString().c_str());
     if (_tReconnect) {
         _tReconnect->disable();
+    }
+    // Subscribe to weather topic if configured
+    if (_weatherTopic.length() > 0) {
+        _client.subscribe(_weatherTopic.c_str(), 0);
+        Log.info("MQTT", "Subscribed to weather topic: %s", _weatherTopic.c_str());
     }
 }
 
@@ -164,21 +180,20 @@ void MQTTHandler::onUnsubscribe(uint16_t packetId) {
 void MQTTHandler::onMessage(char* topic, char* payload,
                              AsyncMqttClientMessageProperties properties,
                              size_t len, size_t index, size_t total) {
-    Serial.println("Publish received.");
-    Serial.print("  topic: ");
-    Serial.println(topic);
-    Serial.print("  qos: ");
-    Serial.println(properties.qos);
-    Serial.print("  dup: ");
-    Serial.println(properties.dup);
-    Serial.print("  retain: ");
-    Serial.println(properties.retain);
-    Serial.print("  len: ");
-    Serial.println(len);
-    Serial.print("  index: ");
-    Serial.println(index);
-    Serial.print("  total: ");
-    Serial.println(total);
+    // Handle weather temperature topic
+    if (_weatherTopic.length() > 0 && _controller != nullptr && strcmp(topic, _weatherTopic.c_str()) == 0) {
+        char buf[32];
+        size_t copyLen = len < sizeof(buf) - 1 ? len : sizeof(buf) - 1;
+        memcpy(buf, payload, copyLen);
+        buf[copyLen] = '\0';
+        float temp = atof(buf);
+        if (temp != 0.0f || buf[0] == '0') {
+            _controller->setWeatherTemp(temp);
+            Log.debug("MQTT", "Weather temp: %.1fF from %s", temp, _weatherTopic.c_str());
+        }
+        return;
+    }
+    Log.debug("MQTT", "Message on %s (%d bytes)", topic, (int)len);
 }
 
 void MQTTHandler::onPublish(uint16_t packetId) {

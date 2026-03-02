@@ -307,7 +307,9 @@ void DisplayManager::drawPageProtections() {
         y += 10; any = true;
     }
     if (_hp->isAmbientFallbackActive()) {
-        _display->setCursor(0, y); _display->print(F("* Amb: Internal")); y += 10; any = true;
+        _display->setCursor(0, y);
+        _display->print(_hp->getAmbientSource() == GoodmanHP::AmbientSource::WEATHER ? F("* Amb: Weather") : F("* Amb: Internal"));
+        y += 10; any = true;
     }
     if (_hp->isStartupLockoutActive()) {
         _display->setCursor(0, y);

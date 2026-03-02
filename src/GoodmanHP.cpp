@@ -58,7 +58,12 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _stateValidationStart(0)
     , _stateValidationMs(30000)
     , _lastValidationLogTick(0)
-    , _ambientFallback(false)
+    , _ambientSource(AmbientSource::SENSOR)
+    , _weatherTempF(0.0f)
+    , _weatherTempValid(false)
+    , _weatherTempTick(0)
+    , _weatherStaleMs(30UL * 60 * 1000)
+    , _ambientFailoverTest(false)
     , _manualOverride(false)
     , _manualOverrideStart(0)
     , _startupLockout(true)
@@ -77,19 +82,30 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
             if (mp.second == nullptr) continue;
             mp.second->update(_sensors);
         }
-        // ESP32 internal temp failsafe for ambient sensor
+        // Ambient temperature fallback chain: Real sensor → Weather → ESP32 internal
+        // Safety: if no AMBIENT_TEMP sensor exists at all, force LOW_TEMP equivalent
+        //         via a very low injected temperature (this should not happen in normal config)
         TempSensor* ambient = getTempSensor("AMBIENT_TEMP");
-        if (ambient != nullptr && !ambient->isValid()) {
-            float internalC = temperatureRead();
-            float internalF = internalC * 9.0f / 5.0f + 32.0f;
-            ambient->updateValue(internalF);
-            if (!_ambientFallback) {
-                _ambientFallback = true;
-                Log.warn("HP", "AMBIENT_TEMP sensor lost, using ESP32 internal temp (%.1fF) as failsafe", internalF);
+        if (ambient != nullptr && (!ambient->isValid() || _ambientFailoverTest)) {
+            bool weatherFresh = _weatherTempValid && (millis() - _weatherTempTick < _weatherStaleMs);
+            if (weatherFresh) {
+                ambient->updateValue(_weatherTempF);
+                if (_ambientSource != AmbientSource::WEATHER) {
+                    _ambientSource = AmbientSource::WEATHER;
+                    Log.warn("HP", "AMBIENT_TEMP lost, using weather (%.1fF)", _weatherTempF);
+                }
+            } else {
+                float internalC = temperatureRead();
+                float internalF = internalC * 9.0f / 5.0f + 32.0f;
+                ambient->updateValue(internalF);
+                if (_ambientSource != AmbientSource::INTERNAL) {
+                    _ambientSource = AmbientSource::INTERNAL;
+                    Log.warn("HP", "AMBIENT_TEMP lost, using ESP32 internal temp (%.1fF)", internalF);
+                }
             }
-        } else if (_ambientFallback && ambient != nullptr && ambient->isValid()) {
-            _ambientFallback = false;
-            Log.info("HP", "AMBIENT_TEMP sensor restored, internal temp failsafe disabled");
+        } else if (_ambientSource != AmbientSource::SENSOR && ambient != nullptr && ambient->isValid() && !_ambientFailoverTest) {
+            _ambientSource = AmbientSource::SENSOR;
+            Log.info("HP", "AMBIENT_TEMP sensor restored");
         }
     }, ts, false);
 }
@@ -1161,7 +1177,47 @@ bool GoodmanHP::isRvHoldActive() const {
 }
 
 bool GoodmanHP::isAmbientFallbackActive() const {
-    return _ambientFallback;
+    return _ambientSource != AmbientSource::SENSOR;
+}
+
+GoodmanHP::AmbientSource GoodmanHP::getAmbientSource() const {
+    return _ambientSource;
+}
+
+void GoodmanHP::setWeatherTemp(float tempF) {
+    _weatherTempF = tempF;
+    _weatherTempValid = true;
+    _weatherTempTick = millis();
+}
+
+void GoodmanHP::setWeatherStaleMs(uint32_t ms) {
+    _weatherStaleMs = ms;
+}
+
+void GoodmanHP::setAmbientFailoverTest(bool on) {
+    _ambientFailoverTest = on;
+    if (!on) {
+        Log.info("HP", "Ambient failover test ended");
+    } else {
+        Log.info("HP", "Ambient failover test started (30 min)");
+    }
+}
+
+bool GoodmanHP::isAmbientFailoverTestActive() const {
+    return _ambientFailoverTest;
+}
+
+float GoodmanHP::getWeatherTempF() const {
+    return _weatherTempF;
+}
+
+bool GoodmanHP::isWeatherTempValid() const {
+    return _weatherTempValid;
+}
+
+uint32_t GoodmanHP::getWeatherTempAgeSec() const {
+    if (!_weatherTempValid) return 0;
+    return (millis() - _weatherTempTick) / 1000;
 }
 
 uint32_t GoodmanHP::getRvHoldRemainingMs() const {
@@ -1223,6 +1279,15 @@ void GoodmanHP::validateOutputStates() {
     bool corrected = false;
 
     // === GLOBAL INVARIANTS (always enforced) ===
+
+    // Safety: if no ambient sensor data available at all, enforce LOW_TEMP outputs
+    TempSensor* ambSensor = getTempSensor("AMBIENT_TEMP");
+    if (ambSensor == nullptr || !ambSensor->isValid()) {
+        if (cnt != nullptr && cnt->isOn() && _state != State::DEFROST) {
+            Log.error("HP", "STATE CHECK: CNT on with no ambient data — forcing OFF for safety");
+            cnt->turnOff(); _cntActivated = false; corrected = true;
+        }
+    }
 
     // W must NEVER be on when O is active
     if (w != nullptr && w->isOn() && isOActive()) {

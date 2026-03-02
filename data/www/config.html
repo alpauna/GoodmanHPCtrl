@@ -130,6 +130,57 @@ button:hover{background:#45a049;}
 <div id='rvFailStatus' style='margin:8px 0;font-size:13px;padding:6px 10px;border-radius:4px;display:none'></div>
 <button type='button' class='btn-sm btn-red' id='clearRvFailBtn' style='display:none' onclick='clearRvFail()'>Clear RV Fail</button>
 </fieldset>
+<fieldset id='s-weather'><legend>Weather Ambient Fallback <span class='tag tag-live'>live</span></legend>
+<p style='color:var(--text-secondary);font-size:12px;margin:0 0 10px;'>Failover only &mdash; the local AMBIENT_TEMP sensor is always preferred. Weather data is used only when the local sensor is lost.</p>
+<label>Source</label>
+<select id='weatherSource' onchange='toggleWeather()'>
+<option value='none'>None</option>
+<option value='mqtt'>MQTT</option>
+<option value='http'>HTTP (OpenWeatherMap)</option>
+</select>
+<div id='weatherMqttSection' style='display:none'>
+<label>MQTT Topic (plain float value in &deg;F)</label>
+<input type='text' id='weatherMqttTopic' placeholder='homeassistant/sensor/outdoor_temp/state'>
+</div>
+<div id='weatherHttpSection' style='display:none'>
+<label>API Key (<a href='https://openweathermap.org/api' target='_blank' style='color:#4CAF50'>openweathermap.org</a>)</label>
+<input type='password' id='weatherApiKey'>
+<label>ZIP Code</label>
+<input type='text' id='weatherZipCode' placeholder='73099' maxlength='10'>
+<label>Country Code</label>
+<select id='weatherCountry'>
+<option value='US'>US - United States</option>
+<option value='CA'>CA - Canada</option>
+<option value='GB'>GB - United Kingdom</option>
+<option value='AU'>AU - Australia</option>
+<option value='DE'>DE - Germany</option>
+<option value='FR'>FR - France</option>
+<option value='ES'>ES - Spain</option>
+<option value='IT'>IT - Italy</option>
+<option value='NL'>NL - Netherlands</option>
+<option value='BR'>BR - Brazil</option>
+<option value='MX'>MX - Mexico</option>
+<option value='IN'>IN - India</option>
+<option value='JP'>JP - Japan</option>
+<option value='KR'>KR - South Korea</option>
+<option value='CN'>CN - China</option>
+<option value='NZ'>NZ - New Zealand</option>
+<option value='ZA'>ZA - South Africa</option>
+<option value='SE'>SE - Sweden</option>
+<option value='NO'>NO - Norway</option>
+<option value='PL'>PL - Poland</option>
+</select>
+</div>
+<div id='weatherStaleSection' style='display:none'>
+<label>Stale Timeout (minutes, 5-120)</label>
+<input type='number' id='weatherStaleMinutes' min='5' max='120' step='1' value='30'>
+</div>
+<div style='margin-top:8px'>
+<button type='button' class='btn-sm' id='btnFailoverTest' onclick='failoverTest(true)'>Test Failover (30 min)</button>
+<button type='button' class='btn-sm btn-red' id='btnFailoverStop' style='display:none' onclick='failoverTest(false)'>Stop Test</button>
+<span id='failoverTestStatus' style='margin-left:8px;font-size:13px;'></span>
+</div>
+</fieldset>
 <fieldset id='s-df'><legend>Defrost Controls <span class='tag tag-live'>live</span></legend>
 <label>Heat Runtime Threshold (minutes, 30-90)</label><input type='number' min='30' max='90' step='1' id='heatRuntimeThresholdMin'>
 <label>Minimum Defrost Time (seconds)</label><input type='number' step='1' id='defrostMinRuntimeSec'>
@@ -190,7 +241,7 @@ button:hover{background:#45a049;}
 <div id='status'></div>
 </div>
 <script>
-var fields=['systemName','mqttPrefix','wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','timezone','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','apPassword','ftpPassword','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec'];
+var fields=['systemName','mqttPrefix','wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','timezone','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','apPassword','ftpPassword','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','weatherSource','weatherMqttTopic','weatherApiKey','weatherZipCode','weatherCountry','weatherStaleMinutes'];
 var tzData={
 'America':{'New York':'EST5EDT,M3.2.0,M11.1.0','Chicago':'CST6CDT,M3.2.0,M11.1.0','Denver':'MST7MDT,M3.2.0,M11.1.0','Los Angeles':'PST8PDT,M3.2.0,M11.1.0','Phoenix':'MST7','Anchorage':'AKST9AKDT,M3.2.0,M11.1.0','Honolulu':'HST10','Halifax':'AST4ADT,M3.2.0,M11.1.0','St Johns':'NST3:30NDT,M3.2.0,M11.1.0','Mexico City':'CST6CDT,M4.1.0,M10.5.0','Sao Paulo':'<-03>3','Buenos Aires':'<-03>3','Santiago':'<-04>4<-03>,M9.1.6/24,M4.1.6/24'},
 'Europe':{'London':'GMT0BST,M3.5.0/1,M10.5.0','Paris':'CET-1CEST,M3.5.0,M10.5.0','Berlin':'CET-1CEST,M3.5.0,M10.5.0','Moscow':'MSK-3','Istanbul':'<+03>-3','Athens':'EET-2EEST,M3.5.0/3,M10.5.0'},
@@ -233,7 +284,27 @@ if(d.theme){document.documentElement.dataset.theme=d.theme;localStorage.setItem(
 if(d.systemName){var b=document.querySelector('.brand');if(b)b.textContent=d.systemName;document.title=document.title.replace('Goodman HP',d.systemName);}
 // RV Fail status
 if(d.rvFail){var el=document.getElementById('rvFailStatus');el.textContent='RV Fail is ACTIVE \u2014 compressor blocked.';el.style.display='block';el.style.background='#f8d7da';el.style.color='#721c24';document.getElementById('clearRvFailBtn').style.display='inline-block';}
+// Weather config
+if(d.weatherSource)document.getElementById('weatherSource').value=d.weatherSource;
+if(d.weatherMqttTopic)document.getElementById('weatherMqttTopic').value=d.weatherMqttTopic;
+if(d.weatherZipCode)document.getElementById('weatherZipCode').value=d.weatherZipCode;
+if(d.weatherCountry)document.getElementById('weatherCountry').value=d.weatherCountry||'US';
+if(d.weatherStaleMinutes)document.getElementById('weatherStaleMinutes').value=d.weatherStaleMinutes;
+toggleWeather();
 });
+function toggleWeather(){
+var s=document.getElementById('weatherSource').value;
+document.getElementById('weatherMqttSection').style.display=s==='mqtt'?'block':'none';
+document.getElementById('weatherHttpSection').style.display=s==='http'?'block':'none';
+document.getElementById('weatherStaleSection').style.display=s!=='none'?'block':'none';
+}
+function failoverTest(on){
+fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({failoverTest:on})}).then(r=>r.json()).then(r=>{
+var st=document.getElementById('failoverTestStatus');
+if(on){st.textContent='Failover test active (30 min)';st.style.color='#e67e22';document.getElementById('btnFailoverTest').style.display='none';document.getElementById('btnFailoverStop').style.display='inline-block';}
+else{st.textContent='Test stopped';st.style.color='';document.getElementById('btnFailoverTest').style.display='inline-block';document.getElementById('btnFailoverStop').style.display='none';}
+});
+}
 function clearRvFail(){
 fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clearRvFail:true})}).then(r=>r.json()).then(r=>{
 document.getElementById('rvFailStatus').style.display='none';
@@ -243,7 +314,7 @@ alert('RV Fail cleared');
 }
 function save(e){
 e.preventDefault();
-var d={};var numFields=['mqttPort','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec'];
+var d={};var numFields=['mqttPort','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','weatherStaleMinutes'];
 fields.forEach(f=>{var e=document.getElementById(f);var v=e?e.value:'';d[f]=numFields.indexOf(f)>=0&&v!==''?Number(v):v;});
 var mbVal=document.getElementById('maxLogSizeMB').value;
 d.maxLogSize=mbVal?parseInt(mbVal)*1024*1024:'';

@@ -20,6 +20,7 @@ class MQTTHandler {
     void publishState();
     void publishFault(const char* fault, const char* message, bool active);
     void setTopicPrefix(const String& prefix) { _topicPrefix = prefix; }
+    void setWeatherTopic(const String& topic);
     void startReconnect();
     void stopReconnect();
     void disconnect();
@@ -30,6 +31,7 @@ class MQTTHandler {
     Task* _tReconnect;
     GoodmanHP* _controller;
     String _topicPrefix = "goodman";
+    String _weatherTopic;
 
     void onConnect(bool sessionPresent);
     void onDisconnect(AsyncMqttClientDisconnectReason reason);

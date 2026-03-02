@@ -261,6 +261,13 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["safeMode"] = ctx->safeMode ? *(ctx->safeMode) : false;
         doc["sessionTimeoutMinutes"] = proj->sessionTimeoutMinutes;
         doc["pollIntervalSec"] = proj->pollIntervalSec;
+        // Weather ambient fallback
+        doc["weatherSource"] = proj->weatherSource.length() > 0 ? proj->weatherSource : "none";
+        doc["weatherMqttTopic"] = proj->weatherMqttTopic;
+        doc["weatherZipCode"] = proj->weatherZipCode;
+        doc["weatherCountry"] = proj->weatherCountry.length() > 0 ? proj->weatherCountry : "US";
+        doc["weatherStaleMinutes"] = proj->weatherStaleMinutes;
+        doc["rvFail"] = proj->rvFail;
         String json;
         serializeJson(doc, json);
         httpd_resp_set_type(req, "application/json");
@@ -588,6 +595,52 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     if (data["forceSafeMode"].is<bool>()) {
         proj->forceSafeMode = data["forceSafeMode"] | false;
         if (proj->forceSafeMode) needsReboot = true;
+    }
+
+    // Weather ambient fallback (live)
+    if (data["weatherSource"].is<const char*>()) {
+        String newSrc = data["weatherSource"] | String("none");
+        if (newSrc == "none" || newSrc == "mqtt" || newSrc == "http") {
+            proj->weatherSource = newSrc;
+            if (newSrc == "mqtt") {
+                String topic = data["weatherMqttTopic"] | proj->weatherMqttTopic;
+                proj->weatherMqttTopic = topic;
+                if (ctx->weatherTopicCb) ctx->weatherTopicCb(topic);
+                if (ctx->weatherHttpCb) ctx->weatherHttpCb(false);
+            } else if (newSrc == "http") {
+                if (ctx->weatherTopicCb) ctx->weatherTopicCb("");
+                if (ctx->weatherHttpCb) ctx->weatherHttpCb(true);
+            } else {
+                if (ctx->weatherTopicCb) ctx->weatherTopicCb("");
+                if (ctx->weatherHttpCb) ctx->weatherHttpCb(false);
+            }
+        }
+    }
+    if (data["weatherMqttTopic"].is<const char*>()) {
+        proj->weatherMqttTopic = data["weatherMqttTopic"] | String("");
+        if (proj->weatherSource == "mqtt" && ctx->weatherTopicCb) ctx->weatherTopicCb(proj->weatherMqttTopic);
+    }
+    if (data["weatherApiKey"].is<const char*>()) {
+        String key = data["weatherApiKey"] | String("******");
+        if (key != "******") proj->weatherApiKey = key;
+    }
+    if (data["weatherZipCode"].is<const char*>()) {
+        proj->weatherZipCode = data["weatherZipCode"] | String("");
+    }
+    if (data["weatherCountry"].is<const char*>()) {
+        proj->weatherCountry = data["weatherCountry"] | String("US");
+    }
+    if (data["weatherStaleMinutes"].is<int>()) {
+        uint32_t stale = data["weatherStaleMinutes"] | 30;
+        if (stale < 5) stale = 5;
+        if (stale > 120) stale = 120;
+        proj->weatherStaleMinutes = stale;
+        ctx->hpController->setWeatherStaleMs(stale * 60000UL);
+    }
+    // Failover test
+    if (data["failoverTest"].is<bool>()) {
+        bool test = data["failoverTest"];
+        if (ctx->failoverTestCb) ctx->failoverTestCb(test);
     }
 
     // Save to SD card
@@ -1124,6 +1177,13 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     doc["rvHold"] = ctx->hpController->isRvHoldActive();
     doc["rvHoldRemainSec"] = ctx->hpController->getRvHoldRemainingMs() / 1000;
     doc["ambientFallback"] = ctx->hpController->isAmbientFallbackActive();
+    { static const char* ambSrc[] = {"sensor","weather","internal"};
+      doc["ambientSource"] = ambSrc[(int)ctx->hpController->getAmbientSource()]; }
+    if (ctx->hpController->isWeatherTempValid()) {
+        doc["weatherTempF"] = serialized(String(ctx->hpController->getWeatherTempF(), 1));
+        doc["weatherTempAgeSec"] = ctx->hpController->getWeatherTempAgeSec();
+    }
+    doc["failoverTest"] = ctx->hpController->isAmbientFailoverTestActive();
     doc["stateValidating"] = ctx->hpController->isStateValidating();
     doc["stateValidationRemainSec"] = ctx->hpController->getStateValidationRemainingMs() / 1000;
     doc["manualOverride"] = ctx->hpController->isManualOverrideActive();

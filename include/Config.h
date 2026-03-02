@@ -67,6 +67,13 @@ struct ProjectInfo {
     String mqttPrefix;               // MQTT topic prefix (default "goodman"), topics: prefix/temps, prefix/state, etc.
     uint32_t sessionTimeoutMinutes;  // Session timeout in minutes (0=disabled/Basic Auth, default 0)
     uint8_t pollIntervalSec;         // Dashboard/pins polling interval in seconds (1-10, default 2)
+    // Weather ambient temperature fallback
+    String weatherSource;            // "none", "mqtt", or "http" (default "none")
+    String weatherMqttTopic;         // MQTT topic for weather temp (e.g., "homeassistant/sensor/outdoor_temp/state")
+    String weatherApiKey;            // OpenWeatherMap API key
+    String weatherZipCode;           // ZIP code (e.g., "73099")
+    String weatherCountry;           // Country code (default "US")
+    uint32_t weatherStaleMinutes;    // Max age before cached weather value expires (default 30)
 };
 
 class Config {
