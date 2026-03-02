@@ -625,7 +625,7 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     }
     if (data["weatherApiKey"].is<const char*>()) {
         String key = data["weatherApiKey"] | String("******");
-        if (key != "******") proj->weatherApiKey = key;
+        if (key != "******" && key.length() > 0) proj->weatherApiKey = key;
     }
     if (data["weatherZipCode"].is<const char*>()) {
         proj->weatherZipCode = data["weatherZipCode"] | String("");
@@ -633,12 +633,24 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     if (data["weatherCountry"].is<const char*>()) {
         proj->weatherCountry = data["weatherCountry"] | String("US");
     }
+    // Validate HTTP source requires API key
+    if (proj->weatherSource == "http" && proj->weatherApiKey.length() == 0) {
+        errors += "HTTP weather source requires an API key. ";
+        proj->weatherSource = "none";
+        if (ctx->weatherHttpCb) ctx->weatherHttpCb(false);
+    }
     if (data["weatherRefreshMinutes"].is<int>()) {
         uint32_t refresh = data["weatherRefreshMinutes"] | 10;
         if (refresh < 1) refresh = 1;
         if (refresh > 60) refresh = 60;
         proj->weatherRefreshMinutes = refresh;
         if (ctx->weatherRefreshCb) ctx->weatherRefreshCb(refresh);
+        // Auto-correct stale if now below 2x refresh
+        uint32_t minStale = refresh * 2;
+        if (proj->weatherStaleMinutes < minStale) {
+            proj->weatherStaleMinutes = minStale;
+            ctx->hpController->setWeatherStaleMs(minStale * 60000UL);
+        }
     }
     if (data["internalTempOffsetF"].is<float>() || data["internalTempOffsetF"].is<int>()) {
         float offset = data["internalTempOffsetF"] | 0.0f;

@@ -308,7 +308,7 @@ if(d.weatherZipCode)document.getElementById('weatherZipCode').value=d.weatherZip
 if(d.weatherCountry)document.getElementById('weatherCountry').value=d.weatherCountry||'US';
 if(d.weatherStaleMinutes)document.getElementById('weatherStaleMinutes').value=d.weatherStaleMinutes;
 if(d.weatherRefreshMinutes)document.getElementById('weatherRefreshMinutes').value=d.weatherRefreshMinutes;
-var akEl=document.getElementById('apiKeyStatus');if(d.weatherApiKeySet){akEl.className='pw-set';akEl.textContent='Set';}else{akEl.className='pw-unset';akEl.textContent='Not Set';}
+var akEl=document.getElementById('apiKeyStatus');if(d.weatherApiKeySet){akEl.className='pw-set';akEl.textContent='Set';document.getElementById('weatherApiKey').value='******';}else{akEl.className='pw-unset';akEl.textContent='Not Set';}
 toggleWeather();
 enforceStaleMin();
 checkCalibNeeded();
@@ -340,16 +340,17 @@ document.getElementById('weatherMqttSection').style.display=s==='mqtt'?'block':'
 document.getElementById('weatherHttpSection').style.display=s==='http'?'block':'none';
 document.getElementById('weatherStaleSection').style.display=s!=='none'?'block':'none';
 }
-function enforceStaleMin(){
+function enforceStaleMin(src){
 var rEl=document.getElementById('weatherRefreshMinutes');
 var r=parseInt(rEl.value)||10;
 var sEl=document.getElementById('weatherStaleMinutes');
 var minStale=r*2;
-if(parseInt(sEl.min)<minStale)sEl.min=minStale;
-if(parseInt(sEl.value)<minStale)sEl.value=minStale;
+var curStale=parseInt(sEl.value)||30;
+sEl.min=minStale;
+if(src==='refresh'||curStale<minStale)sEl.value=minStale;
 }
-document.getElementById('weatherRefreshMinutes').addEventListener('input',enforceStaleMin);
-document.getElementById('weatherStaleMinutes').addEventListener('input',enforceStaleMin);
+document.getElementById('weatherRefreshMinutes').addEventListener('input',function(){enforceStaleMin('refresh');});
+document.getElementById('weatherStaleMinutes').addEventListener('input',function(){enforceStaleMin('stale');});
 function snapshotValues(){
 _origValues={};
 var form=document.getElementById('cf');
@@ -440,6 +441,7 @@ if(ap!==apc){var s=document.getElementById('status');s.className='err';s.textCon
 d.adminPassword=ap;
 d.curAdminPw=document.getElementById('curAdminPw').value;
 }
+if(d.weatherSource==='http'){var ak=d.weatherApiKey||'';if(!ak){var s=document.getElementById('status');s.className='err';s.textContent='HTTP weather source requires an API key.';s.style.display='block';return false;}}
 var s=document.getElementById('status');
 fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r=>r.json()).then(r=>{
 s.className=r.reboot?'info':r.error?'err':'ok';
