@@ -531,10 +531,16 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     const char* wCountry = weatherObj["country"];
     proj.weatherCountry = (wCountry != nullptr && strlen(wCountry) > 0) ? String(wCountry) : "US";
     proj.weatherStaleMinutes = weatherObj["staleMinutes"] | 30;
-    Serial.printf("Read weather: source=%s topic=%s zip=%s country=%s stale=%umin\n",
+    proj.weatherRefreshMinutes = weatherObj["refreshMinutes"] | 10;
+    if (proj.weatherRefreshMinutes < 1) proj.weatherRefreshMinutes = 1;
+    if (proj.weatherRefreshMinutes > 60) proj.weatherRefreshMinutes = 60;
+    // Enforce stale >= 2x refresh
+    uint32_t minStale = proj.weatherRefreshMinutes * 2;
+    if (proj.weatherStaleMinutes < minStale) proj.weatherStaleMinutes = minStale;
+    Serial.printf("Read weather: source=%s topic=%s zip=%s country=%s stale=%umin refresh=%umin\n",
                   proj.weatherSource.c_str(), proj.weatherMqttTopic.c_str(),
                   proj.weatherZipCode.c_str(), proj.weatherCountry.c_str(),
-                  proj.weatherStaleMinutes);
+                  proj.weatherStaleMinutes, proj.weatherRefreshMinutes);
 
     // Load admin password (encrypted same as WiFi/MQTT passwords)
     const char* adminPw = doc["admin"]["password"];
@@ -724,6 +730,7 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     weatherObj["zipCode"] = proj.weatherZipCode;
     weatherObj["country"] = proj.weatherCountry.length() > 0 ? proj.weatherCountry : "US";
     weatherObj["staleMinutes"] = proj.weatherStaleMinutes;
+    weatherObj["refreshMinutes"] = proj.weatherRefreshMinutes;
 
     JsonObject admin = doc["admin"].to<JsonObject>();
     admin["password"] = "";
@@ -888,6 +895,7 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     weatherUpd["zipCode"] = proj.weatherZipCode;
     weatherUpd["country"] = proj.weatherCountry.length() > 0 ? proj.weatherCountry : "US";
     weatherUpd["staleMinutes"] = proj.weatherStaleMinutes;
+    weatherUpd["refreshMinutes"] = proj.weatherRefreshMinutes;
 
     JsonObject admin = doc["admin"].to<JsonObject>();
     admin["password"] = encryptPassword(_adminPasswordHash);

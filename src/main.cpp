@@ -865,6 +865,9 @@ void setup() {
       if (enable) { tFetchWeather.enableDelayed(0); }
       else tFetchWeather.disable();
   });
+  webHandler.setWeatherRefreshCallback([](uint32_t minutes) {
+      tFetchWeather.setInterval(minutes * TASK_MINUTE);
+  });
   webHandler.setFailoverTestCallback([](bool on) {
       hpController.setAmbientFailoverTest(on);
       if (on) {
@@ -897,7 +900,8 @@ void setup() {
   if (proj.weatherSource == "mqtt" && proj.weatherMqttTopic.length() > 0) {
       mqttHandler.setWeatherTopic(proj.weatherMqttTopic);
   }
-  // Enable weather HTTP fetch task (fire immediately, then every 10 min)
+  // Enable weather HTTP fetch task with configurable interval
+  tFetchWeather.setInterval(proj.weatherRefreshMinutes * TASK_MINUTE);
   if (proj.weatherSource == "http") {
       tFetchWeather.enableDelayed(0);
   }

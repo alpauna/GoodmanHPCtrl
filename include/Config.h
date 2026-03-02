@@ -74,6 +74,7 @@ struct ProjectInfo {
     String weatherZipCode;           // ZIP code (e.g., "73099")
     String weatherCountry;           // Country code (default "US")
     uint32_t weatherStaleMinutes;    // Max age before cached weather value expires (default 30)
+    uint32_t weatherRefreshMinutes;  // HTTP fetch interval in minutes (default 10, range 1-60)
 };
 
 class Config {

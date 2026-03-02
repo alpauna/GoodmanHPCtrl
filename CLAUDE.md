@@ -68,6 +68,8 @@ Task-based cooperative scheduling using TaskScheduler with two scheduler instanc
 | `tNtpSync` | 2h | NTP time sync (enabled on WiFi connect) |
 | `tSaveRuntime` | 5min | Persist heat runtime, defrost state, and rvFail to SD card |
 | `tAPReconnect` | `apFallbackSeconds` | WiFi reconnect attempts while in AP mode (disabled by default) |
+| `tFetchWeather` | configurable (default 10min) | Fetch outdoor temp from OpenWeatherMap HTTP API (disabled when source != "http") |
+| `tFailoverTestEnd` | 30min x1 | One-shot: ends ambient failover test after 30 minutes |
 
 ### Memory Management
 
@@ -106,7 +108,8 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
   - **LPS fault protection**: When LPS input goes LOW (low refrigerant pressure), immediately shuts down CNT if running and blocks CNT activation. W (auxiliary heat) continuously follows Y during active fault: ON when Y active and O not active, OFF when Y drops or O active. W is never turned on in COOL mode. Auto-recovers when LPS goes HIGH (W turned off). Publishes fault events via `LPSFaultCallback`. `lpsFault` field included in `goodman/state` MQTT payload.
   - **Low ambient temperature protection**: When AMBIENT_TEMP drops below configurable threshold (default 20°F) and stays below for 10 continuous minutes (`LOW_TEMP_VALIDATION_MS`), enters `LOW_TEMP` state: shuts down CNT, turns off FAN and RV. Turns on W (auxiliary heat) only if not in COOL mode (O active). W is never turned on in COOL mode. Blocks CNT activation and state updates while active. Auto-recovers when temp stays above threshold for 10 continuous minutes. If temp reverses during validation window, pending transition is cancelled (prevents fluttering). `_lowTempPendingEntry`/`_lowTempPendingExit`/`_lowTempPendingTick` track validation state. `lowTemp`, `lowTempPendingEntry`, `lowTempPendingExit`, `lowTempPendingRemainSec` in `/state` JSON and MQTT payload.
   - **State validation delay**: After any state transition, holds the new state for a configurable period (default 30s) before allowing another normal-priority change. OFF and ERROR bypass the timer (high priority). HEAT, COOL, DEFROST, LOW_TEMP are gated. LOW_TEMP output protection (CNT/FAN/RV off) is immediate but state label deferred until validation completes. Dashboard "State Hold" pill with countdown. Configurable via `heatpump.stateValidation.delayMs` (0–300s, live)
-  - **Output state validation**: Every 10s, `validateOutputStates()` verifies outputs against a table-driven expected-state map. Global invariants: W off when O active, CNT off during faults. Per-state table with auto-correction. Logs errors on mismatch, "State check OK" every 30s when clean. Skips during transitions/lockout/override
+  - **Output state validation**: Every 10s, `validateOutputStates()` verifies outputs against a table-driven expected-state map. Global invariants: W off when O active, CNT off during faults, CNT off when no ambient data available. Per-state table with auto-correction. Logs errors on mismatch, "State check OK" every 30s when clean. Skips during transitions/lockout/override
+  - **Ambient temperature fallback (3-tier)**: When AMBIENT_TEMP sensor is invalid, `_tskCheckTemps` (10s) uses cached weather data if fresh, otherwise falls back to ESP32 internal die temp (`temperatureRead()`). `enum class AmbientSource { SENSOR, WEATHER, INTERNAL }` tracks current source. Weather data cached in `_weatherTempF` with staleness timeout (`_weatherStaleMs`, default 30 min). Sources: MQTT subscription (plain float payload) or OpenWeatherMap HTTP API (`tFetchWeather`, configurable interval, default 10 min). `setAmbientFailoverTest(bool)` forces sensor invalid for testing (30 min auto-cancel via `tFailoverTestEnd`). State validator enforces CNT OFF when no ambient data available (sensor invalid + no weather). `ambientSource`, `weatherTempF`, `weatherTempAgeSec`, `failoverTest` in `/state` JSON.
   - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `restoreSoftwareDefrost()`, `isDefrostTransitionActive()`, `isDefrostCntPendingActive()`, `isDefrostExitingActive()`, `getDefrostTransitionRemainingMs()`, `getDefrostCntPendingRemainingMs()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `isLowTempPendingEntry()`, `isLowTempPendingExit()`, `getLowTempPendingRemainingMs()`, `setLowTempThreshold()`, `getLowTempThreshold()`, `setDefrostMinRuntimeMs()`, `getDefrostMinRuntimeMs()`, `setDefrostExitTempF()`, `getDefrostExitTempF()`, `setHeatRuntimeThresholdMs()`, `getHeatRuntimeThresholdMs()`, `isStateValidating()`, `getStateValidationRemainingMs()`, `setStateValidationMs()`, `getStateValidationMs()`
 - **OutPin** (`OutPin.h/cpp`): Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
 - **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, and confirmed-state debouncing. `isActive()` returns the debounced/validated state (not live GPIO). On pin change: ISR queues event → `_tGetInputs` (500ms) reads live GPIO and starts a configurable delay task (default 10s) → after delay, GPIO is re-read to validate the pin is still in the expected state. Mismatches are discarded as false triggers and logged as warnings. Both activation and deactivation go through the full delay. Configurable via `heatpump.inputDelay.ms` (0–60s, live). Methods: `readLiveState()` (bypass debounce), `setDelay(ms)`, `getDelay()`, `setPendingState()`.
@@ -139,6 +142,7 @@ I2C: SDA=GPIO8, SCL=GPIO9 — MCP9600 thermocouple amplifier at 0x67 (LIQUID_TEM
   - `goodman/temps` — all valid temp sensor values as JSON, published on any sensor change. Format: `{"COMPRESSOR_TEMP":72.5,"SUCTION_TEMP":65.2,"LIQUID_TEMP":185.3,...}`
   - `goodman/state` — state + inputs/outputs as JSON, published on state transitions. Format: `{"state":"HEAT","inputs":{...},"outputs":{...},"heatRuntimeMin":42,"defrost":false,"defrostTransition":false,"defrostCntPending":false,"defrostExiting":false,"lpsFault":false,"lowTemp":false}`
   - `goodman/fault` — fault events as JSON, published when faults activate/clear. Format: `{"fault":"LPS","message":"Low refrigerant pressure","active":true}`
+  - Configurable weather topic subscription (e.g., `homeassistant/sensor/outdoor_temp/state`) — parses plain float payload as outdoor temp for ambient fallback
 
 ### Configuration
 
@@ -172,6 +176,13 @@ struct ProjectInfo {
     String apPassword;           // AP mode password override (empty = auto-generate at runtime)
     uint32_t tempHistoryIntervalSec; // Temp history capture interval in seconds (30-300, default 120)
     String theme;                // UI theme: "light" or "dark" (default "light")
+    String weatherSource;        // Weather source: "none", "mqtt", or "http" (default "none")
+    String weatherMqttTopic;     // MQTT topic for weather temp (e.g., "homeassistant/sensor/outdoor_temp/state")
+    String weatherApiKey;        // OpenWeatherMap API key (encrypted with $AES$/$ENC$)
+    String weatherZipCode;       // ZIP code for HTTP weather (e.g., "57106")
+    String weatherCountry;       // Country code (default "US")
+    uint32_t weatherStaleMinutes; // Max age before cached weather expires (default 30)
+    uint32_t weatherRefreshMinutes; // HTTP fetch interval in minutes (default 10, range 1-60)
 };
 ```
 
@@ -227,6 +238,7 @@ JSON config stored on SD card at `/config.txt` (Arduino SD library, SPI interfac
     "inputDelay": { "ms": 10000 }
   },
   "tempHistory": { "intervalSec": 120 },
+  "weather": { "source": "none", "mqttTopic": "", "apiKey": "", "zipCode": "", "country": "US", "staleMinutes": 30, "refreshMinutes": 10 },
   "ui": { "theme": "dark" },
   "admin": { "password": "" },
   "sensors": { "temp": { ... } }

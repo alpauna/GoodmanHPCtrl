@@ -267,6 +267,8 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["weatherZipCode"] = proj->weatherZipCode;
         doc["weatherCountry"] = proj->weatherCountry.length() > 0 ? proj->weatherCountry : "US";
         doc["weatherStaleMinutes"] = proj->weatherStaleMinutes;
+        doc["weatherRefreshMinutes"] = proj->weatherRefreshMinutes;
+        doc["weatherApiKeySet"] = proj->weatherApiKey.length() > 0;
         doc["rvFail"] = proj->rvFail;
         String json;
         serializeJson(doc, json);
@@ -630,10 +632,20 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     if (data["weatherCountry"].is<const char*>()) {
         proj->weatherCountry = data["weatherCountry"] | String("US");
     }
+    if (data["weatherRefreshMinutes"].is<int>()) {
+        uint32_t refresh = data["weatherRefreshMinutes"] | 10;
+        if (refresh < 1) refresh = 1;
+        if (refresh > 60) refresh = 60;
+        proj->weatherRefreshMinutes = refresh;
+        if (ctx->weatherRefreshCb) ctx->weatherRefreshCb(refresh);
+    }
     if (data["weatherStaleMinutes"].is<int>()) {
         uint32_t stale = data["weatherStaleMinutes"] | 30;
         if (stale < 5) stale = 5;
         if (stale > 120) stale = 120;
+        // Enforce stale >= 2x refresh
+        uint32_t minStale = proj->weatherRefreshMinutes * 2;
+        if (stale < minStale) stale = minStale;
         proj->weatherStaleMinutes = stale;
         ctx->hpController->setWeatherStaleMs(stale * 60000UL);
     }

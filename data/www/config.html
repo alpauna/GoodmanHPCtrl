@@ -24,6 +24,8 @@ button:hover{background:#45a049;}
 .btn-red{background:#e74c3c;}
 .btn-red:hover{background:#c0392b;}
 #status{margin-top:15px;padding:10px;border-radius:4px;display:none;}
+#saveFloat{display:none;position:fixed;bottom:24px;right:24px;z-index:100;background:#4CAF50;color:#fff;border:none;border-radius:50px;padding:10px 20px;cursor:pointer;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3);transition:opacity 0.3s;align-items:center;gap:6px;}
+#saveFloat:hover{background:#45a049;}
 .ok{background:#d4edda;color:#155724;display:block!important;}
 .err{background:#f8d7da;color:#721c24;display:block!important;}
 .info{background:#d1ecf1;color:#0c5460;display:block!important;}
@@ -143,7 +145,7 @@ button:hover{background:#45a049;}
 <input type='text' id='weatherMqttTopic' placeholder='homeassistant/sensor/outdoor_temp/state'>
 </div>
 <div id='weatherHttpSection' style='display:none'>
-<label>API Key (<a href='https://openweathermap.org/api' target='_blank' style='color:#4CAF50'>openweathermap.org</a>)</label>
+<label>API Key (<a href='https://openweathermap.org/api' target='_blank' style='color:#4CAF50'>openweathermap.org</a>) <span id='apiKeyStatus' class='pw-unset' style='font-size:12px;padding:2px 8px;border-radius:10px;'>Not Set</span></label>
 <input type='password' id='weatherApiKey'>
 <label>ZIP Code</label>
 <input type='text' id='weatherZipCode' placeholder='73099' maxlength='10'>
@@ -170,6 +172,8 @@ button:hover{background:#45a049;}
 <option value='NO'>NO - Norway</option>
 <option value='PL'>PL - Poland</option>
 </select>
+<label>Refresh Interval (minutes, 1-60)</label>
+<input type='number' id='weatherRefreshMinutes' min='1' max='60' step='1' value='10'>
 </div>
 <div id='weatherStaleSection' style='display:none'>
 <label>Stale Timeout (minutes, 5-120)</label>
@@ -240,8 +244,12 @@ button:hover{background:#45a049;}
 </fieldset>
 <div id='status'></div>
 </div>
+<button type='button' id='saveFloat' onclick='document.querySelector("#cf [type=submit]").scrollIntoView({behavior:"smooth",block:"center"})'>&#8595; Save Changes</button>
 <script>
-var fields=['systemName','mqttPrefix','wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','timezone','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','apPassword','ftpPassword','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','weatherSource','weatherMqttTopic','weatherApiKey','weatherZipCode','weatherCountry','weatherStaleMinutes'];
+var _dirty=false;
+var _origValues={};
+window.addEventListener('beforeunload',function(e){if(_dirty){e.preventDefault();e.returnValue='';}});
+var fields=['systemName','mqttPrefix','wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','timezone','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','apPassword','ftpPassword','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','weatherSource','weatherMqttTopic','weatherApiKey','weatherZipCode','weatherCountry','weatherStaleMinutes','weatherRefreshMinutes'];
 var tzData={
 'America':{'New York':'EST5EDT,M3.2.0,M11.1.0','Chicago':'CST6CDT,M3.2.0,M11.1.0','Denver':'MST7MDT,M3.2.0,M11.1.0','Los Angeles':'PST8PDT,M3.2.0,M11.1.0','Phoenix':'MST7','Anchorage':'AKST9AKDT,M3.2.0,M11.1.0','Honolulu':'HST10','Halifax':'AST4ADT,M3.2.0,M11.1.0','St Johns':'NST3:30NDT,M3.2.0,M11.1.0','Mexico City':'CST6CDT,M4.1.0,M10.5.0','Sao Paulo':'<-03>3','Buenos Aires':'<-03>3','Santiago':'<-04>4<-03>,M9.1.6/24,M4.1.6/24'},
 'Europe':{'London':'GMT0BST,M3.5.0/1,M10.5.0','Paris':'CET-1CEST,M3.5.0,M10.5.0','Berlin':'CET-1CEST,M3.5.0,M10.5.0','Moscow':'MSK-3','Istanbul':'<+03>-3','Athens':'EET-2EEST,M3.5.0/3,M10.5.0'},
@@ -290,13 +298,49 @@ if(d.weatherMqttTopic)document.getElementById('weatherMqttTopic').value=d.weathe
 if(d.weatherZipCode)document.getElementById('weatherZipCode').value=d.weatherZipCode;
 if(d.weatherCountry)document.getElementById('weatherCountry').value=d.weatherCountry||'US';
 if(d.weatherStaleMinutes)document.getElementById('weatherStaleMinutes').value=d.weatherStaleMinutes;
+if(d.weatherRefreshMinutes)document.getElementById('weatherRefreshMinutes').value=d.weatherRefreshMinutes;
+var akEl=document.getElementById('apiKeyStatus');if(d.weatherApiKeySet){akEl.className='pw-set';akEl.textContent='Set';}else{akEl.className='pw-unset';akEl.textContent='Not Set';}
 toggleWeather();
+enforceStaleMin();
+snapshotValues();
+trackDirty();
 });
 function toggleWeather(){
 var s=document.getElementById('weatherSource').value;
 document.getElementById('weatherMqttSection').style.display=s==='mqtt'?'block':'none';
 document.getElementById('weatherHttpSection').style.display=s==='http'?'block':'none';
 document.getElementById('weatherStaleSection').style.display=s!=='none'?'block':'none';
+}
+function enforceStaleMin(){
+var rEl=document.getElementById('weatherRefreshMinutes');
+var r=parseInt(rEl.value)||10;
+var sEl=document.getElementById('weatherStaleMinutes');
+var minStale=r*2;
+if(parseInt(sEl.min)<minStale)sEl.min=minStale;
+if(parseInt(sEl.value)<minStale)sEl.value=minStale;
+}
+document.getElementById('weatherRefreshMinutes').addEventListener('input',enforceStaleMin);
+document.getElementById('weatherStaleMinutes').addEventListener('input',enforceStaleMin);
+function snapshotValues(){
+_origValues={};
+var form=document.getElementById('cf');
+var els=form.querySelectorAll('input,select');
+els.forEach(function(e){if(e.id)_origValues[e.id]=e.type==='checkbox'?e.checked:e.value;});
+}
+function checkDirty(){
+var form=document.getElementById('cf');
+var els=form.querySelectorAll('input,select');
+for(var i=0;i<els.length;i++){
+var e=els[i];if(!e.id||_origValues[e.id]===undefined)continue;
+var cur=e.type==='checkbox'?e.checked:e.value;
+if(cur!=_origValues[e.id]){_dirty=true;document.getElementById('saveFloat').style.display='flex';return;}
+}
+_dirty=false;document.getElementById('saveFloat').style.display='none';
+}
+function trackDirty(){
+var form=document.getElementById('cf');
+form.addEventListener('input',checkDirty);
+form.addEventListener('change',checkDirty);
 }
 function failoverTest(on){
 fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({failoverTest:on})}).then(r=>r.json()).then(r=>{
@@ -314,7 +358,7 @@ alert('RV Fail cleared');
 }
 function save(e){
 e.preventDefault();
-var d={};var numFields=['mqttPort','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','weatherStaleMinutes'];
+var d={};var numFields=['mqttPort','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','weatherStaleMinutes','weatherRefreshMinutes'];
 fields.forEach(f=>{var e=document.getElementById(f);var v=e?e.value:'';d[f]=numFields.indexOf(f)>=0&&v!==''?Number(v):v;});
 var mbVal=document.getElementById('maxLogSizeMB').value;
 d.maxLogSize=mbVal?parseInt(mbVal)*1024*1024:'';
@@ -347,6 +391,7 @@ if(ap.length>0&&!r.error){adminPwSet=true;document.getElementById('adminPwStatus
 var newTheme=document.getElementById('theme').value;
 document.documentElement.dataset.theme=newTheme;
 localStorage.setItem('hp-theme',newTheme);
+snapshotValues();_dirty=false;document.getElementById('saveFloat').style.display='none';
 }).catch(err=>{s.className='err';s.textContent='Error: '+err;s.style.display='block';});
 return false;}
 function ftpControl(mins){

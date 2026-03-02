@@ -1133,6 +1133,8 @@ void WebHandler::setupRoutes() {
                 doc["weatherZipCode"] = proj->weatherZipCode;
                 doc["weatherCountry"] = proj->weatherCountry.length() > 0 ? proj->weatherCountry : "US";
                 doc["weatherStaleMinutes"] = proj->weatherStaleMinutes;
+                doc["weatherRefreshMinutes"] = proj->weatherRefreshMinutes;
+                doc["weatherApiKeySet"] = proj->weatherApiKey.length() > 0;
                 doc["rvFail"] = proj->rvFail;
                 String json;
                 serializeJson(doc, json);
@@ -2052,10 +2054,20 @@ void WebHandler::setupRoutes() {
         if (data["weatherCountry"].is<const char*>()) {
             proj->weatherCountry = data["weatherCountry"] | String("US");
         }
+        if (data["weatherRefreshMinutes"].is<int>()) {
+            uint32_t refresh = data["weatherRefreshMinutes"] | 10;
+            if (refresh < 1) refresh = 1;
+            if (refresh > 60) refresh = 60;
+            proj->weatherRefreshMinutes = refresh;
+            if (_weatherRefreshCb) _weatherRefreshCb(refresh);
+        }
         if (data["weatherStaleMinutes"].is<int>()) {
             uint32_t stale = data["weatherStaleMinutes"] | 30;
             if (stale < 5) stale = 5;
             if (stale > 120) stale = 120;
+            // Enforce stale >= 2x refresh
+            uint32_t minStale = proj->weatherRefreshMinutes * 2;
+            if (stale < minStale) stale = minStale;
             proj->weatherStaleMinutes = stale;
             _hpController->setWeatherStaleMs(stale * 60000UL);
         }
@@ -2132,6 +2144,7 @@ bool WebHandler::beginSecure(const uint8_t* cert, size_t certLen, const uint8_t*
     _httpsCtx.weatherTopicCb = _weatherTopicCb;
     _httpsCtx.weatherHttpCb = _weatherHttpCb;
     _httpsCtx.failoverTestCb = _failoverTestCb;
+    _httpsCtx.weatherRefreshCb = _weatherRefreshCb;
 
     _httpsServer = httpsStart(cert, certLen, key, keyLen, &_httpsCtx);
     return _httpsServer != nullptr;

@@ -42,6 +42,7 @@ class WebHandler {
     typedef std::function<void(const String&)> WeatherTopicCallback;
     typedef std::function<void(bool)> WeatherHttpCallback;
     typedef std::function<void(bool)> FailoverTestCallback;
+    typedef std::function<void(uint32_t)> WeatherRefreshCallback;
     void setTempHistory(TempHistory* th) { _tempHistory = th; }
     void setFtpControl(FtpEnableCallback enableCb, FtpDisableCallback disableCb, FtpStatusCallback statusCb);
     void setTempHistoryIntervalCallback(TempHistoryIntervalCallback cb) { _tempHistIntervalCb = cb; }
@@ -51,6 +52,7 @@ class WebHandler {
     void setWeatherTopicCallback(WeatherTopicCallback cb) { _weatherTopicCb = cb; }
     void setWeatherHttpCallback(WeatherHttpCallback cb) { _weatherHttpCb = cb; }
     void setFailoverTestCallback(FailoverTestCallback cb) { _failoverTestCb = cb; }
+    void setWeatherRefreshCallback(WeatherRefreshCallback cb) { _weatherRefreshCb = cb; }
 
   private:
     AsyncWebServer _server;
@@ -91,6 +93,7 @@ class WebHandler {
     WeatherTopicCallback _weatherTopicCb;
     WeatherHttpCallback _weatherHttpCb;
     FailoverTestCallback _failoverTestCb;
+    WeatherRefreshCallback _weatherRefreshCb;
     bool* _ftpActivePtr = nullptr;
     unsigned long* _ftpStopTimePtr = nullptr;
 
