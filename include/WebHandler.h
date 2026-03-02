@@ -39,12 +39,22 @@ class WebHandler {
     typedef std::function<void(uint32_t, bool)> DisplayConfigCallback;
     typedef std::function<String()> APStartCallback;
     typedef std::function<void()> APStopCallback;
+    typedef std::function<void(const String&)> WeatherTopicCallback;
+    typedef std::function<void(bool)> WeatherHttpCallback;
+    typedef std::function<void(bool)> FailoverTestCallback;
+    typedef std::function<void(uint32_t)> WeatherRefreshCallback;
+    typedef std::function<bool()> MqttConnectedCallback;
     void setTempHistory(TempHistory* th) { _tempHistory = th; }
     void setFtpControl(FtpEnableCallback enableCb, FtpDisableCallback disableCb, FtpStatusCallback statusCb);
     void setTempHistoryIntervalCallback(TempHistoryIntervalCallback cb) { _tempHistIntervalCb = cb; }
     void setDisplayConfigCallback(DisplayConfigCallback cb) { _displayConfigCb = cb; }
     void setFtpState(bool* activePtr, unsigned long* stopTimePtr);
     void setAPCallbacks(APStartCallback startCb, APStopCallback stopCb);
+    void setWeatherTopicCallback(WeatherTopicCallback cb) { _weatherTopicCb = cb; }
+    void setWeatherHttpCallback(WeatherHttpCallback cb) { _weatherHttpCb = cb; }
+    void setFailoverTestCallback(FailoverTestCallback cb) { _failoverTestCb = cb; }
+    void setWeatherRefreshCallback(WeatherRefreshCallback cb) { _weatherRefreshCb = cb; }
+    void setMqttConnectedCallback(MqttConnectedCallback cb) { _mqttConnectedCb = cb; }
 
   private:
     AsyncWebServer _server;
@@ -82,6 +92,11 @@ class WebHandler {
     DisplayConfigCallback _displayConfigCb;
     APStartCallback _apStartCb;
     APStopCallback _apStopCb;
+    WeatherTopicCallback _weatherTopicCb;
+    WeatherHttpCallback _weatherHttpCb;
+    FailoverTestCallback _failoverTestCb;
+    WeatherRefreshCallback _weatherRefreshCb;
+    MqttConnectedCallback _mqttConnectedCb;
     bool* _ftpActivePtr = nullptr;
     unsigned long* _ftpStopTimePtr = nullptr;
 

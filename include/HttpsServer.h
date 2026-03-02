@@ -44,6 +44,11 @@ struct HttpsContext {
     bool* safeMode;
     uint32_t* crashBootCount;
     SessionManager* sessionMgr;
+    std::function<void(const String&)> weatherTopicCb;
+    std::function<void(bool)> weatherHttpCb;
+    std::function<void(bool)> failoverTestCb;
+    std::function<void(uint32_t)> weatherRefreshCb;
+    std::function<bool()> mqttConnectedCb;
 };
 
 // Opaque handle

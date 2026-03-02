@@ -20,6 +20,7 @@
 #include "Logger.h"
 #include "SessionManager.h"
 #include <lwip/sockets.h>
+#include <HTTPClient.h>
 
 extern uint8_t getCpuLoadCore0();
 extern uint8_t getCpuLoadCore1();
@@ -268,6 +269,16 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["lockedRotorThreshold"] = proj->lockedRotorThreshold;
         doc["lockedRotorTimeoutSec"] = proj->lockedRotorTimeoutMs / 1000;
         doc["lockedRotorFault"] = proj->lockedRotorFault;
+        // Weather ambient fallback
+        doc["weatherSource"] = proj->weatherSource.length() > 0 ? proj->weatherSource : "none";
+        doc["weatherMqttTopic"] = proj->weatherMqttTopic;
+        doc["weatherZipCode"] = proj->weatherZipCode;
+        doc["weatherCountry"] = proj->weatherCountry.length() > 0 ? proj->weatherCountry : "US";
+        doc["weatherStaleMinutes"] = proj->weatherStaleMinutes;
+        doc["weatherRefreshMinutes"] = proj->weatherRefreshMinutes;
+        doc["internalTempOffsetF"] = serialized(String(proj->internalTempOffsetF, 1));
+        doc["weatherApiKeySet"] = proj->weatherApiKey.length() > 0;
+        doc["rvFail"] = proj->rvFail;
         String json;
         serializeJson(doc, json);
         httpd_resp_set_type(req, "application/json");
@@ -640,9 +651,130 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         if (proj->forceSafeMode) needsReboot = true;
     }
 
+    // Weather ambient fallback (live)
+    if (data["weatherSource"].is<const char*>()) {
+        String newSrc = data["weatherSource"] | String("none");
+        if (newSrc == "none" || newSrc == "mqtt" || newSrc == "http" || newSrc == "both") {
+            proj->weatherSource = newSrc;
+            bool wantMqtt = (newSrc == "mqtt" || newSrc == "both");
+            bool wantHttp = (newSrc == "http" || newSrc == "both");
+            if (wantMqtt) {
+                String topic = data["weatherMqttTopic"] | proj->weatherMqttTopic;
+                proj->weatherMqttTopic = topic;
+                if (ctx->weatherTopicCb) ctx->weatherTopicCb(topic);
+            } else {
+                if (ctx->weatherTopicCb) ctx->weatherTopicCb("");
+            }
+            if (ctx->weatherHttpCb) ctx->weatherHttpCb(wantHttp);
+        }
+    }
+    if (data["weatherMqttTopic"].is<const char*>()) {
+        proj->weatherMqttTopic = data["weatherMqttTopic"] | String("");
+        if ((proj->weatherSource == "mqtt" || proj->weatherSource == "both") && ctx->weatherTopicCb) ctx->weatherTopicCb(proj->weatherMqttTopic);
+    }
+    if (data["weatherApiKey"].is<const char*>()) {
+        String key = data["weatherApiKey"] | String("******");
+        if (key != "******" && key.length() > 0) proj->weatherApiKey = key;
+    }
+    if (data["weatherZipCode"].is<const char*>()) {
+        proj->weatherZipCode = data["weatherZipCode"] | String("");
+    }
+    if (data["weatherCountry"].is<const char*>()) {
+        proj->weatherCountry = data["weatherCountry"] | String("US");
+    }
+    // Validate HTTP source requires API key
+    if ((proj->weatherSource == "http" || proj->weatherSource == "both") && proj->weatherApiKey.length() == 0) {
+        errors += "HTTP weather source requires an API key. ";
+        if (proj->weatherSource == "both") {
+            proj->weatherSource = "mqtt";  // fall back to mqtt-only
+        } else {
+            proj->weatherSource = "none";
+        }
+        if (ctx->weatherHttpCb) ctx->weatherHttpCb(false);
+    }
+    if (data["weatherRefreshMinutes"].is<int>()) {
+        uint32_t refresh = data["weatherRefreshMinutes"] | 10;
+        if (refresh < 1) refresh = 1;
+        if (refresh > 60) refresh = 60;
+        proj->weatherRefreshMinutes = refresh;
+        if (ctx->weatherRefreshCb) ctx->weatherRefreshCb(refresh);
+        // Auto-correct stale if now below 2x refresh
+        uint32_t minStale = refresh * 2;
+        if (proj->weatherStaleMinutes < minStale) {
+            proj->weatherStaleMinutes = minStale;
+            ctx->hpController->setWeatherStaleMs(minStale * 60000UL);
+        }
+    }
+    if (data["internalTempOffsetF"].is<float>() || data["internalTempOffsetF"].is<int>()) {
+        float offset = data["internalTempOffsetF"] | 0.0f;
+        if (offset < -50.0f) offset = -50.0f;
+        if (offset > 50.0f) offset = 50.0f;
+        proj->internalTempOffsetF = offset;
+        ctx->hpController->setInternalTempOffsetF(offset);
+    }
+    if (data["weatherStaleMinutes"].is<int>()) {
+        uint32_t stale = data["weatherStaleMinutes"] | 30;
+        if (stale < 5) stale = 5;
+        if (stale > 120) stale = 120;
+        // Enforce stale >= 2x refresh
+        uint32_t minStale = proj->weatherRefreshMinutes * 2;
+        if (stale < minStale) stale = minStale;
+        proj->weatherStaleMinutes = stale;
+        ctx->hpController->setWeatherStaleMs(stale * 60000UL);
+    }
+    // Failover test
+    if (data["failoverTest"].is<bool>()) {
+        bool test = data["failoverTest"];
+        if (ctx->failoverTestCb) ctx->failoverTestCb(test);
+    }
+
     // Save to SD card
     TempSensorMap& tempSensors = ctx->hpController->getTempSensorMap();
     bool saved = ctx->config->updateConfig("/config.txt", tempSensors, *proj);
+
+    // Validate weather source after save
+    String weatherTestResult;
+    float weatherTestTemp = 0;
+    bool mqttConnected = false;
+    if (saved && (proj->weatherSource == "http" || proj->weatherSource == "both") && proj->weatherApiKey.length() > 0 && proj->weatherZipCode.length() > 0) {
+        HTTPClient http;
+        String url = "http://api.openweathermap.org/data/2.5/weather?zip="
+                     + proj->weatherZipCode + "," + proj->weatherCountry
+                     + "&appid=" + proj->weatherApiKey + "&units=imperial";
+        http.begin(url);
+        http.setTimeout(10000);
+        int code = http.GET();
+        if (code == 200) {
+            String payload = http.getString();
+            JsonDocument testDoc;
+            if (!deserializeJson(testDoc, payload)) {
+                float temp = testDoc["main"]["temp"] | 0.0f;
+                if (temp != 0.0f) {
+                    ctx->hpController->setWeatherTemp(temp);
+                    weatherTestResult = "ok";
+                    weatherTestTemp = temp;
+                    Log.info("WEATHER", "Validation fetch OK: %.1fF", temp);
+                } else {
+                    weatherTestResult = "Invalid temperature in response";
+                }
+            } else {
+                weatherTestResult = "Invalid JSON response";
+            }
+        } else if (code == 401) {
+            weatherTestResult = "Invalid API key (HTTP 401)";
+        } else if (code == 404) {
+            weatherTestResult = "ZIP code not found (HTTP 404)";
+        } else if (code < 0) {
+            weatherTestResult = "Connection failed";
+        } else {
+            weatherTestResult = "HTTP error " + String(code);
+        }
+        http.end();
+    }
+    if (saved && (proj->weatherSource == "mqtt" || proj->weatherSource == "both")) {
+        mqttConnected = ctx->mqttConnectedCb ? ctx->mqttConnectedCb() : false;
+        if (!mqttConnected) errors += "MQTT broker not connected — topic subscription pending. ";
+    }
 
     JsonDocument respDoc;
     if (!saved) {
@@ -655,6 +787,19 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         respDoc["reboot"] = true;
     } else {
         respDoc["message"] = "Settings saved and applied.";
+    }
+    // Add weather validation results
+    if (weatherTestResult.length() > 0) {
+        if (weatherTestResult == "ok") {
+            respDoc["weatherTestOk"] = true;
+            respDoc["weatherTestTemp"] = weatherTestTemp;
+        } else {
+            respDoc["weatherTestOk"] = false;
+            respDoc["weatherTestError"] = weatherTestResult;
+        }
+    }
+    if (saved && (proj->weatherSource == "mqtt" || proj->weatherSource == "both")) {
+        respDoc["mqttConnected"] = mqttConnected;
     }
     String response;
     serializeJson(respDoc, response);
@@ -1174,6 +1319,14 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     doc["rvHold"] = ctx->hpController->isRvHoldActive();
     doc["rvHoldRemainSec"] = ctx->hpController->getRvHoldRemainingMs() / 1000;
     doc["ambientFallback"] = ctx->hpController->isAmbientFallbackActive();
+    { static const char* ambSrc[] = {"sensor","weather","internal"};
+      doc["ambientSource"] = ambSrc[(int)ctx->hpController->getAmbientSource()]; }
+    if (ctx->hpController->isWeatherTempValid()) {
+        doc["weatherTempF"] = serialized(String(ctx->hpController->getWeatherTempF(), 1));
+        doc["weatherTempAgeSec"] = ctx->hpController->getWeatherTempAgeSec();
+    }
+    doc["failoverTest"] = ctx->hpController->isAmbientFailoverTestActive();
+    doc["failoverTestRemainSec"] = ctx->hpController->getFailoverTestRemainingSec();
     doc["stateValidating"] = ctx->hpController->isStateValidating();
     doc["stateValidationRemainSec"] = ctx->hpController->getStateValidationRemainingMs() / 1000;
     doc["manualOverride"] = ctx->hpController->isManualOverrideActive();
@@ -1181,7 +1334,10 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     doc["cpuLoad0"] = getCpuLoadCore0();
     doc["cpuLoad1"] = getCpuLoadCore1();
     doc["freeHeap"] = ESP.getFreeHeap();
-    doc["internalTempF"] = serialized(String(temperatureRead() * 9.0f / 5.0f + 32.0f, 1));
+    float intOffset = (ctx->config && ctx->config->getProjectInfo()) ? ctx->config->getProjectInfo()->internalTempOffsetF : 0.0f;
+    float intRawF = temperatureRead() * 9.0f / 5.0f + 32.0f;
+    doc["internalTempRawF"] = serialized(String(intRawF, 1));
+    doc["internalTempF"] = serialized(String(intRawF + intOffset, 1));
     doc["wifiSSID"] = WiFi.SSID();
     doc["wifiRSSI"] = WiFi.RSSI();
     doc["wifiIP"] = WiFi.localIP().toString();

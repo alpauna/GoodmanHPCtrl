@@ -14,6 +14,7 @@
 class GoodmanHP {
   public:
     enum class State { OFF, COOL, HEAT, DEFROST, ERROR, LOW_TEMP };
+    enum class AmbientSource { SENSOR, WEATHER, INTERNAL };
     typedef std::function<void(State newState, State oldState)> StateChangeCallback;
     typedef std::function<void(bool active)> LPSFaultCallback;
 
@@ -142,8 +143,19 @@ class GoodmanHP {
     uint32_t getRvHoldRemainingMs() const;
     void handleBootRvHold(bool rvWasOn, bool cntWasOn);
 
-    // Ambient sensor failsafe (ESP32 internal temp)
+    // Ambient sensor failsafe (weather / ESP32 internal temp)
     bool isAmbientFallbackActive() const;
+    AmbientSource getAmbientSource() const;
+    void setWeatherTemp(float tempF);
+    void setWeatherStaleMs(uint32_t ms);
+    void setInternalTempOffsetF(float offset);
+    float getInternalTempOffsetF() const;
+    void setAmbientFailoverTest(bool on);
+    bool isAmbientFailoverTestActive() const;
+    uint32_t getFailoverTestRemainingSec() const;
+    float getWeatherTempF() const;
+    bool isWeatherTempValid() const;
+    uint32_t getWeatherTempAgeSec() const;
 
     // COOL→HEAT transition (RV switch sequencing)
     bool isHeatTransitionActive() const;
@@ -245,7 +257,14 @@ class GoodmanHP {
     // RV pressure equalization hold (prevents RV switching under pressure)
     bool _rvHoldActive;               // True when RV off is deferred for pressure equalization
     // Ambient sensor failsafe
-    bool _ambientFallback;            // True when using ESP32 internal temp as ambient failsafe
+    AmbientSource _ambientSource;     // Current ambient temp data source
+    float _weatherTempF;              // Cached weather temperature in Fahrenheit
+    bool _weatherTempValid;           // True when weather cache has been populated
+    uint32_t _weatherTempTick;        // millis() when weather temp was last updated
+    uint32_t _weatherStaleMs;         // Max weather cache age (default 30 min)
+    float _internalTempOffsetF;       // ESP32 internal temp offset in °F (default 0)
+    bool _ambientFailoverTest;        // True when failover test is active (forces sensor invalid)
+    uint32_t _failoverTestStartTick;  // millis() when failover test started
     // State validation timer
     bool _stateValidationActive;
     uint32_t _stateValidationStart;

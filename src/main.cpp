@@ -24,6 +24,7 @@
 #include "OtaUtils.h"
 #include <max6675.h>
 #include <Adafruit_ADS1X15.h>
+#include <HTTPClient.h>
 
 extern const char compile_date[] = __DATE__ " " __TIME__;
 IPAddress _MQTT_HOST_DEFAULT = IPAddress(192, 168, 0, 46);
@@ -350,6 +351,14 @@ bool onWifiWaitEnable(){
   return true;
 }
 
+// Weather ambient temperature fetch via HTTP (OpenWeatherMap)
+void onFetchWeather();
+Task tFetchWeather(10 * TASK_MINUTE, TASK_FOREVER, &onFetchWeather, &ts, false);
+
+// Ambient failover test — auto-cancel after 30 minutes
+void onFailoverTestEnd();
+Task tFailoverTestEnd(30 * TASK_MINUTE, 1, &onFailoverTestEnd, &ts, false);
+
 // Forward declaration for AP reconnect task
 void onAPReconnect();
 Task tAPReconnect(TASK_MINUTE, TASK_FOREVER, &onAPReconnect, &ts, false);
@@ -485,6 +494,8 @@ void onWiFiEvent(arduino_event_id_t event, arduino_event_info_t info){
       tWaitOnWiFi.disable();
       webHandler.startNtpSync();
       Log.info("WIFI", "Got ip: %s", webHandler.getWiFiIP());
+      // Trigger immediate weather fetch on WiFi connect
+      if (tFetchWeather.isEnabled()) tFetchWeather.forceNextIteration();
       if (_apModeActive) {
         Log.info("WiFi", "WiFi reconnected while in AP mode, exiting AP");
         _apModeActive = false;
@@ -731,6 +742,9 @@ void setup() {
       hpController.setStateValidationMs(proj.stateValidationMs);
       if (proj.rvFail) hpController.setRvFail();  // Restore latched state
       if (proj.softwareDefrost) hpController.restoreSoftwareDefrost();  // Resume defrost after reboot
+      // Weather ambient fallback
+      hpController.setWeatherStaleMs(proj.weatherStaleMinutes * 60000UL);
+      hpController.setInternalTempOffsetF(proj.internalTempOffsetF);
       // Apply temp history capture interval from config
       if (proj.tempHistoryIntervalSec >= 30 && proj.tempHistoryIntervalSec <= 300) {
           tLogTempsCSV.setInterval(proj.tempHistoryIntervalSec * (unsigned long)TASK_SECOND);
@@ -869,6 +883,29 @@ void setup() {
   );
   webHandler.setFtpState(&ftpActive, &ftpStopTime);
 
+  // Weather config change callbacks
+  webHandler.setWeatherTopicCallback([](const String& topic) {
+      mqttHandler.setWeatherTopic(topic);
+  });
+  webHandler.setWeatherHttpCallback([](bool enable) {
+      if (enable) { tFetchWeather.enableDelayed(0); }
+      else tFetchWeather.disable();
+  });
+  webHandler.setWeatherRefreshCallback([](uint32_t minutes) {
+      tFetchWeather.setInterval(minutes * TASK_MINUTE);
+  });
+  webHandler.setMqttConnectedCallback([]() -> bool {
+      return mqttHandler.connected();
+  });
+  webHandler.setFailoverTestCallback([](bool on) {
+      hpController.setAmbientFailoverTest(on);
+      if (on) {
+          tFailoverTestEnd.restartDelayed();
+      } else {
+          tFailoverTestEnd.disable();
+      }
+  });
+
   // AP mode test/stop callbacks
   webHandler.setAPCallbacks(
     []() -> String { return startAPModeTest(); },
@@ -888,6 +925,15 @@ void setup() {
   mqttHandler.setTopicPrefix(proj.mqttPrefix);
   mqttHandler.begin(_MQTT_HOST_DEFAULT, _MQTT_PORT, _MQTT_USER, _MQTT_PASSWORD);
   mqttHandler.setController(&hpController);
+  // Wire up weather MQTT subscription
+  if ((proj.weatherSource == "mqtt" || proj.weatherSource == "both") && proj.weatherMqttTopic.length() > 0) {
+      mqttHandler.setWeatherTopic(proj.weatherMqttTopic);
+  }
+  // Enable weather HTTP fetch task with configurable interval
+  tFetchWeather.setInterval(proj.weatherRefreshMinutes * TASK_MINUTE);
+  if (proj.weatherSource == "http" || proj.weatherSource == "both") {
+      tFetchWeather.enableDelayed(0);
+  }
 
   // Initialize Logger
   Log.setLevel(Logger::LOG_INFO);
@@ -1119,6 +1165,39 @@ void onBackfillTempHistory() {
   if (!getLocalTime(&ti, 0)) return;  // NTP not ready, will retry
   tempHistory.backfillFromSD();
   tBackfillTempHistory.disable();  // Done, stop retrying
+}
+
+void onFetchWeather() {
+    if (proj.weatherSource != "http" && proj.weatherSource != "both") { tFetchWeather.disable(); return; }
+    if (proj.weatherApiKey.length() == 0) { Log.warn("WEATHER", "API key not set, skipping fetch"); return; }
+    if (proj.weatherZipCode.length() == 0) { Log.warn("WEATHER", "ZIP code not set, skipping fetch"); return; }
+    if (!WiFi.isConnected()) { Log.debug("WEATHER", "WiFi not connected, skipping fetch"); return; }
+
+    HTTPClient http;
+    String url = "http://api.openweathermap.org/data/2.5/weather?zip="
+                 + proj.weatherZipCode + "," + proj.weatherCountry
+                 + "&appid=" + proj.weatherApiKey + "&units=imperial";
+    http.begin(url);
+    http.setTimeout(10000);
+    int code = http.GET();
+    if (code == 200) {
+        String payload = http.getString();
+        JsonDocument doc;
+        if (!deserializeJson(doc, payload)) {
+            float temp = doc["main"]["temp"] | 0.0f;
+            if (temp != 0.0f) {
+                hpController.setWeatherTemp(temp);
+                Log.info("WEATHER", "HTTP weather temp: %.1fF", temp);
+            }
+        }
+    } else {
+        Log.warn("WEATHER", "HTTP fetch failed: %d", code);
+    }
+    http.end();
+}
+
+void onFailoverTestEnd() {
+    hpController.setAmbientFailoverTest(false);
 }
 
 // Sensor key → CSV directory name mapping

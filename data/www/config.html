@@ -24,6 +24,8 @@ button:hover{background:#45a049;}
 .btn-red{background:#e74c3c;}
 .btn-red:hover{background:#c0392b;}
 #status{margin-top:15px;padding:10px;border-radius:4px;display:none;}
+#saveFloat{display:none;position:fixed;bottom:24px;right:24px;z-index:100;background:#4CAF50;color:#fff;border:none;border-radius:50px;padding:10px 20px;cursor:pointer;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3);transition:opacity 0.3s;align-items:center;gap:6px;}
+#saveFloat:hover{background:#45a049;}
 .ok{background:#d4edda;color:#155724;display:block!important;}
 .err{background:#f8d7da;color:#721c24;display:block!important;}
 .info{background:#d1ecf1;color:#0c5460;display:block!important;}
@@ -139,6 +141,69 @@ button:hover{background:#45a049;}
 <div id='lockedRotorStatus' style='margin:8px 0;font-size:13px;padding:6px 10px;border-radius:4px;display:none'></div>
 <button type='button' class='btn-sm btn-red' id='clearLockedRotorBtn' style='display:none' onclick='clearLockedRotor()'>Clear Locked Rotor</button>
 </fieldset>
+<fieldset id='s-weather'><legend>Weather Ambient Fallback <span class='tag tag-live'>live</span></legend>
+<p style='color:var(--text-secondary);font-size:12px;margin:0 0 10px;'>Failover only &mdash; the local AMBIENT_TEMP sensor is always preferred. Weather data is used only when the local sensor is lost.</p>
+<label>Source</label>
+<select id='weatherSource' onchange='toggleWeather()'>
+<option value='none'>None</option>
+<option value='mqtt'>MQTT</option>
+<option value='http'>HTTP (OpenWeatherMap)</option>
+<option value='both'>MQTT + HTTP</option>
+</select>
+<div id='weatherMqttSection' style='display:none'>
+<label>MQTT Topic (plain float value in &deg;F)</label>
+<input type='text' id='weatherMqttTopic' placeholder='homeassistant/sensor/outdoor_temp/state'>
+</div>
+<div id='weatherHttpSection' style='display:none'>
+<label>API Key (<a href='https://openweathermap.org/api' target='_blank' style='color:#4CAF50'>openweathermap.org</a>) <span id='apiKeyStatus' class='pw-unset' style='font-size:12px;padding:2px 8px;border-radius:10px;'>Not Set</span></label>
+<input type='password' id='weatherApiKey'>
+<label>ZIP Code</label>
+<input type='text' id='weatherZipCode' placeholder='73099' maxlength='10'>
+<label>Country Code</label>
+<select id='weatherCountry'>
+<option value='US'>US - United States</option>
+<option value='CA'>CA - Canada</option>
+<option value='GB'>GB - United Kingdom</option>
+<option value='AU'>AU - Australia</option>
+<option value='DE'>DE - Germany</option>
+<option value='FR'>FR - France</option>
+<option value='ES'>ES - Spain</option>
+<option value='IT'>IT - Italy</option>
+<option value='NL'>NL - Netherlands</option>
+<option value='BR'>BR - Brazil</option>
+<option value='MX'>MX - Mexico</option>
+<option value='IN'>IN - India</option>
+<option value='JP'>JP - Japan</option>
+<option value='KR'>KR - South Korea</option>
+<option value='CN'>CN - China</option>
+<option value='NZ'>NZ - New Zealand</option>
+<option value='ZA'>ZA - South Africa</option>
+<option value='SE'>SE - Sweden</option>
+<option value='NO'>NO - Norway</option>
+<option value='PL'>PL - Poland</option>
+</select>
+<label>Refresh Interval (minutes, 1-60)</label>
+<input type='number' id='weatherRefreshMinutes' min='1' max='60' step='1' value='10'>
+</div>
+<div id='weatherStaleSection' style='display:none'>
+<label id='staleLbl'>Stale Timeout (minutes, 5-120)</label>
+<input type='number' id='weatherStaleMinutes' min='5' max='120' step='1' value='30'>
+</div>
+<div style='margin-top:12px;padding:10px;border-radius:4px;background:var(--code-bg);border:1px solid var(--border)'>
+<label style='margin-top:0'><strong>ESP32 Internal Temp Offset (&deg;F)</strong></label>
+<p style='color:#e67e22;font-size:12px;margin:4px 0 8px;'>The ESP32 internal die temperature is extremely inaccurate as an ambient reading &mdash; it measures the chip itself, not the surrounding air. Use this offset to roughly calibrate it to your environment. This is a last-resort fallback when both the local sensor and weather data are unavailable.</p>
+<input type='number' id='internalTempOffsetF' min='-50' max='50' step='0.1' value='0'>
+<div id='calibRow' style='margin-top:6px;display:none;align-items:center;gap:8px;'>
+<button type='button' class='btn-sm' onclick='autoCalibOffset()'>Auto Calibrate</button>
+<span id='calibStatus' style='font-size:12px;'></span>
+</div>
+</div>
+<div style='margin-top:8px'>
+<button type='button' class='btn-sm' id='btnFailoverTest' onclick='failoverTest(true)'>Test Failover (30 min)</button>
+<button type='button' class='btn-sm btn-red' id='btnFailoverStop' style='display:none' onclick='failoverTest(false)'>Stop Test</button>
+<span id='failoverTestStatus' style='margin-left:8px;font-size:13px;'></span>
+</div>
+</fieldset>
 <fieldset id='s-df'><legend>Defrost Controls <span class='tag tag-live'>live</span></legend>
 <label>Heat Runtime Threshold (minutes, 30-90)</label><input type='number' min='30' max='90' step='1' id='heatRuntimeThresholdMin'>
 <label>Minimum Defrost Time (seconds)</label><input type='number' step='1' id='defrostMinRuntimeSec'>
@@ -197,9 +262,14 @@ button:hover{background:#45a049;}
 <div id='sdFormatStatus' style='margin-top:8px;font-size:13px;padding:6px 10px;border-radius:4px;display:none'></div>
 </fieldset>
 <div id='status'></div>
+<div id='weatherTestStatus' style='display:none;margin-top:6px;padding:8px 12px;border-radius:6px;font-size:13px;'></div>
 </div>
+<button type='button' id='saveFloat' onclick='document.querySelector("#cf [type=submit]").scrollIntoView({behavior:"smooth",block:"center"})'>&#8595; Save Changes</button>
 <script>
-var fields=['systemName','mqttPrefix','wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','timezone','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','apPassword','ftpPassword','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','compressorOvercurrentAmps','fanOvercurrentAmps','overcurrentDelaySec','lockedRotorThreshold','lockedRotorTimeoutSec'];
+var _dirty=false;
+var _origValues={};
+window.addEventListener('beforeunload',function(e){if(_dirty){e.preventDefault();e.returnValue='';}});
+var fields=['systemName','mqttPrefix','wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','timezone','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','apPassword','ftpPassword','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','compressorOvercurrentAmps','fanOvercurrentAmps','overcurrentDelaySec','lockedRotorThreshold','lockedRotorTimeoutSec','weatherSource','weatherMqttTopic','weatherApiKey','weatherZipCode','weatherCountry','weatherStaleMinutes','weatherRefreshMinutes','internalTempOffsetF'];
 var tzData={
 'America':{'New York':'EST5EDT,M3.2.0,M11.1.0','Chicago':'CST6CDT,M3.2.0,M11.1.0','Denver':'MST7MDT,M3.2.0,M11.1.0','Los Angeles':'PST8PDT,M3.2.0,M11.1.0','Phoenix':'MST7','Anchorage':'AKST9AKDT,M3.2.0,M11.1.0','Honolulu':'HST10','Halifax':'AST4ADT,M3.2.0,M11.1.0','St Johns':'NST3:30NDT,M3.2.0,M11.1.0','Mexico City':'CST6CDT,M4.1.0,M10.5.0','Sao Paulo':'<-03>3','Buenos Aires':'<-03>3','Santiago':'<-04>4<-03>,M9.1.6/24,M4.1.6/24'},
 'Europe':{'London':'GMT0BST,M3.5.0/1,M10.5.0','Paris':'CET-1CEST,M3.5.0,M10.5.0','Berlin':'CET-1CEST,M3.5.0,M10.5.0','Moscow':'MSK-3','Istanbul':'<+03>-3','Athens':'EET-2EEST,M3.5.0/3,M10.5.0'},
@@ -243,7 +313,123 @@ if(d.systemName){var b=document.querySelector('.brand');if(b)b.textContent=d.sys
 // RV Fail status
 if(d.rvFail){var el=document.getElementById('rvFailStatus');el.textContent='RV Fail is ACTIVE \u2014 compressor blocked.';el.style.display='block';el.style.background='#f8d7da';el.style.color='#721c24';document.getElementById('clearRvFailBtn').style.display='inline-block';}
 if(d.lockedRotorFault){var el=document.getElementById('lockedRotorStatus');el.textContent='Locked Rotor fault is ACTIVE \u2014 compressor blocked.';el.style.display='block';el.style.background='#f8d7da';el.style.color='#721c24';document.getElementById('clearLockedRotorBtn').style.display='inline-block';}
+// Weather config
+if(d.weatherSource)document.getElementById('weatherSource').value=d.weatherSource;
+if(d.weatherMqttTopic)document.getElementById('weatherMqttTopic').value=d.weatherMqttTopic;
+if(d.weatherZipCode)document.getElementById('weatherZipCode').value=d.weatherZipCode;
+if(d.weatherCountry)document.getElementById('weatherCountry').value=d.weatherCountry||'US';
+if(d.weatherStaleMinutes)document.getElementById('weatherStaleMinutes').value=d.weatherStaleMinutes;
+if(d.weatherRefreshMinutes)document.getElementById('weatherRefreshMinutes').value=d.weatherRefreshMinutes;
+var akEl=document.getElementById('apiKeyStatus');if(d.weatherApiKeySet){akEl.className='pw-set';akEl.textContent='Set';document.getElementById('weatherApiKey').value='******';}else{akEl.className='pw-unset';akEl.textContent='Not Set';}
+toggleWeather();
+enforceStaleMin();
+checkCalibNeeded();
+snapshotValues();
+trackDirty();
 });
+// Restore failover test state from device
+function checkFailoverState(){
+fetch('/state').then(function(r){return r.json();}).then(function(d){
+if(d.failoverTest){
+var sec=d.failoverTestRemainSec||0;
+var m=Math.floor(sec/60);var s=sec%60;
+document.getElementById('failoverTestStatus').textContent='Failover test active ('+m+'m '+s+'s remaining)';
+document.getElementById('failoverTestStatus').style.color='#e67e22';
+document.getElementById('btnFailoverTest').style.display='none';
+document.getElementById('btnFailoverStop').style.display='inline-block';
+}
+if(d.apMode){
+document.getElementById('btnTestAP').style.display='none';
+document.getElementById('btnStopAP').style.display='inline-block';
+document.getElementById('apTestStatus').textContent='AP Mode active';
+}
+}).catch(function(){});
+}
+checkFailoverState();
+function toggleWeather(){
+var s=document.getElementById('weatherSource').value;
+var mqtt=s==='mqtt'||s==='both';
+var http=s==='http'||s==='both';
+document.getElementById('weatherMqttSection').style.display=mqtt?'block':'none';
+document.getElementById('weatherHttpSection').style.display=http?'block':'none';
+document.getElementById('weatherStaleSection').style.display=s!=='none'?'block':'none';
+}
+function enforceStaleMin(src){
+var rEl=document.getElementById('weatherRefreshMinutes');
+var r=parseInt(rEl.value)||10;
+var sEl=document.getElementById('weatherStaleMinutes');
+var minStale=r*2;
+var curStale=parseInt(sEl.value)||30;
+sEl.min=minStale;
+if(src==='refresh'||curStale<minStale)sEl.value=minStale;
+document.getElementById('staleLbl').textContent='Stale Timeout (minutes, '+minStale+'-120)';
+}
+document.getElementById('weatherRefreshMinutes').addEventListener('input',function(){enforceStaleMin('refresh');});
+document.getElementById('weatherStaleMinutes').addEventListener('input',function(){enforceStaleMin('stale');});
+function snapshotValues(){
+_origValues={};
+var form=document.getElementById('cf');
+var els=form.querySelectorAll('input,select');
+els.forEach(function(e){if(e.id)_origValues[e.id]=e.type==='checkbox'?e.checked:e.value;});
+}
+function checkDirty(){
+var form=document.getElementById('cf');
+var els=form.querySelectorAll('input,select');
+for(var i=0;i<els.length;i++){
+var e=els[i];if(!e.id||_origValues[e.id]===undefined)continue;
+var cur=e.type==='checkbox'?e.checked:e.value;
+if(cur!=_origValues[e.id]){_dirty=true;document.getElementById('saveFloat').style.display='flex';return;}
+}
+_dirty=false;document.getElementById('saveFloat').style.display='none';
+}
+function trackDirty(){
+var form=document.getElementById('cf');
+form.addEventListener('input',checkDirty);
+form.addEventListener('change',checkDirty);
+}
+function _getCalibData(d){
+var curOffset=parseFloat(document.getElementById('internalTempOffsetF').value)||0;
+var intWithOffset=parseFloat(d.internalTempF);
+if(isNaN(intWithOffset))return null;
+var rawInternal=intWithOffset-curOffset;
+var ref=null;var refName='';
+var ts=d.temps||{};
+if(ts.AMBIENT_TEMP!==undefined){ref=ts.AMBIENT_TEMP;refName='Local sensor';}
+else if(d.weatherTempF!==undefined&&d.weatherTempF!==0){ref=parseFloat(d.weatherTempF);refName='Weather';}
+if(ref===null)return null;
+var pctErr=Math.abs(ref)>0.1?Math.abs(intWithOffset-ref)/Math.abs(ref)*100:Math.abs(intWithOffset-ref);
+return{rawInternal:rawInternal,intWithOffset:intWithOffset,ref:ref,refName:refName,pctErr:pctErr,curOffset:curOffset};
+}
+function checkCalibNeeded(){
+fetch('/state').then(function(r){return r.json();}).then(function(d){
+var c=_getCalibData(d);
+var row=document.getElementById('calibRow');
+var st=document.getElementById('calibStatus');
+if(!c){row.style.display='none';return;}
+if(c.pctErr>10){row.style.display='flex';st.textContent='Off by '+c.pctErr.toFixed(0)+'% (ESP32: '+c.intWithOffset.toFixed(1)+'\u00b0F vs '+c.refName+': '+c.ref.toFixed(1)+'\u00b0F)';st.style.color='#e67e22';}
+else{row.style.display='none';}
+}).catch(function(){});
+}
+function autoCalibOffset(){
+var st=document.getElementById('calibStatus');
+st.textContent='Calibrating...';st.style.color='var(--text-muted)';
+fetch('/state').then(function(r){return r.json();}).then(function(d){
+var c=_getCalibData(d);
+if(!c){st.textContent='No reference source available';st.style.color='#e74c3c';return;}
+var newOffset=c.ref-c.rawInternal;
+if(newOffset<-50)newOffset=-50;if(newOffset>50)newOffset=50;
+document.getElementById('internalTempOffsetF').value=newOffset.toFixed(1);
+document.getElementById('internalTempOffsetF').dispatchEvent(new Event('input',{bubbles:true}));
+st.textContent='Set to '+newOffset.toFixed(1)+'\u00b0F ('+c.refName+': '+c.ref.toFixed(1)+'\u00b0F, raw ESP32: '+c.rawInternal.toFixed(1)+'\u00b0F). Save to apply.';st.style.color='#27ae60';
+}).catch(function(e){st.textContent='Error: '+e;st.style.color='#e74c3c';});
+}
+function failoverTest(on){
+fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({failoverTest:on})}).then(r=>r.json()).then(r=>{
+var st=document.getElementById('failoverTestStatus');
+if(on){st.textContent='Failover test active (30 min)';st.style.color='#e67e22';document.getElementById('btnFailoverTest').style.display='none';document.getElementById('btnFailoverStop').style.display='inline-block';}
+else{st.textContent='Test stopped';st.style.color='';document.getElementById('btnFailoverTest').style.display='inline-block';document.getElementById('btnFailoverStop').style.display='none';}
+});
+}
 function clearRvFail(){
 fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clearRvFail:true})}).then(r=>r.json()).then(r=>{
 document.getElementById('rvFailStatus').style.display='none';
@@ -260,7 +446,7 @@ alert('Locked Rotor fault cleared');
 }
 function save(e){
 e.preventDefault();
-var d={};var numFields=['mqttPort','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','compressorOvercurrentAmps','fanOvercurrentAmps','overcurrentDelaySec','lockedRotorThreshold','lockedRotorTimeoutSec'];
+var d={};var numFields=['mqttPort','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','compressorOvercurrentAmps','fanOvercurrentAmps','overcurrentDelaySec','lockedRotorThreshold','lockedRotorTimeoutSec','weatherStaleMinutes','weatherRefreshMinutes','internalTempOffsetF'];
 fields.forEach(f=>{var e=document.getElementById(f);var v=e?e.value:'';d[f]=numFields.indexOf(f)>=0&&v!==''?Number(v):v;});
 var mbVal=document.getElementById('maxLogSizeMB').value;
 d.maxLogSize=mbVal?parseInt(mbVal)*1024*1024:'';
@@ -277,11 +463,21 @@ if(ap!==apc){var s=document.getElementById('status');s.className='err';s.textCon
 d.adminPassword=ap;
 d.curAdminPw=document.getElementById('curAdminPw').value;
 }
+if(d.weatherSource==='http'||d.weatherSource==='both'){var ak=d.weatherApiKey||'';if(!ak){var s=document.getElementById('status');s.className='err';s.textContent='HTTP weather source requires an API key.';s.style.display='block';return false;}}
 var s=document.getElementById('status');
 fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r=>r.json()).then(r=>{
 s.className=r.reboot?'info':r.error?'err':'ok';
 s.textContent=r.message||r.error||'Saved';
 s.style.display='block';
+// Weather/MQTT validation result
+var wts=document.getElementById('weatherTestStatus');
+var parts=[];
+if(r.weatherTestOk===true)parts.push('\u2705 Weather API validated: '+r.weatherTestTemp.toFixed(1)+'\u00b0F');
+else if(r.weatherTestOk===false)parts.push('\u274c Weather API error: '+r.weatherTestError);
+if(r.mqttConnected===true)parts.push('\u2705 MQTT connected, topic subscribed');
+else if(r.mqttConnected===false)parts.push('\u26a0\ufe0f MQTT broker not connected \u2014 topic subscription pending');
+if(parts.length>0){wts.textContent=parts.join(' | ');var hasErr=r.weatherTestOk===false||r.mqttConnected===false;var allOk=!hasErr;wts.style.background=allOk?'#d4edda':hasErr&&parts.length===1&&r.weatherTestOk===false?'#f8d7da':'#fff3cd';wts.style.color=allOk?'#155724':hasErr&&parts.length===1&&r.weatherTestOk===false?'#721c24':'#856404';wts.style.display='block';}
+else{wts.style.display='none';}
 if(r.reboot){setTimeout(()=>{s.textContent='Rebooting... page will reload in 5s';setTimeout(()=>location.reload(),5000);},1000);}
 document.getElementById('curWifiPw').value='';
 document.getElementById('curMqttPw').value='';
@@ -293,7 +489,8 @@ if(ap.length>0&&!r.error){adminPwSet=true;document.getElementById('adminPwStatus
 var newTheme=document.getElementById('theme').value;
 document.documentElement.dataset.theme=newTheme;
 localStorage.setItem('hp-theme',newTheme);
-}).catch(err=>{s.className='err';s.textContent='Error: '+err;s.style.display='block';});
+snapshotValues();_dirty=false;document.getElementById('saveFloat').style.display='none';
+}).catch(err=>{s.className='err';s.textContent='Error: '+err;s.style.display='block';document.getElementById('weatherTestStatus').style.display='none';});
 return false;}
 function ftpControl(mins){
 fetch('/ftp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({duration:mins})}).then(r=>r.json()).then(r=>{
@@ -441,13 +638,6 @@ document.getElementById('btnStopAP').style.display='none';
 document.getElementById('btnTestAP').style.display='inline-block';
 }).catch(err=>{document.getElementById('apTestStatus').textContent='Error: '+err;});
 }
-fetch('/state').then(r=>r.json()).then(d=>{
-if(d.apMode){
-document.getElementById('btnTestAP').style.display='none';
-document.getElementById('btnStopAP').style.display='inline-block';
-document.getElementById('apTestStatus').textContent='AP Mode active';
-}
-}).catch(()=>{});
 function doLogout(){
 fetch('/api/logout',{method:'POST'}).then(function(){location.href='/login';}).catch(function(){location.href='/login';});
 }

@@ -217,7 +217,7 @@ void Logger::writeToMqtt(const char* msg) {
     if (_mqttClient == nullptr || !_mqttClient->connected()) {
         return;
     }
-    _mqttClient->publish(_mqttTopic.c_str(), 0, false, msg);
+    _mqttClient->publish(_mqttTopic.c_str(), 1, false, msg);
 }
 
 void Logger::writeToSdCard(const char* msg) {

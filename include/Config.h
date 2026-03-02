@@ -74,6 +74,15 @@ struct ProjectInfo {
     float lockedRotorThreshold;      // Locked rotor current threshold in amps (0 = disabled)
     uint32_t lockedRotorTimeoutMs;   // Max inrush settle time before locked rotor fault (default 5000)
     bool lockedRotorFault;           // Latched locked rotor fault (persisted, like rvFail)
+    // Weather ambient temperature fallback
+    String weatherSource;            // "none", "mqtt", or "http" (default "none")
+    String weatherMqttTopic;         // MQTT topic for weather temp (e.g., "homeassistant/sensor/outdoor_temp/state")
+    String weatherApiKey;            // OpenWeatherMap API key
+    String weatherZipCode;           // ZIP code (e.g., "73099")
+    String weatherCountry;           // Country code (default "US")
+    uint32_t weatherStaleMinutes;    // Max age before cached weather value expires (default 30)
+    uint32_t weatherRefreshMinutes;  // HTTP fetch interval in minutes (default 10, range 1-60)
+    float internalTempOffsetF;       // ESP32 internal temp offset in °F (default 0, range -50 to 50)
 };
 
 class Config {
