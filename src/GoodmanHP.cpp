@@ -713,6 +713,20 @@ void GoodmanHP::updateState() {
             }
         }
 
+        // Resume defrost from Phase 1 when Y returns in HEAT mode
+        // MUST run before W control so _defrostTransition is set before W is evaluated
+        if (newState == State::DEFROST && _softwareDefrost && oldState != State::DEFROST) {
+            OutPin* cnt = getOutput("CNT");
+            OutPin* dfFan = getOutput("FAN");
+            Log.info("HP", "Defrost resuming, restarting transition from Phase 1 (%lu s RV short cycle)",
+                     _rvShortCycleMs / 1000UL);
+            if (cnt != nullptr) { cnt->turnOff(); _cntActivated = false; }
+            if (dfFan != nullptr) dfFan->turnOff();
+            _defrostTransition = true;
+            _defrostTransitionStart = millis();
+            _defrostCntPending = false;
+        }
+
         // Control W: always OFF in COOL; ON in DEFROST (after Phase 1), HEAT with RV fail
         OutPin* w = getOutput("W");
         if (w != nullptr) {
@@ -732,19 +746,6 @@ void GoodmanHP::updateState() {
                 w->turnOff();
                 Log.info("HP", "W turned OFF for %s mode", getStateString());
             }
-        }
-
-        // Resume defrost from Phase 1 when Y returns in HEAT mode
-        if (newState == State::DEFROST && _softwareDefrost && oldState != State::DEFROST) {
-            OutPin* cnt = getOutput("CNT");
-            OutPin* dfFan = getOutput("FAN");
-            Log.info("HP", "Defrost resuming, restarting transition from Phase 1 (%lu s RV short cycle)",
-                     _rvShortCycleMs / 1000UL);
-            if (cnt != nullptr) { cnt->turnOff(); _cntActivated = false; }
-            if (dfFan != nullptr) dfFan->turnOff();
-            _defrostTransition = true;
-            _defrostTransitionStart = millis();
-            _defrostCntPending = false;
         }
 
         // Control FAN: OFF during DEFROST and COOL transition, restore when leaving DEFROST if Y active
