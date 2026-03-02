@@ -179,6 +179,11 @@ button:hover{background:#45a049;}
 <label>Stale Timeout (minutes, 5-120)</label>
 <input type='number' id='weatherStaleMinutes' min='5' max='120' step='1' value='30'>
 </div>
+<div style='margin-top:12px;padding:10px;border-radius:4px;background:var(--code-bg);border:1px solid var(--border)'>
+<label style='margin-top:0'><strong>ESP32 Internal Temp Offset (&deg;F)</strong></label>
+<p style='color:#e67e22;font-size:12px;margin:4px 0 8px;'>The ESP32 internal die temperature is extremely inaccurate as an ambient reading &mdash; it measures the chip itself, not the surrounding air. Use this offset to roughly calibrate it to your environment. This is a last-resort fallback when both the local sensor and weather data are unavailable.</p>
+<input type='number' id='internalTempOffsetF' min='-50' max='50' step='0.1' value='0'>
+</div>
 <div style='margin-top:8px'>
 <button type='button' class='btn-sm' id='btnFailoverTest' onclick='failoverTest(true)'>Test Failover (30 min)</button>
 <button type='button' class='btn-sm btn-red' id='btnFailoverStop' style='display:none' onclick='failoverTest(false)'>Stop Test</button>
@@ -249,7 +254,7 @@ button:hover{background:#45a049;}
 var _dirty=false;
 var _origValues={};
 window.addEventListener('beforeunload',function(e){if(_dirty){e.preventDefault();e.returnValue='';}});
-var fields=['systemName','mqttPrefix','wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','timezone','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','apPassword','ftpPassword','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','weatherSource','weatherMqttTopic','weatherApiKey','weatherZipCode','weatherCountry','weatherStaleMinutes','weatherRefreshMinutes'];
+var fields=['systemName','mqttPrefix','wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','timezone','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','apPassword','ftpPassword','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','weatherSource','weatherMqttTopic','weatherApiKey','weatherZipCode','weatherCountry','weatherStaleMinutes','weatherRefreshMinutes','internalTempOffsetF'];
 var tzData={
 'America':{'New York':'EST5EDT,M3.2.0,M11.1.0','Chicago':'CST6CDT,M3.2.0,M11.1.0','Denver':'MST7MDT,M3.2.0,M11.1.0','Los Angeles':'PST8PDT,M3.2.0,M11.1.0','Phoenix':'MST7','Anchorage':'AKST9AKDT,M3.2.0,M11.1.0','Honolulu':'HST10','Halifax':'AST4ADT,M3.2.0,M11.1.0','St Johns':'NST3:30NDT,M3.2.0,M11.1.0','Mexico City':'CST6CDT,M4.1.0,M10.5.0','Sao Paulo':'<-03>3','Buenos Aires':'<-03>3','Santiago':'<-04>4<-03>,M9.1.6/24,M4.1.6/24'},
 'Europe':{'London':'GMT0BST,M3.5.0/1,M10.5.0','Paris':'CET-1CEST,M3.5.0,M10.5.0','Berlin':'CET-1CEST,M3.5.0,M10.5.0','Moscow':'MSK-3','Istanbul':'<+03>-3','Athens':'EET-2EEST,M3.5.0/3,M10.5.0'},
@@ -358,7 +363,7 @@ alert('RV Fail cleared');
 }
 function save(e){
 e.preventDefault();
-var d={};var numFields=['mqttPort','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','weatherStaleMinutes','weatherRefreshMinutes'];
+var d={};var numFields=['mqttPort','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostMinRuntimeSec','defrostExitTempF','heatRuntimeThresholdMin','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','weatherStaleMinutes','weatherRefreshMinutes','internalTempOffsetF'];
 fields.forEach(f=>{var e=document.getElementById(f);var v=e?e.value:'';d[f]=numFields.indexOf(f)>=0&&v!==''?Number(v):v;});
 var mbVal=document.getElementById('maxLogSizeMB').value;
 d.maxLogSize=mbVal?parseInt(mbVal)*1024*1024:'';

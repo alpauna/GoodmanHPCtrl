@@ -138,6 +138,8 @@ class GoodmanHP {
     AmbientSource getAmbientSource() const;
     void setWeatherTemp(float tempF);
     void setWeatherStaleMs(uint32_t ms);
+    void setInternalTempOffsetF(float offset);
+    float getInternalTempOffsetF() const;
     void setAmbientFailoverTest(bool on);
     bool isAmbientFailoverTestActive() const;
     float getWeatherTempF() const;
@@ -245,6 +247,7 @@ class GoodmanHP {
     bool _weatherTempValid;           // True when weather cache has been populated
     uint32_t _weatherTempTick;        // millis() when weather temp was last updated
     uint32_t _weatherStaleMs;         // Max weather cache age (default 30 min)
+    float _internalTempOffsetF;       // ESP32 internal temp offset in °F (default 0)
     bool _ambientFailoverTest;        // True when failover test is active (forces sensor invalid)
     // State validation timer
     bool _stateValidationActive;

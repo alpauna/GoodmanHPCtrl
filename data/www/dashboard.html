@@ -204,7 +204,7 @@ function update(d){
   if(hsEl){var suctVal=suctValid?ts.SUCTION_TEMP.toFixed(0):'--';hsEl.textContent=(d.highSuctionTemp?'High Suct: ':'Suct Temp: ')+suctVal+'\u00B0F';hsEl.className='pill '+(!suctValid?'invalid':d.highSuctionTemp?'active':'ok');}
   var rvEl=document.getElementById('fRvFail');if(rvEl){rvEl.textContent=d.rvFail?'RV Fail':'RV Pass';setPill('fRvFail',d.rvFail);}
   var rvBtn=document.getElementById('clearRvFailBtn');if(rvBtn)rvBtn.style.display=d.rvFail?'inline-block':'none';
-  var afEl=document.getElementById('fAmbFallback');if(afEl){var src=d.ambientSource||'sensor';afEl.textContent=src==='weather'?'Amb: Weather':src==='internal'?'Amb: ESP32':'Amb Sensor';afEl.className='pill '+(src==='sensor'?'ok':'warn');}
+  var afEl=document.getElementById('fAmbFallback');if(afEl){var src=d.ambientSource||'none';var ambLbl=src==='sensor'?'Amb: Local':src==='weather'?'Amb: Weather':src==='internal'?'Amb: ESP32':'Amb: None';afEl.textContent=ambLbl;afEl.className='pill '+(src==='sensor'?'ok':src==='none'?'active':'warn');}
   var shEl=document.getElementById('fStateHold');if(shEl){shEl.textContent=d.stateValidating&&d.stateValidationRemainSec>0?'State Check Hold: '+d.stateValidationRemainSec+'s':'State Check Hold';shEl.className='pill '+(d.stateValidating?'active':'ok');if(d.stateValidating)shEl.style.background='#e3f2fd',shEl.style.color='#1565c0';}
   setPill('fRvDFH',d.defrostTransition);
   var rvHoldEl=document.getElementById('fRvHold');if(rvHoldEl){rvHoldEl.textContent=d.rvHold&&d.rvHoldRemainSec>0?'Hold: '+d.rvHoldRemainSec+'s':'Hold';rvHoldEl.className='pill '+(d.rvHold?'active':'ok')+' sc-pill';}
@@ -234,21 +234,26 @@ function update(d){
   var tc=document.getElementById('temps');
   var ts=d.temps||{};
   var order=['AMBIENT_TEMP','COMPRESSOR_TEMP','SUCTION_TEMP','CONDENSER_TEMP','LIQUID_TEMP'];
+  var weatherActive=d.ambientSource==='weather';
   var html='';
   for(var i=0;i<order.length;i++){
     var k=order[i];
     var name=tempNames[k]||k;
     var val=ts[k];
+    var ambGreen=k==='AMBIENT_TEMP'&&!weatherActive&&val!==undefined;
+    var sty=ambGreen?' style="color:#4CAF50"':'';
     if(val!==undefined){
-      html+="<div class='temp-row'><span class='temp-name'>"+name+"</span><span class='temp-value'>"+val.toFixed(1)+"&deg;F</span></div>";
+      html+="<div class='temp-row'><span class='temp-name'"+sty+">"+name+"</span><span class='temp-value'"+sty+">"+val.toFixed(1)+"&deg;F</span></div>";
     }else{
       html+="<div class='temp-row'><span class='temp-name'>"+name+"</span><span class='temp-value' style='color:var(--text-muted)'>--</span></div>";
     }
   }
-  if(d.ambientFallback&&d.weatherTempF!==undefined){
-    var src=d.ambientSource||'internal';
-    var lbl=src==='weather'?'Weather Amb':'ESP32 Amb';
-    html+="<div class='temp-row'><span class='temp-name' style='color:var(--warn)'>"+lbl+" (failover)</span><span class='temp-value' style='color:var(--warn)'>"+parseFloat(d.weatherTempF).toFixed(1)+"&deg;F</span></div>";
+  if(d.weatherTempF!==undefined&&d.weatherTempF!==0){
+    var wAge=d.weatherTempAgeSec||0;
+    var agoStr=wAge<60?wAge+'s ago':wAge<3600?Math.floor(wAge/60)+'m ago':Math.floor(wAge/3600)+'h ago';
+    var wStyle=weatherActive?' style="color:#4CAF50"':'';
+    var lbl=weatherActive?'Weather Amb (active)':'Weather Amb';
+    html+="<div class='temp-row'><span class='temp-name'"+wStyle+">"+lbl+"</span><span class='temp-value'"+wStyle+">"+parseFloat(d.weatherTempF).toFixed(1)+"&deg;F <small style='font-size:11px;color:var(--text-muted)'>"+agoStr+"</small></span></div>";
   }
   tc.innerHTML=html;
 

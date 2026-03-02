@@ -534,6 +534,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     proj.weatherRefreshMinutes = weatherObj["refreshMinutes"] | 10;
     if (proj.weatherRefreshMinutes < 1) proj.weatherRefreshMinutes = 1;
     if (proj.weatherRefreshMinutes > 60) proj.weatherRefreshMinutes = 60;
+    proj.internalTempOffsetF = weatherObj["internalTempOffsetF"] | 0.0f;
     // Enforce stale >= 2x refresh
     uint32_t minStale = proj.weatherRefreshMinutes * 2;
     if (proj.weatherStaleMinutes < minStale) proj.weatherStaleMinutes = minStale;
@@ -731,6 +732,7 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     weatherObj["country"] = proj.weatherCountry.length() > 0 ? proj.weatherCountry : "US";
     weatherObj["staleMinutes"] = proj.weatherStaleMinutes;
     weatherObj["refreshMinutes"] = proj.weatherRefreshMinutes;
+    weatherObj["internalTempOffsetF"] = serialized(String(proj.internalTempOffsetF, 1));
 
     JsonObject admin = doc["admin"].to<JsonObject>();
     admin["password"] = "";
@@ -896,6 +898,7 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     weatherUpd["country"] = proj.weatherCountry.length() > 0 ? proj.weatherCountry : "US";
     weatherUpd["staleMinutes"] = proj.weatherStaleMinutes;
     weatherUpd["refreshMinutes"] = proj.weatherRefreshMinutes;
+    weatherUpd["internalTempOffsetF"] = serialized(String(proj.internalTempOffsetF, 1));
 
     JsonObject admin = doc["admin"].to<JsonObject>();
     admin["password"] = encryptPassword(_adminPasswordHash);

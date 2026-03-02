@@ -63,6 +63,7 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _weatherTempValid(false)
     , _weatherTempTick(0)
     , _weatherStaleMs(30UL * 60 * 1000)
+    , _internalTempOffsetF(0.0f)
     , _ambientFailoverTest(false)
     , _manualOverride(false)
     , _manualOverrideStart(0)
@@ -96,11 +97,11 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
                 }
             } else {
                 float internalC = temperatureRead();
-                float internalF = internalC * 9.0f / 5.0f + 32.0f;
+                float internalF = internalC * 9.0f / 5.0f + 32.0f + _internalTempOffsetF;
                 ambient->updateValue(internalF);
                 if (_ambientSource != AmbientSource::INTERNAL) {
                     _ambientSource = AmbientSource::INTERNAL;
-                    Log.warn("HP", "AMBIENT_TEMP lost, using ESP32 internal temp (%.1fF)", internalF);
+                    Log.warn("HP", "AMBIENT_TEMP lost, using ESP32 internal temp (%.1fF, offset %.1f)", internalF, _internalTempOffsetF);
                 }
             }
         } else if (_ambientSource != AmbientSource::SENSOR && ambient != nullptr && ambient->isValid() && !_ambientFailoverTest) {
@@ -1192,6 +1193,14 @@ void GoodmanHP::setWeatherTemp(float tempF) {
 
 void GoodmanHP::setWeatherStaleMs(uint32_t ms) {
     _weatherStaleMs = ms;
+}
+
+void GoodmanHP::setInternalTempOffsetF(float offset) {
+    _internalTempOffsetF = offset;
+}
+
+float GoodmanHP::getInternalTempOffsetF() const {
+    return _internalTempOffsetF;
 }
 
 void GoodmanHP::setAmbientFailoverTest(bool on) {

@@ -576,7 +576,8 @@ void WebHandler::setupRoutes() {
         doc["cpuLoad0"] = getCpuLoadCore0();
         doc["cpuLoad1"] = getCpuLoadCore1();
         doc["freeHeap"] = ESP.getFreeHeap();
-        doc["internalTempF"] = serialized(String(temperatureRead() * 9.0f / 5.0f + 32.0f, 1));
+        float intOffset = _config && _config->getProjectInfo() ? _config->getProjectInfo()->internalTempOffsetF : 0.0f;
+        doc["internalTempF"] = serialized(String(temperatureRead() * 9.0f / 5.0f + 32.0f + intOffset, 1));
         doc["wifiSSID"] = WiFi.SSID();
         doc["wifiRSSI"] = WiFi.RSSI();
         doc["wifiIP"] = WiFi.localIP().toString();
@@ -1134,6 +1135,7 @@ void WebHandler::setupRoutes() {
                 doc["weatherCountry"] = proj->weatherCountry.length() > 0 ? proj->weatherCountry : "US";
                 doc["weatherStaleMinutes"] = proj->weatherStaleMinutes;
                 doc["weatherRefreshMinutes"] = proj->weatherRefreshMinutes;
+                doc["internalTempOffsetF"] = serialized(String(proj->internalTempOffsetF, 1));
                 doc["weatherApiKeySet"] = proj->weatherApiKey.length() > 0;
                 doc["rvFail"] = proj->rvFail;
                 String json;
@@ -2060,6 +2062,13 @@ void WebHandler::setupRoutes() {
             if (refresh > 60) refresh = 60;
             proj->weatherRefreshMinutes = refresh;
             if (_weatherRefreshCb) _weatherRefreshCb(refresh);
+        }
+        if (data["internalTempOffsetF"].is<float>() || data["internalTempOffsetF"].is<int>()) {
+            float offset = data["internalTempOffsetF"] | 0.0f;
+            if (offset < -50.0f) offset = -50.0f;
+            if (offset > 50.0f) offset = 50.0f;
+            proj->internalTempOffsetF = offset;
+            _hpController->setInternalTempOffsetF(offset);
         }
         if (data["weatherStaleMinutes"].is<int>()) {
             uint32_t stale = data["weatherStaleMinutes"] | 30;

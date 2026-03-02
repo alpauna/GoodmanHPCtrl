@@ -719,6 +719,7 @@ void setup() {
       if (proj.softwareDefrost) hpController.restoreSoftwareDefrost();  // Resume defrost after reboot
       // Weather ambient fallback
       hpController.setWeatherStaleMs(proj.weatherStaleMinutes * 60000UL);
+      hpController.setInternalTempOffsetF(proj.internalTempOffsetF);
       // Apply temp history capture interval from config
       if (proj.tempHistoryIntervalSec >= 30 && proj.tempHistoryIntervalSec <= 300) {
           tLogTempsCSV.setInterval(proj.tempHistoryIntervalSec * (unsigned long)TASK_SECOND);
