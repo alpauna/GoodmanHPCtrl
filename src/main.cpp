@@ -933,7 +933,12 @@ void setup() {
     hpController.addInput("Y", new InputPin(&ts, proj.inputDelayMs, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _yPin, "Y", "OT-NO", onInput));
     hpController.addInput("O", new InputPin(&ts, proj.inputDelayMs, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _oPin, "O", "OT-NC", onInput));
 
-    // Add output pins to GoodmanHP controller
+    // Read raw GPIO states before initPin() drives them LOW — detect if relays
+    // were still energized from pre-reboot state (software reset / OTA / watchdog)
+    bool rvWasOnAtBoot = digitalRead(_RVPin);
+    bool cntWasOnAtBoot = digitalRead(_CNTPin);
+
+    // Add output pins to GoodmanHP controller (initPin drives GPIO LOW)
     hpController.addOutput("FAN", new OutPin(&ts, 0, _fanPin, "FAN", "FAN", onOutpin));
     hpController.addOutput("CNT", new OutPin(&ts, 3000, _CNTPin, "CNT", "CNT", onOutpin));
     hpController.addOutput("W", new OutPin(&ts, 0, _WPin, "W", "W", onOutpin));
@@ -982,6 +987,7 @@ void setup() {
           active);
     });
     hpController.begin();
+    hpController.handleBootRvHold(rvWasOnAtBoot, cntWasOnAtBoot);
 
     // Add current sensors if ADS1115 found
     if (ads1115Ready) {

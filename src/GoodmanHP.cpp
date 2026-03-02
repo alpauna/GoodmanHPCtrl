@@ -238,6 +238,10 @@ void GoodmanHP::checkCurrentProtections() {
 }
 
 void GoodmanHP::update() {
+    // RV hold must run even during startup lockout — boot RV hold needs to
+    // complete its 30s equalization within the 180s lockout period
+    checkRvHold();
+
     // Startup lockout: keep all outputs OFF until sensors have stabilized
     if (_startupLockout) {
         if (millis() - _startupTick >= STARTUP_LOCKOUT_MS) {
@@ -1225,6 +1229,25 @@ uint32_t GoodmanHP::getRvHoldRemainingMs() const {
     if (cntOffElapsed >= _rvShortCycleMs) return 0;
     return _rvShortCycleMs - cntOffElapsed;
 }
+
+void GoodmanHP::handleBootRvHold(bool rvWasOn, bool cntWasOn) {
+    if (!rvWasOn || !cntWasOn) {
+        Log.info("HP", "Boot GPIO: CNT=%s RV=%s — no RV hold needed",
+                 cntWasOn ? "ON" : "OFF", rvWasOn ? "ON" : "OFF");
+        return;
+    }
+
+    // Both CNT and RV were energized before reboot — re-energize RV
+    // for pressure equalization before allowing it to turn off
+    OutPin* rv = getOutput("RV");
+    if (rv == nullptr) return;
+
+    rv->turnOn();
+    _rvHoldActive = true;
+    Log.warn("HP", "Boot: CNT+RV were on before reboot, holding RV for %lus pressure equalization",
+             _rvShortCycleMs / 1000UL);
+}
+
 
 void GoodmanHP::validateOutputStates() {
     uint32_t now = millis();

@@ -140,6 +140,7 @@ class GoodmanHP {
     // RV pressure equalization hold
     bool isRvHoldActive() const;
     uint32_t getRvHoldRemainingMs() const;
+    void handleBootRvHold(bool rvWasOn, bool cntWasOn);
 
     // COOL→HEAT transition (RV switch sequencing)
     bool isHeatTransitionActive() const;

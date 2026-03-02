@@ -137,23 +137,27 @@ void TempSensor::update(DallasTemperature* sensors, float threshold) {
 
     float rawTemp = sensors->getTemp(_deviceAddress);
     float tempF = DallasTemperature::rawToFahrenheit(rawTemp);
-    float delta = abs(_previous - tempF);
 
+    // Set validity on every read — not gated by delta threshold
+    // (BUG-003 fix starts sensors as invalid; they must become valid on first real read
+    // even if the reading matches the config-cached value)
+    _valid = (tempF != DEVICE_DISCONNECTED_F);
+
+    float delta = abs(_previous - tempF);
     if (delta > threshold) {
         _previous = _value;
         _value = tempF;
-        _valid = (_value != DEVICE_DISCONNECTED_F);
         fireChangeCallback();
     }
 }
 
 void TempSensor::updateValue(float tempF, float threshold) {
-    float delta = abs(_previous - tempF);
+    _valid = true;  // Any call means a real reading was obtained
 
+    float delta = abs(_previous - tempF);
     if (delta > threshold) {
         _previous = _value;
         _value = tempF;
-        _valid = true;
         fireChangeCallback();
     }
 }
