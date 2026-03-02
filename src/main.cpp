@@ -869,6 +869,9 @@ void setup() {
   webHandler.setWeatherRefreshCallback([](uint32_t minutes) {
       tFetchWeather.setInterval(minutes * TASK_MINUTE);
   });
+  webHandler.setMqttConnectedCallback([]() -> bool {
+      return mqttHandler.connected();
+  });
   webHandler.setFailoverTestCallback([](bool on) {
       hpController.setAmbientFailoverTest(on);
       if (on) {
@@ -1111,8 +1114,9 @@ void onBackfillTempHistory() {
 
 void onFetchWeather() {
     if (proj.weatherSource != "http") { tFetchWeather.disable(); return; }
-    if (proj.weatherApiKey.length() == 0 || proj.weatherZipCode.length() == 0) return;
-    if (!WiFi.isConnected()) return;
+    if (proj.weatherApiKey.length() == 0) { Log.warn("WEATHER", "API key not set, skipping fetch"); return; }
+    if (proj.weatherZipCode.length() == 0) { Log.warn("WEATHER", "ZIP code not set, skipping fetch"); return; }
+    if (!WiFi.isConnected()) { Log.debug("WEATHER", "WiFi not connected, skipping fetch"); return; }
 
     HTTPClient http;
     String url = "http://api.openweathermap.org/data/2.5/weather?zip="

@@ -48,6 +48,7 @@ struct HttpsContext {
     std::function<void(bool)> weatherHttpCb;
     std::function<void(bool)> failoverTestCb;
     std::function<void(uint32_t)> weatherRefreshCb;
+    std::function<bool()> mqttConnectedCb;
 };
 
 // Opaque handle

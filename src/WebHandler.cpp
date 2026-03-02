@@ -5,6 +5,7 @@
 #include "TempSensor.h"
 #include "TempHistory.h"
 #include "OtaUtils.h"
+#include <HTTPClient.h>
 
 extern const char compile_date[];
 
@@ -2103,6 +2104,50 @@ void WebHandler::setupRoutes() {
         TempSensorMap& tempSensors = _hpController->getTempSensorMap();
         bool saved = _config->updateConfig("/config.txt", tempSensors, *proj);
 
+        // Validate weather source after save
+        String weatherTestResult;
+        float weatherTestTemp = 0;
+        bool mqttConnected = false;
+        if (saved && proj->weatherSource == "http" && proj->weatherApiKey.length() > 0 && proj->weatherZipCode.length() > 0) {
+            HTTPClient http;
+            String url = "http://api.openweathermap.org/data/2.5/weather?zip="
+                         + proj->weatherZipCode + "," + proj->weatherCountry
+                         + "&appid=" + proj->weatherApiKey + "&units=imperial";
+            http.begin(url);
+            http.setTimeout(10000);
+            int code = http.GET();
+            if (code == 200) {
+                String payload = http.getString();
+                JsonDocument testDoc;
+                if (!deserializeJson(testDoc, payload)) {
+                    float temp = testDoc["main"]["temp"] | 0.0f;
+                    if (temp != 0.0f) {
+                        _hpController->setWeatherTemp(temp);
+                        weatherTestResult = "ok";
+                        weatherTestTemp = temp;
+                        Log.info("WEATHER", "Validation fetch OK: %.1fF", temp);
+                    } else {
+                        weatherTestResult = "Invalid temperature in response";
+                    }
+                } else {
+                    weatherTestResult = "Invalid JSON response";
+                }
+            } else if (code == 401) {
+                weatherTestResult = "Invalid API key (HTTP 401)";
+            } else if (code == 404) {
+                weatherTestResult = "ZIP code not found (HTTP 404)";
+            } else if (code < 0) {
+                weatherTestResult = "Connection failed";
+            } else {
+                weatherTestResult = "HTTP error " + String(code);
+            }
+            http.end();
+        }
+        if (saved && proj->weatherSource == "mqtt") {
+            mqttConnected = _mqttConnectedCb ? _mqttConnectedCb() : false;
+            if (!mqttConnected) errors += "MQTT broker not connected — topic subscription pending. ";
+        }
+
         String response;
         JsonDocument respDoc;
         if (!saved) {
@@ -2115,6 +2160,19 @@ void WebHandler::setupRoutes() {
             respDoc["reboot"] = true;
         } else {
             respDoc["message"] = "Settings saved and applied.";
+        }
+        // Add weather validation results
+        if (weatherTestResult.length() > 0) {
+            if (weatherTestResult == "ok") {
+                respDoc["weatherTestOk"] = true;
+                respDoc["weatherTestTemp"] = weatherTestTemp;
+            } else {
+                respDoc["weatherTestOk"] = false;
+                respDoc["weatherTestError"] = weatherTestResult;
+            }
+        }
+        if (saved && proj->weatherSource == "mqtt") {
+            respDoc["mqttConnected"] = mqttConnected;
         }
         serializeJson(respDoc, response);
         request->send(200, "application/json", response);
@@ -2167,6 +2225,7 @@ bool WebHandler::beginSecure(const uint8_t* cert, size_t certLen, const uint8_t*
     _httpsCtx.weatherHttpCb = _weatherHttpCb;
     _httpsCtx.failoverTestCb = _failoverTestCb;
     _httpsCtx.weatherRefreshCb = _weatherRefreshCb;
+    _httpsCtx.mqttConnectedCb = _mqttConnectedCb;
 
     _httpsServer = httpsStart(cert, certLen, key, keyLen, &_httpsCtx);
     return _httpsServer != nullptr;

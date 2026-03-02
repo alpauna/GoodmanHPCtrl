@@ -20,6 +20,7 @@
 #include "Logger.h"
 #include "SessionManager.h"
 #include <lwip/sockets.h>
+#include <HTTPClient.h>
 
 extern uint8_t getCpuLoadCore0();
 extern uint8_t getCpuLoadCore1();
@@ -679,6 +680,50 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     TempSensorMap& tempSensors = ctx->hpController->getTempSensorMap();
     bool saved = ctx->config->updateConfig("/config.txt", tempSensors, *proj);
 
+    // Validate weather source after save
+    String weatherTestResult;
+    float weatherTestTemp = 0;
+    bool mqttConnected = false;
+    if (saved && proj->weatherSource == "http" && proj->weatherApiKey.length() > 0 && proj->weatherZipCode.length() > 0) {
+        HTTPClient http;
+        String url = "http://api.openweathermap.org/data/2.5/weather?zip="
+                     + proj->weatherZipCode + "," + proj->weatherCountry
+                     + "&appid=" + proj->weatherApiKey + "&units=imperial";
+        http.begin(url);
+        http.setTimeout(10000);
+        int code = http.GET();
+        if (code == 200) {
+            String payload = http.getString();
+            JsonDocument testDoc;
+            if (!deserializeJson(testDoc, payload)) {
+                float temp = testDoc["main"]["temp"] | 0.0f;
+                if (temp != 0.0f) {
+                    ctx->hpController->setWeatherTemp(temp);
+                    weatherTestResult = "ok";
+                    weatherTestTemp = temp;
+                    Log.info("WEATHER", "Validation fetch OK: %.1fF", temp);
+                } else {
+                    weatherTestResult = "Invalid temperature in response";
+                }
+            } else {
+                weatherTestResult = "Invalid JSON response";
+            }
+        } else if (code == 401) {
+            weatherTestResult = "Invalid API key (HTTP 401)";
+        } else if (code == 404) {
+            weatherTestResult = "ZIP code not found (HTTP 404)";
+        } else if (code < 0) {
+            weatherTestResult = "Connection failed";
+        } else {
+            weatherTestResult = "HTTP error " + String(code);
+        }
+        http.end();
+    }
+    if (saved && proj->weatherSource == "mqtt") {
+        mqttConnected = ctx->mqttConnectedCb ? ctx->mqttConnectedCb() : false;
+        if (!mqttConnected) errors += "MQTT broker not connected — topic subscription pending. ";
+    }
+
     JsonDocument respDoc;
     if (!saved) {
         respDoc["error"] = "Failed to save config to SD card";
@@ -690,6 +735,19 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         respDoc["reboot"] = true;
     } else {
         respDoc["message"] = "Settings saved and applied.";
+    }
+    // Add weather validation results
+    if (weatherTestResult.length() > 0) {
+        if (weatherTestResult == "ok") {
+            respDoc["weatherTestOk"] = true;
+            respDoc["weatherTestTemp"] = weatherTestTemp;
+        } else {
+            respDoc["weatherTestOk"] = false;
+            respDoc["weatherTestError"] = weatherTestResult;
+        }
+    }
+    if (saved && proj->weatherSource == "mqtt") {
+        respDoc["mqttConnected"] = mqttConnected;
     }
     String response;
     serializeJson(respDoc, response);

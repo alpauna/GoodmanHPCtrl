@@ -252,6 +252,7 @@ button:hover{background:#45a049;}
 <div id='sdFormatStatus' style='margin-top:8px;font-size:13px;padding:6px 10px;border-radius:4px;display:none'></div>
 </fieldset>
 <div id='status'></div>
+<div id='weatherTestStatus' style='display:none;margin-top:6px;padding:8px 12px;border-radius:6px;font-size:13px;'></div>
 </div>
 <button type='button' id='saveFloat' onclick='document.querySelector("#cf [type=submit]").scrollIntoView({behavior:"smooth",block:"center"})'>&#8595; Save Changes</button>
 <script>
@@ -448,6 +449,13 @@ fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:
 s.className=r.reboot?'info':r.error?'err':'ok';
 s.textContent=r.message||r.error||'Saved';
 s.style.display='block';
+// Weather/MQTT validation result
+var wts=document.getElementById('weatherTestStatus');
+if(r.weatherTestOk===true){wts.textContent='\u2705 Weather API validated: '+r.weatherTestTemp.toFixed(1)+'\u00b0F';wts.style.background='#d4edda';wts.style.color='#155724';wts.style.display='block';}
+else if(r.weatherTestOk===false){wts.textContent='\u274c Weather API error: '+r.weatherTestError;wts.style.background='#f8d7da';wts.style.color='#721c24';wts.style.display='block';}
+else if(r.mqttConnected===true){wts.textContent='\u2705 MQTT connected, topic subscribed';wts.style.background='#d4edda';wts.style.color='#155724';wts.style.display='block';}
+else if(r.mqttConnected===false){wts.textContent='\u26a0\ufe0f MQTT broker not connected \u2014 topic subscription pending';wts.style.background='#fff3cd';wts.style.color='#856404';wts.style.display='block';}
+else{wts.style.display='none';}
 if(r.reboot){setTimeout(()=>{s.textContent='Rebooting... page will reload in 5s';setTimeout(()=>location.reload(),5000);},1000);}
 document.getElementById('curWifiPw').value='';
 document.getElementById('curMqttPw').value='';
@@ -460,7 +468,7 @@ var newTheme=document.getElementById('theme').value;
 document.documentElement.dataset.theme=newTheme;
 localStorage.setItem('hp-theme',newTheme);
 snapshotValues();_dirty=false;document.getElementById('saveFloat').style.display='none';
-}).catch(err=>{s.className='err';s.textContent='Error: '+err;s.style.display='block';});
+}).catch(err=>{s.className='err';s.textContent='Error: '+err;s.style.display='block';document.getElementById('weatherTestStatus').style.display='none';});
 return false;}
 function ftpControl(mins){
 fetch('/ftp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({duration:mins})}).then(r=>r.json()).then(r=>{
