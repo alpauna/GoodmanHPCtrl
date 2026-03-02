@@ -569,6 +569,7 @@ void WebHandler::setupRoutes() {
             doc["weatherTempAgeSec"] = _hpController->getWeatherTempAgeSec();
         }
         doc["failoverTest"] = _hpController->isAmbientFailoverTestActive();
+        doc["failoverTestRemainSec"] = _hpController->getFailoverTestRemainingSec();
         doc["stateValidating"] = _hpController->isStateValidating();
         doc["stateValidationRemainSec"] = _hpController->getStateValidationRemainingMs() / 1000;
         doc["manualOverride"] = _hpController->isManualOverrideActive();

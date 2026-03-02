@@ -1204,6 +1204,7 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
         doc["weatherTempAgeSec"] = ctx->hpController->getWeatherTempAgeSec();
     }
     doc["failoverTest"] = ctx->hpController->isAmbientFailoverTestActive();
+    doc["failoverTestRemainSec"] = ctx->hpController->getFailoverTestRemainingSec();
     doc["stateValidating"] = ctx->hpController->isStateValidating();
     doc["stateValidationRemainSec"] = ctx->hpController->getStateValidationRemainingMs() / 1000;
     doc["manualOverride"] = ctx->hpController->isManualOverrideActive();

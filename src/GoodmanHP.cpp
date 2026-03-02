@@ -65,6 +65,7 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _weatherStaleMs(30UL * 60 * 1000)
     , _internalTempOffsetF(0.0f)
     , _ambientFailoverTest(false)
+    , _failoverTestStartTick(0)
     , _manualOverride(false)
     , _manualOverrideStart(0)
     , _startupLockout(true)
@@ -1206,14 +1207,24 @@ float GoodmanHP::getInternalTempOffsetF() const {
 void GoodmanHP::setAmbientFailoverTest(bool on) {
     _ambientFailoverTest = on;
     if (!on) {
+        _failoverTestStartTick = 0;
         Log.info("HP", "Ambient failover test ended");
     } else {
+        _failoverTestStartTick = millis();
         Log.info("HP", "Ambient failover test started (30 min)");
     }
 }
 
 bool GoodmanHP::isAmbientFailoverTestActive() const {
     return _ambientFailoverTest;
+}
+
+uint32_t GoodmanHP::getFailoverTestRemainingSec() const {
+    if (!_ambientFailoverTest || _failoverTestStartTick == 0) return 0;
+    uint32_t elapsed = millis() - _failoverTestStartTick;
+    uint32_t durationMs = 30UL * 60 * 1000;
+    if (elapsed >= durationMs) return 0;
+    return (durationMs - elapsed) / 1000;
 }
 
 float GoodmanHP::getWeatherTempF() const {

@@ -183,6 +183,10 @@ button:hover{background:#45a049;}
 <label style='margin-top:0'><strong>ESP32 Internal Temp Offset (&deg;F)</strong></label>
 <p style='color:#e67e22;font-size:12px;margin:4px 0 8px;'>The ESP32 internal die temperature is extremely inaccurate as an ambient reading &mdash; it measures the chip itself, not the surrounding air. Use this offset to roughly calibrate it to your environment. This is a last-resort fallback when both the local sensor and weather data are unavailable.</p>
 <input type='number' id='internalTempOffsetF' min='-50' max='50' step='0.1' value='0'>
+<div id='calibRow' style='margin-top:6px;display:none;align-items:center;gap:8px;'>
+<button type='button' class='btn-sm' onclick='autoCalibOffset()'>Auto Calibrate</button>
+<span id='calibStatus' style='font-size:12px;'></span>
+</div>
 </div>
 <div style='margin-top:8px'>
 <button type='button' class='btn-sm' id='btnFailoverTest' onclick='failoverTest(true)'>Test Failover (30 min)</button>
@@ -307,9 +311,29 @@ if(d.weatherRefreshMinutes)document.getElementById('weatherRefreshMinutes').valu
 var akEl=document.getElementById('apiKeyStatus');if(d.weatherApiKeySet){akEl.className='pw-set';akEl.textContent='Set';}else{akEl.className='pw-unset';akEl.textContent='Not Set';}
 toggleWeather();
 enforceStaleMin();
+checkCalibNeeded();
 snapshotValues();
 trackDirty();
 });
+// Restore failover test state from device
+function checkFailoverState(){
+fetch('/state').then(function(r){return r.json();}).then(function(d){
+if(d.failoverTest){
+var sec=d.failoverTestRemainSec||0;
+var m=Math.floor(sec/60);var s=sec%60;
+document.getElementById('failoverTestStatus').textContent='Failover test active ('+m+'m '+s+'s remaining)';
+document.getElementById('failoverTestStatus').style.color='#e67e22';
+document.getElementById('btnFailoverTest').style.display='none';
+document.getElementById('btnFailoverStop').style.display='inline-block';
+}
+if(d.apMode){
+document.getElementById('btnTestAP').style.display='none';
+document.getElementById('btnStopAP').style.display='inline-block';
+document.getElementById('apTestStatus').textContent='AP Mode active';
+}
+}).catch(function(){});
+}
+checkFailoverState();
 function toggleWeather(){
 var s=document.getElementById('weatherSource').value;
 document.getElementById('weatherMqttSection').style.display=s==='mqtt'?'block':'none';
@@ -346,6 +370,42 @@ function trackDirty(){
 var form=document.getElementById('cf');
 form.addEventListener('input',checkDirty);
 form.addEventListener('change',checkDirty);
+}
+function _getCalibData(d){
+var curOffset=parseFloat(document.getElementById('internalTempOffsetF').value)||0;
+var intWithOffset=parseFloat(d.internalTempF);
+if(isNaN(intWithOffset))return null;
+var rawInternal=intWithOffset-curOffset;
+var ref=null;var refName='';
+var ts=d.temps||{};
+if(ts.AMBIENT_TEMP!==undefined){ref=ts.AMBIENT_TEMP;refName='Local sensor';}
+else if(d.weatherTempF!==undefined&&d.weatherTempF!==0){ref=parseFloat(d.weatherTempF);refName='Weather';}
+if(ref===null)return null;
+var pctErr=Math.abs(ref)>0.1?Math.abs(intWithOffset-ref)/Math.abs(ref)*100:Math.abs(intWithOffset-ref);
+return{rawInternal:rawInternal,intWithOffset:intWithOffset,ref:ref,refName:refName,pctErr:pctErr,curOffset:curOffset};
+}
+function checkCalibNeeded(){
+fetch('/state').then(function(r){return r.json();}).then(function(d){
+var c=_getCalibData(d);
+var row=document.getElementById('calibRow');
+var st=document.getElementById('calibStatus');
+if(!c){row.style.display='none';return;}
+if(c.pctErr>10){row.style.display='flex';st.textContent='Off by '+c.pctErr.toFixed(0)+'% (ESP32: '+c.intWithOffset.toFixed(1)+'\u00b0F vs '+c.refName+': '+c.ref.toFixed(1)+'\u00b0F)';st.style.color='#e67e22';}
+else{row.style.display='none';}
+}).catch(function(){});
+}
+function autoCalibOffset(){
+var st=document.getElementById('calibStatus');
+st.textContent='Calibrating...';st.style.color='var(--text-muted)';
+fetch('/state').then(function(r){return r.json();}).then(function(d){
+var c=_getCalibData(d);
+if(!c){st.textContent='No reference source available';st.style.color='#e74c3c';return;}
+var newOffset=c.ref-c.rawInternal;
+if(newOffset<-50)newOffset=-50;if(newOffset>50)newOffset=50;
+document.getElementById('internalTempOffsetF').value=newOffset.toFixed(1);
+document.getElementById('internalTempOffsetF').dispatchEvent(new Event('input',{bubbles:true}));
+st.textContent='Set to '+newOffset.toFixed(1)+'\u00b0F ('+c.refName+': '+c.ref.toFixed(1)+'\u00b0F, raw ESP32: '+c.rawInternal.toFixed(1)+'\u00b0F). Save to apply.';st.style.color='#27ae60';
+}).catch(function(e){st.textContent='Error: '+e;st.style.color='#e74c3c';});
 }
 function failoverTest(on){
 fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({failoverTest:on})}).then(r=>r.json()).then(r=>{
@@ -545,13 +605,6 @@ document.getElementById('btnStopAP').style.display='none';
 document.getElementById('btnTestAP').style.display='inline-block';
 }).catch(err=>{document.getElementById('apTestStatus').textContent='Error: '+err;});
 }
-fetch('/state').then(r=>r.json()).then(d=>{
-if(d.apMode){
-document.getElementById('btnTestAP').style.display='none';
-document.getElementById('btnStopAP').style.display='inline-block';
-document.getElementById('apTestStatus').textContent='AP Mode active';
-}
-}).catch(()=>{});
 function doLogout(){
 fetch('/api/logout',{method:'POST'}).then(function(){location.href='/login';}).catch(function(){location.href='/login';});
 }
