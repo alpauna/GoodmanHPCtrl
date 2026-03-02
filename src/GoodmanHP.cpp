@@ -84,30 +84,38 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
             if (mp.second == nullptr) continue;
             mp.second->update(_sensors);
         }
-        // Ambient temperature fallback chain: Real sensor → Weather → ESP32 internal
-        // Safety: if no AMBIENT_TEMP sensor exists at all, force LOW_TEMP equivalent
-        //         via a very low injected temperature (this should not happen in normal config)
+        // Ambient temperature fallback chain: Sensor → Weather → ESP32 internal
+        // Tries to "fail up" every cycle: INTERNAL→WEATHER when weather arrives,
+        // any fallback→SENSOR when the real sensor recovers.
         TempSensor* ambient = getTempSensor("AMBIENT_TEMP");
-        if (ambient != nullptr && (!ambient->isValid() || _ambientFailoverTest)) {
-            bool weatherFresh = _weatherTempValid && (millis() - _weatherTempTick < _weatherStaleMs);
-            if (weatherFresh) {
-                ambient->updateValue(_weatherTempF);
-                if (_ambientSource != AmbientSource::WEATHER) {
-                    _ambientSource = AmbientSource::WEATHER;
-                    Log.warn("HP", "AMBIENT_TEMP lost, using weather (%.1fF)", _weatherTempF);
-                }
-            } else {
-                float internalC = temperatureRead();
-                float internalF = internalC * 9.0f / 5.0f + 32.0f + _internalTempOffsetF;
-                ambient->updateValue(internalF);
-                if (_ambientSource != AmbientSource::INTERNAL) {
-                    _ambientSource = AmbientSource::INTERNAL;
-                    Log.warn("HP", "AMBIENT_TEMP lost, using ESP32 internal temp (%.1fF, offset %.1f)", internalF, _internalTempOffsetF);
+        if (ambient != nullptr) {
+            // Check if real OneWire sensor just read a valid value (set by update() above)
+            bool sensorOk = ambient->isValid() && !_ambientFailoverTest;
+            if (sensorOk && _ambientSource != AmbientSource::SENSOR) {
+                // Sensor recovered — promote back to SENSOR
+                _ambientSource = AmbientSource::SENSOR;
+                Log.info("HP", "AMBIENT_TEMP sensor restored");
+            } else if (!sensorOk) {
+                // Sensor unavailable — use best available fallback
+                bool weatherFresh = _weatherTempValid && (millis() - _weatherTempTick < _weatherStaleMs);
+                if (weatherFresh) {
+                    ambient->updateValue(_weatherTempF);
+                    if (_ambientSource != AmbientSource::WEATHER) {
+                        _ambientSource = AmbientSource::WEATHER;
+                        Log.warn("HP", "AMBIENT_TEMP %s, using weather (%.1fF)",
+                            _ambientFailoverTest ? "failover test" : "lost", _weatherTempF);
+                    }
+                } else {
+                    float internalC = temperatureRead();
+                    float internalF = internalC * 9.0f / 5.0f + 32.0f + _internalTempOffsetF;
+                    ambient->updateValue(internalF);
+                    if (_ambientSource != AmbientSource::INTERNAL) {
+                        _ambientSource = AmbientSource::INTERNAL;
+                        Log.warn("HP", "AMBIENT_TEMP %s, using ESP32 internal temp (%.1fF, offset %.1f)",
+                            _ambientFailoverTest ? "failover test" : "lost", internalF, _internalTempOffsetF);
+                    }
                 }
             }
-        } else if (_ambientSource != AmbientSource::SENSOR && ambient != nullptr && ambient->isValid() && !_ambientFailoverTest) {
-            _ambientSource = AmbientSource::SENSOR;
-            Log.info("HP", "AMBIENT_TEMP sensor restored");
         }
     }, ts, false);
 }
