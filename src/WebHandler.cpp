@@ -579,7 +579,9 @@ void WebHandler::setupRoutes() {
         doc["cpuLoad1"] = getCpuLoadCore1();
         doc["freeHeap"] = ESP.getFreeHeap();
         float intOffset = _config && _config->getProjectInfo() ? _config->getProjectInfo()->internalTempOffsetF : 0.0f;
-        doc["internalTempF"] = serialized(String(temperatureRead() * 9.0f / 5.0f + 32.0f + intOffset, 1));
+        float intRawF = temperatureRead() * 9.0f / 5.0f + 32.0f;
+        doc["internalTempRawF"] = serialized(String(intRawF, 1));
+        doc["internalTempF"] = serialized(String(intRawF + intOffset, 1));
         doc["wifiSSID"] = WiFi.SSID();
         doc["wifiRSSI"] = WiFi.RSSI();
         doc["wifiIP"] = WiFi.localIP().toString();
