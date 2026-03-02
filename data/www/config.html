@@ -176,7 +176,7 @@ button:hover{background:#45a049;}
 <input type='number' id='weatherRefreshMinutes' min='1' max='60' step='1' value='10'>
 </div>
 <div id='weatherStaleSection' style='display:none'>
-<label>Stale Timeout (minutes, 5-120)</label>
+<label id='staleLbl'>Stale Timeout (minutes, 5-120)</label>
 <input type='number' id='weatherStaleMinutes' min='5' max='120' step='1' value='30'>
 </div>
 <div style='margin-top:12px;padding:10px;border-radius:4px;background:var(--code-bg);border:1px solid var(--border)'>
@@ -348,6 +348,7 @@ var minStale=r*2;
 var curStale=parseInt(sEl.value)||30;
 sEl.min=minStale;
 if(src==='refresh'||curStale<minStale)sEl.value=minStale;
+document.getElementById('staleLbl').textContent='Stale Timeout (minutes, '+minStale+'-120)';
 }
 document.getElementById('weatherRefreshMinutes').addEventListener('input',function(){enforceStaleMin('refresh');});
 document.getElementById('weatherStaleMinutes').addEventListener('input',function(){enforceStaleMin('stale');});
