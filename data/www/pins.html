@@ -308,6 +308,8 @@ function scanI2C(){
   });
 }
 
+var knownI2C={'0x3C':'SSD1306 OLED','0x48':'ADS1115 ADC','0x67':'MCP9600 Thermocouple'};
+
 function renderI2C(){
   var tb=document.getElementById('i2cBody'),h='';
   // Build lookup of current I2C temp sensors from /temps data
@@ -321,14 +323,21 @@ function renderI2C(){
     var d=i2cDevices[i];
     var addr=d.address;
     var cur=i2cTemps[addr]||{driver:'',name:''};
+    var known=knownI2C[addr];
+    var addrLabel=addr+(known?' <span class="v-off">('+known+')</span>':'');
     var roleCell='';
+    if(known&&!cur.driver){
+      // Known fixed-function device (LCD, ADC) — show label, no dropdown
+      h+='<tr><td class="addr">'+addrLabel+'</td><td>'+known+'</td><td><span class="v-off">--</span></td></tr>';
+      continue;
+    }
     if(cur.driver==='MCP9600'){
       roleCell=roleSelect('i2c_role_'+i,cur.name,true);
     } else {
       roleCell='<span class="v-off">--</span>';
     }
     h+='<tr>';
-    h+='<td class="addr">'+addr+'</td>';
+    h+='<td class="addr">'+addrLabel+'</td>';
     h+='<td>'+driverSelect('i2c_drv_'+i,cur.driver)+'</td>';
     h+='<td id="i2c_rolecell_'+i+'">'+roleCell+'</td>';
     h+='</tr>';
