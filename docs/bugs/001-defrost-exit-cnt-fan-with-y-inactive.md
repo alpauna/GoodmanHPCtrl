@@ -1,4 +1,4 @@
-# Bug #1: Defrost exit turns on CNT+FAN with Y inactive — compressor runs without indoor airflow
+# BUG-001: Defrost exit turns on CNT+FAN with Y inactive — compressor runs without indoor airflow
 
 **Severity:** Critical (safety)
 **Date discovered:** 2026-02-15
