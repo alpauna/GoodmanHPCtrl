@@ -64,7 +64,7 @@ void MQTTHandler::setWeatherTopic(const String& topic) {
     _weatherTopic = topic;
     if (_client.connected()) {
         if (oldTopic.length() > 0) _client.unsubscribe(oldTopic.c_str());
-        if (topic.length() > 0) _client.subscribe(topic.c_str(), 0);
+        if (topic.length() > 0) _client.subscribe(topic.c_str(), 1);
     }
 }
 
@@ -81,7 +81,7 @@ void MQTTHandler::publishTemps() {
     char buf[256];
     size_t len = serializeJson(doc, buf, sizeof(buf));
     String topic = _topicPrefix + "/temps";
-    _client.publish(topic.c_str(), 0, false, buf, len);
+    _client.publish(topic.c_str(), 1, false, buf, len);
 }
 
 void MQTTHandler::publishState() {
@@ -121,7 +121,7 @@ void MQTTHandler::publishState() {
     char buf[512];
     size_t len = serializeJson(doc, buf, sizeof(buf));
     String topic = _topicPrefix + "/state";
-    _client.publish(topic.c_str(), 0, false, buf, len);
+    _client.publish(topic.c_str(), 1, false, buf, len);
 }
 
 void MQTTHandler::publishFault(const char* fault, const char* message, bool active) {
@@ -135,7 +135,7 @@ void MQTTHandler::publishFault(const char* fault, const char* message, bool acti
     char buf[256];
     size_t len = serializeJson(doc, buf, sizeof(buf));
     String topic = _topicPrefix + "/fault";
-    _client.publish(topic.c_str(), 0, false, buf, len);
+    _client.publish(topic.c_str(), 1, false, buf, len);
 }
 
 void MQTTHandler::onConnect(bool sessionPresent) {
@@ -146,7 +146,7 @@ void MQTTHandler::onConnect(bool sessionPresent) {
     }
     // Subscribe to weather topic if configured
     if (_weatherTopic.length() > 0) {
-        _client.subscribe(_weatherTopic.c_str(), 0);
+        _client.subscribe(_weatherTopic.c_str(), 1);
         Log.info("MQTT", "Subscribed to weather topic: %s", _weatherTopic.c_str());
     }
 }

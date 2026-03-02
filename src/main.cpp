@@ -901,12 +901,12 @@ void setup() {
   mqttHandler.begin(_MQTT_HOST_DEFAULT, _MQTT_PORT, _MQTT_USER, _MQTT_PASSWORD);
   mqttHandler.setController(&hpController);
   // Wire up weather MQTT subscription
-  if (proj.weatherSource == "mqtt" && proj.weatherMqttTopic.length() > 0) {
+  if ((proj.weatherSource == "mqtt" || proj.weatherSource == "both") && proj.weatherMqttTopic.length() > 0) {
       mqttHandler.setWeatherTopic(proj.weatherMqttTopic);
   }
   // Enable weather HTTP fetch task with configurable interval
   tFetchWeather.setInterval(proj.weatherRefreshMinutes * TASK_MINUTE);
-  if (proj.weatherSource == "http") {
+  if (proj.weatherSource == "http" || proj.weatherSource == "both") {
       tFetchWeather.enableDelayed(0);
   }
 
@@ -1113,7 +1113,7 @@ void onBackfillTempHistory() {
 }
 
 void onFetchWeather() {
-    if (proj.weatherSource != "http") { tFetchWeather.disable(); return; }
+    if (proj.weatherSource != "http" && proj.weatherSource != "both") { tFetchWeather.disable(); return; }
     if (proj.weatherApiKey.length() == 0) { Log.warn("WEATHER", "API key not set, skipping fetch"); return; }
     if (proj.weatherZipCode.length() == 0) { Log.warn("WEATHER", "ZIP code not set, skipping fetch"); return; }
     if (!WiFi.isConnected()) { Log.debug("WEATHER", "WiFi not connected, skipping fetch"); return; }

@@ -139,6 +139,7 @@ button:hover{background:#45a049;}
 <option value='none'>None</option>
 <option value='mqtt'>MQTT</option>
 <option value='http'>HTTP (OpenWeatherMap)</option>
+<option value='both'>MQTT + HTTP</option>
 </select>
 <div id='weatherMqttSection' style='display:none'>
 <label>MQTT Topic (plain float value in &deg;F)</label>
@@ -337,8 +338,10 @@ document.getElementById('apTestStatus').textContent='AP Mode active';
 checkFailoverState();
 function toggleWeather(){
 var s=document.getElementById('weatherSource').value;
-document.getElementById('weatherMqttSection').style.display=s==='mqtt'?'block':'none';
-document.getElementById('weatherHttpSection').style.display=s==='http'?'block':'none';
+var mqtt=s==='mqtt'||s==='both';
+var http=s==='http'||s==='both';
+document.getElementById('weatherMqttSection').style.display=mqtt?'block':'none';
+document.getElementById('weatherHttpSection').style.display=http?'block':'none';
 document.getElementById('weatherStaleSection').style.display=s!=='none'?'block':'none';
 }
 function enforceStaleMin(src){
@@ -443,7 +446,7 @@ if(ap!==apc){var s=document.getElementById('status');s.className='err';s.textCon
 d.adminPassword=ap;
 d.curAdminPw=document.getElementById('curAdminPw').value;
 }
-if(d.weatherSource==='http'){var ak=d.weatherApiKey||'';if(!ak){var s=document.getElementById('status');s.className='err';s.textContent='HTTP weather source requires an API key.';s.style.display='block';return false;}}
+if(d.weatherSource==='http'||d.weatherSource==='both'){var ak=d.weatherApiKey||'';if(!ak){var s=document.getElementById('status');s.className='err';s.textContent='HTTP weather source requires an API key.';s.style.display='block';return false;}}
 var s=document.getElementById('status');
 fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r=>r.json()).then(r=>{
 s.className=r.reboot?'info':r.error?'err':'ok';
@@ -451,10 +454,12 @@ s.textContent=r.message||r.error||'Saved';
 s.style.display='block';
 // Weather/MQTT validation result
 var wts=document.getElementById('weatherTestStatus');
-if(r.weatherTestOk===true){wts.textContent='\u2705 Weather API validated: '+r.weatherTestTemp.toFixed(1)+'\u00b0F';wts.style.background='#d4edda';wts.style.color='#155724';wts.style.display='block';}
-else if(r.weatherTestOk===false){wts.textContent='\u274c Weather API error: '+r.weatherTestError;wts.style.background='#f8d7da';wts.style.color='#721c24';wts.style.display='block';}
-else if(r.mqttConnected===true){wts.textContent='\u2705 MQTT connected, topic subscribed';wts.style.background='#d4edda';wts.style.color='#155724';wts.style.display='block';}
-else if(r.mqttConnected===false){wts.textContent='\u26a0\ufe0f MQTT broker not connected \u2014 topic subscription pending';wts.style.background='#fff3cd';wts.style.color='#856404';wts.style.display='block';}
+var parts=[];
+if(r.weatherTestOk===true)parts.push('\u2705 Weather API validated: '+r.weatherTestTemp.toFixed(1)+'\u00b0F');
+else if(r.weatherTestOk===false)parts.push('\u274c Weather API error: '+r.weatherTestError);
+if(r.mqttConnected===true)parts.push('\u2705 MQTT connected, topic subscribed');
+else if(r.mqttConnected===false)parts.push('\u26a0\ufe0f MQTT broker not connected \u2014 topic subscription pending');
+if(parts.length>0){wts.textContent=parts.join(' | ');var hasErr=r.weatherTestOk===false||r.mqttConnected===false;var allOk=!hasErr;wts.style.background=allOk?'#d4edda':hasErr&&parts.length===1&&r.weatherTestOk===false?'#f8d7da':'#fff3cd';wts.style.color=allOk?'#155724':hasErr&&parts.length===1&&r.weatherTestOk===false?'#721c24':'#856404';wts.style.display='block';}
 else{wts.style.display='none';}
 if(r.reboot){setTimeout(()=>{s.textContent='Rebooting... page will reload in 5s';setTimeout(()=>location.reload(),5000);},1000);}
 document.getElementById('curWifiPw').value='';

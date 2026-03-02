@@ -2028,27 +2028,25 @@ void WebHandler::setupRoutes() {
         // Weather ambient fallback (live)
         if (data["weatherSource"].is<const char*>()) {
             String newSrc = data["weatherSource"] | String("none");
-            if (newSrc == "none" || newSrc == "mqtt" || newSrc == "http") {
+            if (newSrc == "none" || newSrc == "mqtt" || newSrc == "http" || newSrc == "both") {
                 String oldSrc = proj->weatherSource;
                 proj->weatherSource = newSrc;
-                // Update MQTT weather subscription
-                if (newSrc == "mqtt") {
+                // Update MQTT weather subscription and HTTP fetch task
+                bool wantMqtt = (newSrc == "mqtt" || newSrc == "both");
+                bool wantHttp = (newSrc == "http" || newSrc == "both");
+                if (wantMqtt) {
                     String topic = data["weatherMqttTopic"] | proj->weatherMqttTopic;
                     proj->weatherMqttTopic = topic;
                     if (_weatherTopicCb) _weatherTopicCb(topic);
-                    if (_weatherHttpCb) _weatherHttpCb(false);
-                } else if (newSrc == "http") {
-                    if (_weatherTopicCb) _weatherTopicCb("");  // unsubscribe
-                    if (_weatherHttpCb) _weatherHttpCb(true);
                 } else {
-                    if (_weatherTopicCb) _weatherTopicCb("");
-                    if (_weatherHttpCb) _weatherHttpCb(false);
+                    if (_weatherTopicCb) _weatherTopicCb("");  // unsubscribe
                 }
+                if (_weatherHttpCb) _weatherHttpCb(wantHttp);
             }
         }
         if (data["weatherMqttTopic"].is<const char*>()) {
             proj->weatherMqttTopic = data["weatherMqttTopic"] | String("");
-            if (proj->weatherSource == "mqtt" && _weatherTopicCb) _weatherTopicCb(proj->weatherMqttTopic);
+            if ((proj->weatherSource == "mqtt" || proj->weatherSource == "both") && _weatherTopicCb) _weatherTopicCb(proj->weatherMqttTopic);
         }
         if (data["weatherApiKey"].is<const char*>()) {
             String key = data["weatherApiKey"] | String("******");
@@ -2061,9 +2059,13 @@ void WebHandler::setupRoutes() {
             proj->weatherCountry = data["weatherCountry"] | String("US");
         }
         // Validate HTTP source requires API key
-        if (proj->weatherSource == "http" && proj->weatherApiKey.length() == 0) {
+        if ((proj->weatherSource == "http" || proj->weatherSource == "both") && proj->weatherApiKey.length() == 0) {
             errors += "HTTP weather source requires an API key. ";
-            proj->weatherSource = "none";  // fall back to none
+            if (proj->weatherSource == "both") {
+                proj->weatherSource = "mqtt";  // fall back to mqtt-only
+            } else {
+                proj->weatherSource = "none";  // fall back to none
+            }
             if (_weatherHttpCb) _weatherHttpCb(false);
         }
         if (data["weatherRefreshMinutes"].is<int>()) {
@@ -2110,7 +2112,7 @@ void WebHandler::setupRoutes() {
         String weatherTestResult;
         float weatherTestTemp = 0;
         bool mqttConnected = false;
-        if (saved && proj->weatherSource == "http" && proj->weatherApiKey.length() > 0 && proj->weatherZipCode.length() > 0) {
+        if (saved && (proj->weatherSource == "http" || proj->weatherSource == "both") && proj->weatherApiKey.length() > 0 && proj->weatherZipCode.length() > 0) {
             HTTPClient http;
             String url = "http://api.openweathermap.org/data/2.5/weather?zip="
                          + proj->weatherZipCode + "," + proj->weatherCountry
@@ -2145,7 +2147,7 @@ void WebHandler::setupRoutes() {
             }
             http.end();
         }
-        if (saved && proj->weatherSource == "mqtt") {
+        if (saved && (proj->weatherSource == "mqtt" || proj->weatherSource == "both")) {
             mqttConnected = _mqttConnectedCb ? _mqttConnectedCb() : false;
             if (!mqttConnected) errors += "MQTT broker not connected — topic subscription pending. ";
         }
@@ -2173,7 +2175,7 @@ void WebHandler::setupRoutes() {
                 respDoc["weatherTestError"] = weatherTestResult;
             }
         }
-        if (saved && proj->weatherSource == "mqtt") {
+        if (saved && (proj->weatherSource == "mqtt" || proj->weatherSource == "both")) {
             respDoc["mqttConnected"] = mqttConnected;
         }
         serializeJson(respDoc, response);

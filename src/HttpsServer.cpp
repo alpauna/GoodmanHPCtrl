@@ -604,25 +604,23 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     // Weather ambient fallback (live)
     if (data["weatherSource"].is<const char*>()) {
         String newSrc = data["weatherSource"] | String("none");
-        if (newSrc == "none" || newSrc == "mqtt" || newSrc == "http") {
+        if (newSrc == "none" || newSrc == "mqtt" || newSrc == "http" || newSrc == "both") {
             proj->weatherSource = newSrc;
-            if (newSrc == "mqtt") {
+            bool wantMqtt = (newSrc == "mqtt" || newSrc == "both");
+            bool wantHttp = (newSrc == "http" || newSrc == "both");
+            if (wantMqtt) {
                 String topic = data["weatherMqttTopic"] | proj->weatherMqttTopic;
                 proj->weatherMqttTopic = topic;
                 if (ctx->weatherTopicCb) ctx->weatherTopicCb(topic);
-                if (ctx->weatherHttpCb) ctx->weatherHttpCb(false);
-            } else if (newSrc == "http") {
-                if (ctx->weatherTopicCb) ctx->weatherTopicCb("");
-                if (ctx->weatherHttpCb) ctx->weatherHttpCb(true);
             } else {
                 if (ctx->weatherTopicCb) ctx->weatherTopicCb("");
-                if (ctx->weatherHttpCb) ctx->weatherHttpCb(false);
             }
+            if (ctx->weatherHttpCb) ctx->weatherHttpCb(wantHttp);
         }
     }
     if (data["weatherMqttTopic"].is<const char*>()) {
         proj->weatherMqttTopic = data["weatherMqttTopic"] | String("");
-        if (proj->weatherSource == "mqtt" && ctx->weatherTopicCb) ctx->weatherTopicCb(proj->weatherMqttTopic);
+        if ((proj->weatherSource == "mqtt" || proj->weatherSource == "both") && ctx->weatherTopicCb) ctx->weatherTopicCb(proj->weatherMqttTopic);
     }
     if (data["weatherApiKey"].is<const char*>()) {
         String key = data["weatherApiKey"] | String("******");
@@ -635,9 +633,13 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         proj->weatherCountry = data["weatherCountry"] | String("US");
     }
     // Validate HTTP source requires API key
-    if (proj->weatherSource == "http" && proj->weatherApiKey.length() == 0) {
+    if ((proj->weatherSource == "http" || proj->weatherSource == "both") && proj->weatherApiKey.length() == 0) {
         errors += "HTTP weather source requires an API key. ";
-        proj->weatherSource = "none";
+        if (proj->weatherSource == "both") {
+            proj->weatherSource = "mqtt";  // fall back to mqtt-only
+        } else {
+            proj->weatherSource = "none";
+        }
         if (ctx->weatherHttpCb) ctx->weatherHttpCb(false);
     }
     if (data["weatherRefreshMinutes"].is<int>()) {
@@ -684,7 +686,7 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     String weatherTestResult;
     float weatherTestTemp = 0;
     bool mqttConnected = false;
-    if (saved && proj->weatherSource == "http" && proj->weatherApiKey.length() > 0 && proj->weatherZipCode.length() > 0) {
+    if (saved && (proj->weatherSource == "http" || proj->weatherSource == "both") && proj->weatherApiKey.length() > 0 && proj->weatherZipCode.length() > 0) {
         HTTPClient http;
         String url = "http://api.openweathermap.org/data/2.5/weather?zip="
                      + proj->weatherZipCode + "," + proj->weatherCountry
@@ -719,7 +721,7 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         }
         http.end();
     }
-    if (saved && proj->weatherSource == "mqtt") {
+    if (saved && (proj->weatherSource == "mqtt" || proj->weatherSource == "both")) {
         mqttConnected = ctx->mqttConnectedCb ? ctx->mqttConnectedCb() : false;
         if (!mqttConnected) errors += "MQTT broker not connected — topic subscription pending. ";
     }
@@ -746,7 +748,7 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
             respDoc["weatherTestError"] = weatherTestResult;
         }
     }
-    if (saved && proj->weatherSource == "mqtt") {
+    if (saved && (proj->weatherSource == "mqtt" || proj->weatherSource == "both")) {
         respDoc["mqttConnected"] = mqttConnected;
     }
     String response;
