@@ -1,4 +1,4 @@
-# Bug #2: Manual override bypasses startup lockout — CNT can be activated during sensor stabilization period
+# BUG-002: Manual override bypasses startup lockout — CNT can be activated during sensor stabilization period
 
 **Severity:** High (safety)
 **Date discovered:** 2026-02-22

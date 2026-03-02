@@ -1,4 +1,4 @@
-# Bug #3: Config-loaded sensors marked valid on boot — stale 0.0°F triggers false LOW_TEMP protection
+# BUG-003: Config-loaded sensors marked valid on boot — stale 0.0°F triggers false LOW_TEMP protection
 
 **Severity:** High (safety)
 **Date discovered:** 2026-02-26

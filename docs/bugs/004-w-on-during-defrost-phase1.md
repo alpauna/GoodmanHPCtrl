@@ -1,4 +1,4 @@
-# BUG-001: W relay turned ON during defrost Phase 1
+# BUG-004: W relay turned ON during defrost Phase 1
 
 **Date**: 2026-03-01
 **Severity**: Medium

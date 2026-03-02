@@ -1220,11 +1220,16 @@ If the MCP9600 stops responding after flashing firmware that performed bare I2C 
 
 ## Known Bugs
 
+All bug reports in [`docs/bugs/`](docs/bugs/).
+
 | # | Description | Severity | Fixed In |
 |---|-------------|----------|----------|
-| [1](bugs/1.md) | Defrost exit turns on CNT+FAN with Y inactive — compressor runs without indoor airflow. `_defrostStartTick=0` causes false 15-min timeout when Y drops during Phase 1/2, triggering exit sequence that turns on compressor without checking Y. Suction temp peaked at 148°F. | Critical | `028e568` |
-| [2](bugs/2.md) | Manual override bypasses startup lockout — CNT can be turned ON 69 seconds after reboot during 180s lockout period. `setManualOverride()` and `setManualOutput()` did not check `_startupLockout`. Short cycle condition had redundant AND making it ineffective after 30s. | High | `6f0871c` |
-| [3](bugs/3.md) | Config-loaded sensors marked `valid=true` on boot with stale cached `last-value: 0`. `checkAmbientTemp()` sees 0.0°F < threshold and triggers false LOW_TEMP protection on every reboot — shutting down CNT, turning on W for ~10s until real OneWire data arrives. 77 false triggers across 263 reboots in first 18-day deployment. | High | `d49d2e8` |
+| [BUG-001](docs/bugs/001-defrost-exit-cnt-fan-with-y-inactive.md) | Defrost exit turns on CNT+FAN with Y inactive — compressor runs without indoor airflow. `_defrostStartTick=0` causes false 15-min timeout when Y drops during Phase 1/2, triggering exit sequence that turns on compressor without checking Y. Suction temp peaked at 148°F. | Critical | `028e568` |
+| [BUG-002](docs/bugs/002-manual-override-bypasses-startup-lockout.md) | Manual override bypasses startup lockout — CNT can be turned ON 69 seconds after reboot during 180s lockout period. `setManualOverride()` and `setManualOutput()` did not check `_startupLockout`. Short cycle condition had redundant AND making it ineffective after 30s. | High | `6f0871c` |
+| [BUG-003](docs/bugs/003-stale-sensor-false-low-temp-on-boot.md) | Config-loaded sensors marked `valid=true` on boot with stale cached `last-value: 0`. `checkAmbientTemp()` sees 0.0°F < threshold and triggers false LOW_TEMP protection on every reboot — shutting down CNT, turning on W for ~10s until real OneWire data arrives. 77 false triggers across 263 reboots in first 18-day deployment. | High | `d49d2e8` |
+| [BUG-004](docs/bugs/004-w-on-during-defrost-phase1.md) | W relay turned ON during defrost Phase 1 — race condition in `updateState()` where W control block ran before Phase 1 restart set `_defrostTransition=true`. Validator auto-corrected. 6 occurrences (Feb 25–Mar 1). | Medium | `46d3a0f` |
+| [BUG-005](docs/bugs/005-fan-off-after-manual-override-exit.md) | FAN not restored after manual override exit — `_yWasActive` not reset so Y activation edge never re-fired. Validator auto-corrected. 1 occurrence (Feb 25). | Low | `f7f3cf4` |
+| [BUG-006](docs/bugs/006-fan-validator-fight-during-state-validation.md) | FAN validator fight during state validation window — validator enforced OFF rules against stale state label while FAN was correct for pending HEAT transition. Double-correction. 2 occurrences (Feb 28). | Low | `f7f3cf4` |
 
 ## Dependencies
 

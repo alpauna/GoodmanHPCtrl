@@ -1,4 +1,4 @@
-# BUG-003: FAN validator fight during state validation window
+# BUG-006: FAN validator fight during state validation window
 
 **Date**: 2026-03-01
 **Severity**: Low

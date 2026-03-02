@@ -1,4 +1,4 @@
-# BUG-002: FAN not restored after manual override exit
+# BUG-005: FAN not restored after manual override exit
 
 **Date**: 2026-03-01
 **Severity**: Low
