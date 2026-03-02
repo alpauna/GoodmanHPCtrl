@@ -1086,8 +1086,9 @@ void GoodmanHP::validateOutputStates() {
     if (now - _lastValidateTick < STATE_VALIDATE_MS) return;
     _lastValidateTick = now;
 
-    // Skip only during startup lockout and manual override
-    if (_startupLockout || _manualOverride) return;
+    // Skip during startup lockout, manual override, and state validation hold
+    // (state label doesn't reflect actual operating mode during validation window)
+    if (_startupLockout || _manualOverride || _stateValidationActive) return;
 
     // Skip if LOW_TEMP outputs are protected but state label is deferred
     if (_lowTemp && _state != State::LOW_TEMP) return;
@@ -1735,6 +1736,8 @@ String GoodmanHP::setManualOverride(bool on) {
             }
         }
         _cntActivated = false;
+        // Reset Y tracking so normal activation sequence (FAN on, 30s CNT delay) resumes
+        _yWasActive = false;
         Log.warn("HP", "MANUAL OVERRIDE disabled, all outputs OFF");
     }
     return "";
