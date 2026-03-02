@@ -561,6 +561,7 @@ void WebHandler::setupRoutes() {
         doc["heatCntPendingRemainSec"] = _hpController->getHeatCntPendingRemainingMs() / 1000;
         doc["rvHold"] = _hpController->isRvHoldActive();
         doc["rvHoldRemainSec"] = _hpController->getRvHoldRemainingMs() / 1000;
+        doc["ambientFallback"] = _hpController->isAmbientFallbackActive();
         doc["stateValidating"] = _hpController->isStateValidating();
         doc["stateValidationRemainSec"] = _hpController->getStateValidationRemainingMs() / 1000;
         doc["manualOverride"] = _hpController->isManualOverrideActive();
@@ -785,6 +786,7 @@ void WebHandler::setupRoutes() {
             doc["rvFail"] = _hpController->isRvFailActive();
             doc["highSuctionTemp"] = _hpController->isHighSuctionTempActive();
             doc["heatRuntimeMin"] = _hpController->getHeatRuntimeMs() / 60000;
+            doc["ambientFallback"] = _hpController->isAmbientFallbackActive();
             doc["stateValidating"] = _hpController->isStateValidating();
             doc["stateValidationRemainSec"] = _hpController->getStateValidationRemainingMs() / 1000;
 

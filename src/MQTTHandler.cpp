@@ -103,6 +103,7 @@ void MQTTHandler::publishState() {
     doc["suctionLowTemp"] = _controller->isSuctionLowTempActive();
     doc["rvFail"] = _controller->isRvFailActive();
     doc["highSuctionTemp"] = _controller->isHighSuctionTempActive();
+    doc["ambientFallback"] = _controller->isAmbientFallbackActive();
     doc["manualOverride"] = _controller->isManualOverrideActive();
     doc["stateValidating"] = _controller->isStateValidating();
 

@@ -132,6 +132,9 @@ class GoodmanHP {
     uint32_t getRvHoldRemainingMs() const;
     void handleBootRvHold(bool rvWasOn, bool cntWasOn);
 
+    // Ambient sensor failsafe (ESP32 internal temp)
+    bool isAmbientFallbackActive() const;
+
     // COOL→HEAT transition (RV switch sequencing)
     bool isHeatTransitionActive() const;
     bool isHeatCntPendingActive() const;
@@ -227,6 +230,8 @@ class GoodmanHP {
     uint32_t _heatCntPendingStart;
     // RV pressure equalization hold (prevents RV switching under pressure)
     bool _rvHoldActive;               // True when RV off is deferred for pressure equalization
+    // Ambient sensor failsafe
+    bool _ambientFallback;            // True when using ESP32 internal temp as ambient failsafe
     // State validation timer
     bool _stateValidationActive;
     uint32_t _stateValidationStart;

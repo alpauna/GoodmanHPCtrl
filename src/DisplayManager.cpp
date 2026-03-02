@@ -306,6 +306,9 @@ void DisplayManager::drawPageProtections() {
         _display->printf("* RV Hold (%lus)", _hp->getRvHoldRemainingMs() / 1000);
         y += 10; any = true;
     }
+    if (_hp->isAmbientFallbackActive()) {
+        _display->setCursor(0, y); _display->print(F("* Amb: Internal")); y += 10; any = true;
+    }
     if (_hp->isStartupLockoutActive()) {
         _display->setCursor(0, y);
         _display->printf("* Startup (%lus)", _hp->getStartupLockoutRemainingMs() / 1000);

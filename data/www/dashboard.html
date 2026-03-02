@@ -83,6 +83,7 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <span class='pill ok' id='fSuctLT'>Suct LT Ok</span>
 <span class='pill ok' id='fHighSuct'>Suct Temp: --&deg;F</span>
 <span class='pill ok' id='fRvFail'>RV Pass</span><button class='btn-clear' id='clearRvFailBtn' style='display:none' onclick='clearRvFail()'>Clear</button>
+<span class='pill ok' id='fAmbFallback'>Amb Sensor</span>
 <span class='pill ok' id='fStateHold'>State Check Hold</span>
 </div>
 </div>
@@ -202,6 +203,7 @@ function update(d){
   if(hsEl){var suctVal=suctValid?ts.SUCTION_TEMP.toFixed(0):'--';hsEl.textContent=(d.highSuctionTemp?'High Suct: ':'Suct Temp: ')+suctVal+'\u00B0F';hsEl.className='pill '+(!suctValid?'invalid':d.highSuctionTemp?'active':'ok');}
   var rvEl=document.getElementById('fRvFail');if(rvEl){rvEl.textContent=d.rvFail?'RV Fail':'RV Pass';setPill('fRvFail',d.rvFail);}
   var rvBtn=document.getElementById('clearRvFailBtn');if(rvBtn)rvBtn.style.display=d.rvFail?'inline-block':'none';
+  var afEl=document.getElementById('fAmbFallback');if(afEl){afEl.textContent=d.ambientFallback?'Amb: ESP32':'Amb Sensor';afEl.className='pill '+(d.ambientFallback?'warn':'ok');}
   var shEl=document.getElementById('fStateHold');if(shEl){shEl.textContent=d.stateValidating&&d.stateValidationRemainSec>0?'State Check Hold: '+d.stateValidationRemainSec+'s':'State Check Hold';shEl.className='pill '+(d.stateValidating?'active':'ok');if(d.stateValidating)shEl.style.background='#e3f2fd',shEl.style.color='#1565c0';}
   setPill('fRvDFH',d.defrostTransition);
   var rvHoldEl=document.getElementById('fRvHold');if(rvHoldEl){rvHoldEl.textContent=d.rvHold&&d.rvHoldRemainSec>0?'Hold: '+d.rvHoldRemainSec+'s':'Hold';rvHoldEl.className='pill '+(d.rvHold?'active':'ok')+' sc-pill';}

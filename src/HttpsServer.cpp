@@ -1123,6 +1123,7 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     doc["heatCntPendingRemainSec"] = ctx->hpController->getHeatCntPendingRemainingMs() / 1000;
     doc["rvHold"] = ctx->hpController->isRvHoldActive();
     doc["rvHoldRemainSec"] = ctx->hpController->getRvHoldRemainingMs() / 1000;
+    doc["ambientFallback"] = ctx->hpController->isAmbientFallbackActive();
     doc["stateValidating"] = ctx->hpController->isStateValidating();
     doc["stateValidationRemainSec"] = ctx->hpController->getStateValidationRemainingMs() / 1000;
     doc["manualOverride"] = ctx->hpController->isManualOverrideActive();
