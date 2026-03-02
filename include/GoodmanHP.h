@@ -137,6 +137,10 @@ class GoodmanHP {
     uint32_t getCoolTransitionRemainingMs() const;
     uint32_t getCoolCntPendingRemainingMs() const;
 
+    // RV pressure equalization hold
+    bool isRvHoldActive() const;
+    uint32_t getRvHoldRemainingMs() const;
+
     // COOL→HEAT transition (RV switch sequencing)
     bool isHeatTransitionActive() const;
     bool isHeatCntPendingActive() const;
@@ -234,6 +238,8 @@ class GoodmanHP {
     uint32_t _heatTransitionStart;
     bool _heatCntPending;             // Phase 2: RV off, waiting CNT short cycle
     uint32_t _heatCntPendingStart;
+    // RV pressure equalization hold (prevents RV switching under pressure)
+    bool _rvHoldActive;               // True when RV off is deferred for pressure equalization
     // State validation timer
     bool _stateValidationActive;
     uint32_t _stateValidationStart;
@@ -259,6 +265,8 @@ class GoodmanHP {
     void checkDefrostNeeded();
     void checkCoolTransition();
     void checkHeatTransition();
+    void safeRvOff();
+    void checkRvHold();
     void validateOutputStates();
     void startSoftwareDefrost();
     void stopSoftwareDefrost();

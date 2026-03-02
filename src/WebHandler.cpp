@@ -559,6 +559,8 @@ void WebHandler::setupRoutes() {
         doc["heatTransitionRemainSec"] = _hpController->getHeatTransitionRemainingMs() / 1000;
         doc["heatCntPending"] = _hpController->isHeatCntPendingActive();
         doc["heatCntPendingRemainSec"] = _hpController->getHeatCntPendingRemainingMs() / 1000;
+        doc["rvHold"] = _hpController->isRvHoldActive();
+        doc["rvHoldRemainSec"] = _hpController->getRvHoldRemainingMs() / 1000;
         doc["stateValidating"] = _hpController->isStateValidating();
         doc["stateValidationRemainSec"] = _hpController->getStateValidationRemainingMs() / 1000;
         doc["manualOverride"] = _hpController->isManualOverrideActive();
@@ -767,6 +769,7 @@ void WebHandler::setupRoutes() {
             doc["coolCntPending"] = _hpController->isCoolCntPendingActive();
             doc["heatTransition"] = _hpController->isHeatTransitionActive();
             doc["heatCntPending"] = _hpController->isHeatCntPendingActive();
+            doc["rvHold"] = _hpController->isRvHoldActive();
 
             // Countdown timers (seconds)
             doc["startupLockout"] = _hpController->isStartupLockoutActive();
@@ -778,6 +781,7 @@ void WebHandler::setupRoutes() {
             doc["coolCntPendingRemainSec"] = _hpController->getCoolCntPendingRemainingMs() / 1000;
             doc["heatTransitionRemainSec"] = _hpController->getHeatTransitionRemainingMs() / 1000;
             doc["heatCntPendingRemainSec"] = _hpController->getHeatCntPendingRemainingMs() / 1000;
+            doc["rvHoldRemainSec"] = _hpController->getRvHoldRemainingMs() / 1000;
 
             // Protection flags
             doc["lpsFault"] = _hpController->isLPSFaultActive();
