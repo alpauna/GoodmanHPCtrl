@@ -569,6 +569,7 @@ void WebHandler::setupRoutes() {
         doc["cpuLoad0"] = getCpuLoadCore0();
         doc["cpuLoad1"] = getCpuLoadCore1();
         doc["freeHeap"] = ESP.getFreeHeap();
+        doc["internalTempF"] = serialized(String(temperatureRead() * 9.0f / 5.0f + 32.0f, 1));
         doc["wifiSSID"] = WiFi.SSID();
         doc["wifiRSSI"] = WiFi.RSSI();
         doc["wifiIP"] = WiFi.localIP().toString();
