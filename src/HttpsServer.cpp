@@ -500,6 +500,8 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     // Adaptive defrost band breakpoints
     float coldMax = data["defrostColdMaxTemp"] | proj->defrostColdMaxTempF;
     float warmMin = data["defrostWarmMinTemp"] | proj->defrostWarmMinTempF;
+    if (coldMax < proj->lowTempThreshold) coldMax = proj->lowTempThreshold;
+    if (warmMin > 35.0f) warmMin = 35.0f;
     if (coldMax >= warmMin) coldMax = warmMin - 1.0f;
     proj->defrostColdMaxTempF = coldMax;
     proj->defrostWarmMinTempF = warmMin;
@@ -510,7 +512,7 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
                         uint32_t& rtMs, uint32_t& minMs, float& exitF,
                         GoodmanHP::DefrostBandName bandName) {
         uint32_t rtMin2 = data[rtKey] | (int)(rtMs / 60000);
-        if (rtMin2 < 1) rtMin2 = 1;
+        if (rtMin2 < 15) rtMin2 = 15;
         if (rtMin2 > 120) rtMin2 = 120;
         rtMs = rtMin2 * 60000UL;
         uint32_t minSec = data[minKey] | (int)(minMs / 1000);
@@ -518,8 +520,8 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         if (minSec > 600) minSec = 600;
         minMs = minSec * 1000UL;
         float exit2 = data[exitKey] | exitF;
-        if (exit2 < 30.0f) exit2 = 30.0f;
-        if (exit2 > 120.0f) exit2 = 120.0f;
+        if (exit2 < 36.0f) exit2 = 36.0f;
+        if (exit2 > 65.0f) exit2 = 65.0f;
         exitF = exit2;
         ctx->hpController->setDefrostBand(bandName, {rtMs, minMs, exitF});
     };

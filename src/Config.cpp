@@ -514,6 +514,21 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.lockedRotorTimeoutMs = hpCurrent["lockedRotorTimeoutMs"] | 5000;
         proj.lockedRotorFault = hpCurrent["lockedRotorFault"] | false;
     }
+
+    // Defensive clamping for defrost band values (catches corrupt SD data)
+    if (proj.defrostColdMaxTempF < proj.lowTempThreshold) proj.defrostColdMaxTempF = proj.lowTempThreshold;
+    if (proj.defrostWarmMinTempF > 35.0f) proj.defrostWarmMinTempF = 35.0f;
+    if (proj.defrostColdMaxTempF >= proj.defrostWarmMinTempF) proj.defrostColdMaxTempF = proj.defrostWarmMinTempF - 1.0f;
+    // Per-band runtime: min 15 minutes (900000 ms)
+    if (proj.defrostColdRuntimeMs < 900000) proj.defrostColdRuntimeMs = 900000;
+    if (proj.defrostMidRuntimeMs < 900000) proj.defrostMidRuntimeMs = 900000;
+    if (proj.defrostWarmRuntimeMs < 900000) proj.defrostWarmRuntimeMs = 900000;
+    // Per-band exit temp: 36-65°F
+    auto clampExitTemp = [](float& v) { if (v < 36.0f) v = 36.0f; if (v > 65.0f) v = 65.0f; };
+    clampExitTemp(proj.defrostColdExitTempF);
+    clampExitTemp(proj.defrostMidExitTempF);
+    clampExitTemp(proj.defrostWarmExitTempF);
+
     Serial.printf("Read heatpump: lowTemp=%.1fF highSuct=%.1fF rvFail=%d rvSC=%lu cntSC=%lu\n",
                   proj.lowTempThreshold, proj.highSuctionTempThreshold, proj.rvFail,
                   proj.rvShortCycleMs, proj.cntShortCycleMs);

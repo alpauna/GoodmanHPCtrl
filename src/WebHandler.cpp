@@ -1938,6 +1938,8 @@ void WebHandler::setupRoutes() {
         // Adaptive defrost band breakpoints
         float coldMax = data["defrostColdMaxTemp"] | proj->defrostColdMaxTempF;
         float warmMin = data["defrostWarmMinTemp"] | proj->defrostWarmMinTempF;
+        if (coldMax < proj->lowTempThreshold) coldMax = proj->lowTempThreshold;
+        if (warmMin > 35.0f) warmMin = 35.0f;
         if (coldMax >= warmMin) coldMax = warmMin - 1.0f;  // Enforce gap
         proj->defrostColdMaxTempF = coldMax;
         proj->defrostWarmMinTempF = warmMin;
@@ -1949,7 +1951,7 @@ void WebHandler::setupRoutes() {
                             uint32_t& rtMs, uint32_t& minMs, float& exitF,
                             GoodmanHP::DefrostBandName bandName) {
             uint32_t rtMin = data[rtKey] | (int)(rtMs / 60000);
-            if (rtMin < 1) rtMin = 1;
+            if (rtMin < 15) rtMin = 15;
             if (rtMin > 120) rtMin = 120;
             rtMs = rtMin * 60000UL;
             uint32_t minSec = data[minKey] | (int)(minMs / 1000);
@@ -1957,8 +1959,8 @@ void WebHandler::setupRoutes() {
             if (minSec > 600) minSec = 600;
             minMs = minSec * 1000UL;
             float exit = data[exitKey] | exitF;
-            if (exit < 30.0f) exit = 30.0f;
-            if (exit > 120.0f) exit = 120.0f;
+            if (exit < 36.0f) exit = 36.0f;
+            if (exit > 65.0f) exit = 65.0f;
             exitF = exit;
             _hpController->setDefrostBand(bandName, {rtMs, minMs, exitF});
         };
