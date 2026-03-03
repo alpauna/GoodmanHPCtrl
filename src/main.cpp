@@ -213,12 +213,12 @@ ProjectInfo proj = {
   31.0f,              // defrostWarmMinTempF: Warm ≥ 31°F
   1800000,            // defrostColdRuntimeMs: Cold 30 min
   120000,             // defrostColdMinRuntimeMs: Cold 2 min
-  45.0f,              // defrostColdExitTempF: Cold 45°F
+  50.0f,              // defrostColdExitTempF: Cold 50°F
   3600000,            // defrostMidRuntimeMs: Mid 60 min
-  180000,             // defrostMidMinRuntimeMs: Mid 3 min
+  90000,              // defrostMidMinRuntimeMs: Mid 1.5 min
   55.0f,              // defrostMidExitTempF: Mid 55°F
   5400000,            // defrostWarmRuntimeMs: Warm 90 min
-  180000,             // defrostWarmMinRuntimeMs: Warm 3 min
+  60000,              // defrostWarmMinRuntimeMs: Warm 1 min
   60.0f,              // defrostWarmExitTempF: Warm 60°F
   false,              // softwareDefrost: not active
   30000,              // stateValidationMs: 30s default

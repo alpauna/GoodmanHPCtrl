@@ -10,9 +10,9 @@ Replaced the single defrost runtime threshold (default 90 min) with 3 ambient te
 
 | Band | Ambient Range | Runtime Threshold | Min Defrost | Exit Temp |
 |------|--------------|-------------------|-------------|-----------|
-| **Cold** | ≤ 23°F | 30 min | 2 min | 45°F |
-| **Mid** | 23–31°F | 60 min | 3 min | 55°F |
-| **Warm** | ≥ 31°F | 90 min | 3 min | 60°F |
+| **Cold** | ≤ 23°F | 30 min | 2 min | 50°F |
+| **Mid** | 23–31°F | 60 min | 1.5 min | 55°F |
+| **Warm** | ≥ 31°F | 90 min | 1 min | 60°F |
 
 All values configurable via config page. Two breakpoint temperatures (`coldMaxTemp`, `warmMinTemp`) define the band boundaries.
 
@@ -47,9 +47,9 @@ All values configurable via config page. Two breakpoint temperatures (`coldMaxTe
     "active": false,
     "coldMaxTemp": 23.0,
     "warmMinTemp": 31.0,
-    "cold": { "runtimeThresholdMs": 1800000, "minRuntimeMs": 120000, "exitTempF": 45.0 },
-    "mid":  { "runtimeThresholdMs": 3600000, "minRuntimeMs": 180000, "exitTempF": 55.0 },
-    "warm": { "runtimeThresholdMs": 5400000, "minRuntimeMs": 180000, "exitTempF": 60.0 }
+    "cold": { "runtimeThresholdMs": 1800000, "minRuntimeMs": 120000, "exitTempF": 50.0 },
+    "mid":  { "runtimeThresholdMs": 3600000, "minRuntimeMs": 90000, "exitTempF": 55.0 },
+    "warm": { "runtimeThresholdMs": 5400000, "minRuntimeMs": 60000, "exitTempF": 60.0 }
 }
 ```
 
@@ -71,9 +71,9 @@ Added:
 ## Migration
 
 On config load, if old single-value fields exist (`heatRuntimeThresholdMs`, `minRuntimeMs`, `exitTempF`) and new `cold` sub-object doesn't exist:
-- **Warm band** = old values verbatim
-- **Mid band** = runtime ×⅔, exit temp −5°F
-- **Cold band** = runtime ×⅓, min defrost −1 min, exit temp −15°F
+- **Warm band** = old runtime, min defrost ×⅓, old exit temp
+- **Mid band** = runtime ×⅔, min defrost ×½, exit temp −5°F
+- **Cold band** = runtime ×⅓, min defrost ×⅔, exit temp −10°F
 
 Old keys are removed on next `updateConfig()` save.
 

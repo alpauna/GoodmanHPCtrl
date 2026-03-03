@@ -447,9 +447,9 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         // Legacy defaults — Warm band values
         proj.defrostColdMaxTempF = 23.0f;
         proj.defrostWarmMinTempF = 31.0f;
-        proj.defrostColdRuntimeMs = 1800000;   proj.defrostColdMinRuntimeMs = 120000;  proj.defrostColdExitTempF = 45.0f;
-        proj.defrostMidRuntimeMs = 3600000;    proj.defrostMidMinRuntimeMs = 180000;   proj.defrostMidExitTempF = 55.0f;
-        proj.defrostWarmRuntimeMs = 5400000;   proj.defrostWarmMinRuntimeMs = 180000;  proj.defrostWarmExitTempF = 60.0f;
+        proj.defrostColdRuntimeMs = 1800000;   proj.defrostColdMinRuntimeMs = 120000;  proj.defrostColdExitTempF = 50.0f;
+        proj.defrostMidRuntimeMs = 3600000;    proj.defrostMidMinRuntimeMs = 90000;    proj.defrostMidExitTempF = 55.0f;
+        proj.defrostWarmRuntimeMs = 5400000;   proj.defrostWarmMinRuntimeMs = 60000;   proj.defrostWarmExitTempF = 60.0f;
         proj.softwareDefrost = false;
         proj.stateValidationMs = 30000;
         proj.inputDelayMs = 2000;
@@ -470,12 +470,12 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
             proj.defrostWarmMinTempF = defrost["warmMinTemp"] | 31.0f;
             proj.defrostColdRuntimeMs = defrost["cold"]["runtimeThresholdMs"] | 1800000;
             proj.defrostColdMinRuntimeMs = defrost["cold"]["minRuntimeMs"] | 120000;
-            proj.defrostColdExitTempF = defrost["cold"]["exitTempF"] | 45.0f;
+            proj.defrostColdExitTempF = defrost["cold"]["exitTempF"] | 50.0f;
             proj.defrostMidRuntimeMs = defrost["mid"]["runtimeThresholdMs"] | 3600000;
-            proj.defrostMidMinRuntimeMs = defrost["mid"]["minRuntimeMs"] | 180000;
+            proj.defrostMidMinRuntimeMs = defrost["mid"]["minRuntimeMs"] | 90000;
             proj.defrostMidExitTempF = defrost["mid"]["exitTempF"] | 55.0f;
             proj.defrostWarmRuntimeMs = defrost["warm"]["runtimeThresholdMs"] | 5400000;
-            proj.defrostWarmMinRuntimeMs = defrost["warm"]["minRuntimeMs"] | 180000;
+            proj.defrostWarmMinRuntimeMs = defrost["warm"]["minRuntimeMs"] | 60000;
             proj.defrostWarmExitTempF = defrost["warm"]["exitTempF"] | 60.0f;
         } else {
             // Migrate from old single-value fields: old values become Warm band
@@ -486,14 +486,14 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
             proj.defrostWarmMinTempF = 31.0f;
             // Warm = old values; Mid/Cold derived proportionally
             proj.defrostWarmRuntimeMs = oldRuntimeMs;
-            proj.defrostWarmMinRuntimeMs = oldMinMs;
+            proj.defrostWarmMinRuntimeMs = oldMinMs > 60000 ? oldMinMs / 3 : oldMinMs;       // 1/3 of old
             proj.defrostWarmExitTempF = oldExitF;
             proj.defrostMidRuntimeMs = (oldRuntimeMs * 2) / 3;  // ~67% of warm
-            proj.defrostMidMinRuntimeMs = oldMinMs;
+            proj.defrostMidMinRuntimeMs = oldMinMs > 60000 ? oldMinMs / 2 : oldMinMs;        // 1/2 of old
             proj.defrostMidExitTempF = oldExitF - 5.0f;
             proj.defrostColdRuntimeMs = oldRuntimeMs / 3;        // ~33% of warm
-            proj.defrostColdMinRuntimeMs = oldMinMs > 60000 ? oldMinMs - 60000 : oldMinMs;  // 1 min less
-            proj.defrostColdExitTempF = oldExitF - 15.0f;
+            proj.defrostColdMinRuntimeMs = (oldMinMs * 2) / 3;   // 2/3 of old
+            proj.defrostColdExitTempF = oldExitF - 10.0f;
             Serial.println("Config migration: old single-value defrost -> band format");
         }
         proj.softwareDefrost = defrost["active"] | false;

@@ -26,12 +26,12 @@ class GoodmanHP {
     // Defrost constants — per-band defaults
     static const uint32_t DEFROST_COLD_RUNTIME_MS = 30UL * 60 * 1000;    // 30 min
     static const uint32_t DEFROST_COLD_MIN_RUNTIME_MS = 2UL * 60 * 1000; // 2 min
-    static constexpr float DEFROST_COLD_EXIT_F = 45.0f;
+    static constexpr float DEFROST_COLD_EXIT_F = 50.0f;
     static const uint32_t DEFROST_MID_RUNTIME_MS = 60UL * 60 * 1000;     // 60 min
-    static const uint32_t DEFROST_MID_MIN_RUNTIME_MS = 3UL * 60 * 1000;  // 3 min
+    static const uint32_t DEFROST_MID_MIN_RUNTIME_MS = 90UL * 1000;      // 1.5 min
     static constexpr float DEFROST_MID_EXIT_F = 55.0f;
     static const uint32_t DEFROST_WARM_RUNTIME_MS = 90UL * 60 * 1000;    // 90 min
-    static const uint32_t DEFROST_WARM_MIN_RUNTIME_MS = 3UL * 60 * 1000; // 3 min
+    static const uint32_t DEFROST_WARM_MIN_RUNTIME_MS = 60UL * 1000;     // 1 min
     static constexpr float DEFROST_WARM_EXIT_F = 60.0f;
     static constexpr float DEFROST_COLD_MAX_TEMP_F = 23.0f;
     static constexpr float DEFROST_WARM_MIN_TEMP_F = 31.0f;
