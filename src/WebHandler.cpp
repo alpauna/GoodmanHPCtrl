@@ -1161,6 +1161,7 @@ void WebHandler::setupRoutes() {
         });
 
         // Upload saves firmware to SD card (no reboot)
+        // Buffer in PSRAM during recv to avoid concurrent SD access from async task
         _server.on("/update", HTTP_POST, [this](AsyncWebServerRequest *request) {
             if (!checkAuth(request)) return;
             request->send(200, "text/plain", _otaUploadOk ? "OK" : "FAIL: upload error");
@@ -1168,27 +1169,39 @@ void WebHandler::setupRoutes() {
         }, nullptr, [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
             if (index == 0) {
                 _otaUploadOk = false;
-                _otaFile = SD.open("/firmware.new", FILE_WRITE);
-                if (!_otaFile) {
-                    Log.error("OTA", "Failed to open /firmware.new for writing");
+                if (_otaBuffer) { free(_otaBuffer); _otaBuffer = nullptr; }
+                if (total == 0 || total > 2 * 1024 * 1024) {
+                    Log.error("OTA", "Invalid firmware size: %u", total);
                     return;
                 }
-                Log.info("OTA", "Saving firmware to SD (%u bytes)", total);
+                _otaBuffer = (uint8_t*)heap_caps_malloc(total, MALLOC_CAP_SPIRAM);
+                if (!_otaBuffer) {
+                    Log.error("OTA", "Failed to allocate %u bytes in PSRAM", total);
+                    return;
+                }
+                _otaTotal = total;
+                Log.info("OTA", "Receiving firmware (%u bytes) into PSRAM", total);
             }
-            if (_otaFile) {
-                if (_otaFile.write(data, len) != len) {
-                    Log.error("OTA", "SD write failed at offset %u", index);
-                    _otaFile.close();
+            if (_otaBuffer && index + len <= _otaTotal) {
+                memcpy(_otaBuffer + index, data, len);
+            }
+            if (index + len == total && _otaBuffer) {
+                File fw = SD.open("/firmware.new", FILE_WRITE);
+                if (!fw) {
+                    Log.error("OTA", "Failed to open /firmware.new for writing");
+                    free(_otaBuffer); _otaBuffer = nullptr;
+                    return;
+                }
+                size_t written = fw.write(_otaBuffer, _otaTotal);
+                fw.close();
+                free(_otaBuffer); _otaBuffer = nullptr;
+                if (written != _otaTotal) {
+                    Log.error("OTA", "SD write failed (%u of %u)", written, _otaTotal);
                     SD.remove("/firmware.new");
-                    _otaFile = File();
+                    return;
                 }
-            }
-            if (index + len == total) {
-                if (_otaFile) {
-                    _otaFile.close();
-                    Log.info("OTA", "Firmware saved to SD");
-                    _otaUploadOk = true;
-                }
+                Log.info("OTA", "Firmware saved to SD");
+                _otaUploadOk = true;
             }
         });
 

@@ -100,8 +100,9 @@ class WebHandler {
     bool* _ftpActivePtr = nullptr;
     unsigned long* _ftpStopTimePtr = nullptr;
 
-    // OTA upload state (for chunked body handler)
-    File _otaFile;
+    // OTA upload state (PSRAM buffer to avoid concurrent SD access)
+    uint8_t* _otaBuffer = nullptr;
+    size_t _otaTotal = 0;
     bool _otaUploadOk = false;
 
     // WWW file upload state (for chunked body handler)

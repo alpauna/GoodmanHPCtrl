@@ -798,40 +798,58 @@ static esp_err_t updateGetHandler(httpd_req_t* req) {
 static esp_err_t updatePostHandler(httpd_req_t* req) {
     if (!checkHttpsAuth(req)) return ESP_OK;
 
-    int remaining = req->content_len;
-    if (remaining <= 0) {
+    int total = req->content_len;
+    if (total <= 0) {
         httpd_resp_send(req, "FAIL: no data", HTTPD_RESP_USE_STRLEN);
         return ESP_OK;
     }
+    if (total > 2 * 1024 * 1024) {
+        httpd_resp_send(req, "FAIL: firmware too large (2MB max)", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
 
+    // Buffer firmware in PSRAM during TLS recv to avoid concurrent SD access.
+    // The httpd task runs on a separate FreeRTOS task from the Arduino loop;
+    // interleaving SD writes (via SPI) with Logger/tSaveRuntime causes SPI
+    // bus corruption and device hangs since Arduino SD is not thread-safe.
+    uint8_t* fwBuf = (uint8_t*)heap_caps_malloc(total, MALLOC_CAP_SPIRAM);
+    if (!fwBuf) {
+        httpd_resp_send(req, "FAIL: out of PSRAM", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    Log.info("OTA", "Receiving firmware (%d bytes) into PSRAM", total);
+
+    int received = 0;
+    while (received < total) {
+        int ret = httpd_req_recv(req, (char*)(fwBuf + received), total - received);
+        if (ret <= 0) {
+            free(fwBuf);
+            httpd_resp_send(req, "FAIL: receive error", HTTPD_RESP_USE_STRLEN);
+            return ESP_OK;
+        }
+        received += ret;
+    }
+
+    // All data received — write to SD in one operation (minimal contention window)
     File fw = SD.open("/firmware.new", FILE_WRITE);
     if (!fw) {
+        free(fwBuf);
         httpd_resp_send(req, "FAIL: SD open error", HTTPD_RESP_USE_STRLEN);
         return ESP_OK;
     }
 
-    Log.info("OTA", "Saving firmware to SD (%d bytes)", remaining);
+    Log.info("OTA", "Writing firmware to SD...");
+    size_t written = fw.write(fwBuf, total);
+    fw.close();
+    free(fwBuf);
 
-    char buf[1024];
-    while (remaining > 0) {
-        int toRead = remaining > (int)sizeof(buf) ? (int)sizeof(buf) : remaining;
-        int ret = httpd_req_recv(req, buf, toRead);
-        if (ret <= 0) {
-            fw.close();
-            SD.remove("/firmware.new");
-            httpd_resp_send(req, "FAIL: receive error", HTTPD_RESP_USE_STRLEN);
-            return ESP_OK;
-        }
-        if (fw.write((uint8_t*)buf, ret) != (size_t)ret) {
-            fw.close();
-            SD.remove("/firmware.new");
-            httpd_resp_send(req, "FAIL: SD write error", HTTPD_RESP_USE_STRLEN);
-            return ESP_OK;
-        }
-        remaining -= ret;
+    if (written != (size_t)total) {
+        SD.remove("/firmware.new");
+        httpd_resp_send(req, "FAIL: SD write error", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
     }
 
-    fw.close();
     Log.info("OTA", "Firmware saved to SD");
     httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
@@ -2426,6 +2444,7 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
     cfg.prvtkey_len = keyLen + 1;
     cfg.port_secure = 443;
     cfg.httpd.max_uri_handlers = 50;
+    cfg.httpd.stack_size = 16384;  // Default 10240 too tight for TLS + SD ops
 
     httpd_handle_t server = nullptr;
     esp_err_t err = httpd_ssl_start(&server, &cfg);
