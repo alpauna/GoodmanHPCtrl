@@ -145,7 +145,38 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - Manual override also bypasses the state validation timer so it doesn't interfere with manual pin control testing
   - Logs "State check OK" at info level every 30 seconds when all outputs are correct
 
-- **Automatic Defrost (3-Phase Sequencing)** — After a configurable heat runtime threshold (default 90 minutes, range 1–90 min) of accumulated CNT runtime in HEAT mode while DFT is active (coil temp ≤ 32°F, indicating icing conditions), initiates a 3-phase software defrost cycle for safe pressure equalization and output sequencing:
+- **Adaptive Defrost Bands** — Colder ambient temperatures cause faster ice buildup on the outdoor coil, requiring more frequent defrost cycles. Instead of a single fixed runtime threshold, the controller uses 3 ambient temperature bands — each with its own heat runtime threshold, minimum defrost duration, and condenser exit temperature:
+
+  | Band | Ambient Range | Runtime Threshold | Min Defrost | Condenser Exit Temp |
+  |------|--------------|-------------------|-------------|---------------------|
+  | **Cold** | ≤ 23°F | 30 min | 2 min | 50°F |
+  | **Mid** | 23–31°F | 60 min | 1.5 min | 55°F |
+  | **Warm** | ≥ 31°F | 90 min | 1 min | 60°F |
+
+  All values are configurable via the config page "Defrost Bands" fieldset. The two breakpoint temperatures (`coldMaxTemp`, `warmMinTemp`) define the band boundaries and can be adjusted independently.
+
+  **How it works:**
+  - The active band is selected every update cycle based on the current ambient temperature (using the same 3-tier fallback: sensor → weather → ESP32 internal temp)
+  - When no ambient data is available, the system defaults to the **Warm** band (most conservative — longest runtime before defrost triggers)
+  - When defrost starts, the active band's parameters are **snapshotted** and frozen for the duration of the cycle. If ambient temperature drifts mid-defrost (e.g., the sun comes up), the exit criteria stay stable — no mid-cycle parameter jumps
+  - Dashboard and OLED display show the current band and progress: `Heat RT: 42m / 60m (Mid)`
+  - `/state` JSON includes `defrostBand` (active band name) and `defrostBandThresholdMin` (active threshold in minutes)
+
+  **Config JSON structure:**
+  ```json
+  "defrost": {
+      "active": false,
+      "coldMaxTemp": 23.0,
+      "warmMinTemp": 31.0,
+      "cold": { "runtimeThresholdMs": 1800000, "minRuntimeMs": 120000, "exitTempF": 50.0 },
+      "mid":  { "runtimeThresholdMs": 3600000, "minRuntimeMs": 90000,  "exitTempF": 55.0 },
+      "warm": { "runtimeThresholdMs": 5400000, "minRuntimeMs": 60000,  "exitTempF": 60.0 }
+  }
+  ```
+
+  **Backward compatibility:** Devices upgrading from firmware with single-value defrost settings (`heatRuntimeThresholdMs`, `minRuntimeMs`, `exitTempF`) auto-migrate on first config load. The old values become the Warm band, and Mid/Cold bands are derived proportionally. Old keys are removed on the next config save.
+
+- **Automatic Defrost (3-Phase Sequencing)** — After the active band's heat runtime threshold of accumulated CNT runtime in HEAT mode while DFT is active (coil temp ≤ 32°F, indicating icing conditions), initiates a 3-phase software defrost cycle for safe pressure equalization and output sequencing:
 
   **Phase 1 — Pressure Equalization** (`defrostTransition`):
   - All outputs OFF (CNT, FAN, W, RV)
@@ -159,9 +190,9 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 
   **Phase 3 — Active Defrost**:
   - CNT turned ON, defrost fully active
-  - Runs for at least `heatpump.defrost.minRuntimeMs` (default 3 min) before checking exit conditions
+  - Runs for at least the active band's minimum defrost time before checking exit conditions
   - Rechecks CONDENSER_TEMP every 1 minute during defrost with logging
-  - Exits when CONDENSER_TEMP >= `heatpump.defrost.exitTempF` (default 60°F) or 15-minute safety timeout
+  - Exits when CONDENSER_TEMP >= the active band's exit temperature or 15-minute safety timeout
 
 - **Defrost Exit Transition (3-Phase)** — When defrost completes (condenser temp reached or timeout), the system performs a reverse 3-phase sequence to safely switch the reversing valve back to heat position before restarting the compressor:
 
@@ -224,7 +255,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | `COOL` | Y active, O active | ON | ON | ON | OFF | Will not operate below 20°F |
 | `DEFROST` Phase 1 | Pressure equalization (30s) | OFF | OFF | OFF | OFF | All outputs off for pressure equalization |
 | `DEFROST` Phase 2 | RV + W engaged, CNT hold (30s) | OFF | OFF | ON | ON | Reversing valve seats before compressor starts |
-| `DEFROST` Phase 3 | Active defrost | OFF | ON | ON | ON | 3-min minimum, exits at condenser ≥ 60°F or 15-min timeout |
+| `DEFROST` Phase 3 | Active defrost | OFF | ON | ON | ON | Band-specific min time/exit temp (see Adaptive Defrost Bands), 15-min safety timeout |
 | `HEAT` Exit Phase 1 | Defrost exit pressure equalization (30s) | OFF | OFF | ON | ON | RV+W stay on from defrost, CNT+FAN off |
 | `HEAT` Exit Phase 2 | RV switch + CNT hold (30s) | OFF | OFF | OFF | OFF | RV switches back to heat position |
 | `HEAT` Exit Complete | CNT+FAN resume | ON | ON | OFF | OFF | Normal HEAT mode resumes |
