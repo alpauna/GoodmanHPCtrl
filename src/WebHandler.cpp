@@ -1361,7 +1361,7 @@ void WebHandler::setupRoutes() {
 
         // SD card info/format endpoints (HTTP fallback)
         _server.on("/sd/info", HTTP_GET, [this](AsyncWebServerRequest *request) {
-            if (!checkAuth(request)) return;
+            // No auth required — only returns disk size info (same as /heap, /state)
             if (!_config) {
                 request->send(500, "application/json", "{\"error\":\"Config not available\"}");
                 return;

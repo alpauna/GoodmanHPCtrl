@@ -2091,7 +2091,7 @@ static esp_err_t adminSetupPostHandler(httpd_req_t* req) {
 // --- SD card info/format handlers ---
 
 static esp_err_t sdInfoGetHandler(httpd_req_t* req) {
-    if (!checkHttpsAuth(req)) return ESP_OK;
+    // No auth required — only returns disk size info (same as /heap, /state)
     HttpsContext* ctx = (HttpsContext*)req->user_ctx;
 
     if (!ctx->config) {

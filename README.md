@@ -18,7 +18,8 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 
 - **Relay control** — 4 output pins (FAN, Contactor, W-Heat, Reversing Valve) driven by 4 input signals (Low Pressure Switch, Defrost, Y-Cool, O-Heat)
 - **Temperature monitoring** — 4 OneWire (Dallas DS18B20) sensors (compressor, suction, ambient, condenser) + liquid line thermocouple with auto-detection priority: MAX6675 SPI > MAX31850K OneWire > MCP9600 I2C. OneWire sensors discovered on the bus are automatically merged with saved config on boot — new devices get default names and appear immediately without a config reset
-- **Remote access** — REST API, WebSocket, and MQTT for monitoring and control
+- **Ambient temp fallback** — 3-tier failover chain for ambient temperature: local OneWire sensor → weather data (MQTT subscription or OpenWeatherMap HTTP API, or both simultaneously) → ESP32 internal die temp. Actively fails up to the best available source every cycle. Configurable staleness timeout, test failover button, dashboard source indicator
+- **Remote access** — REST API, WebSocket, and MQTT (QoS 1) for monitoring and control
 - **HTTPS/SSL** — Self-signed ECC P-256 certificate on port 443 for secure `/config`, `/update`, and `/ftp` endpoints. Graceful fallback to HTTP-only if no certs found on SD card
 - **Dark/light theme** — Configurable dark/light theme with shared `theme.css` stylesheet. Persisted to SD card config, cached in localStorage for flash-free page loads. Instant preview on config page
 - **Admin password protection** — HTTP Basic Auth on sensitive endpoints (`/config`, `/update`, `/ftp`). No password = open access
@@ -101,6 +102,22 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - Blocks all compressor activation (CNT) while ambient temp is too low
   - Auto-recovers when temperature stays above threshold for 10 minutes
   - Threshold is configurable via `lowTemp.threshold` in SD card config
+
+- **Ambient Temperature Fallback (3-Tier)** — When the local AMBIENT_TEMP OneWire sensor is unavailable, the system falls through a priority chain to maintain ambient awareness:
+  1. **Local sensor** (primary) — OneWire DS18B20, highest accuracy
+  2. **Weather data** (failover) — Cached outdoor temperature from a configurable source:
+     - **MQTT**: Subscribes (QoS 1) to a configurable topic (e.g., `homeassistant/sensor/outdoor_temp/state`) and parses plain float payloads
+     - **HTTP**: Polls OpenWeatherMap API at a configurable interval (default 10 min, range 1–60)
+     - **MQTT + HTTP**: Both run simultaneously — MQTT delivers faster push updates while HTTP acts as a safety net if MQTT stops publishing. Most recent update from either source wins
+  3. **ESP32 internal temp** (last resort) — Die temperature via `temperatureRead()`, converted C→F. Reads higher than true ambient but catches genuinely cold conditions
+  - **Fail-up**: The fallback chain re-evaluates every 10s cycle and actively promotes to the best available source — INTERNAL→WEATHER when weather data arrives, any fallback→SENSOR when the real sensor recovers
+  - Weather data is cached with a configurable staleness timeout (default 30 minutes). Stale weather with no local sensor falls through to ESP32 internal temp
+  - `ambientSource` field in `/state` JSON and MQTT state tracks the active source: `"sensor"`, `"weather"`, or `"internal"`
+  - Dashboard shows a source-aware ambient pill (green for sensor, orange for weather/internal) and a "Weather Amb (failover)" row with the cached temperature and age
+  - Output state validator enforces CNT OFF when no ambient data is available (sensor invalid + no weather)
+  - Config page "Weather Ambient Fallback" fieldset: source dropdown (None/MQTT/HTTP/MQTT + HTTP), conditional MQTT topic or HTTP API key/ZIP/country fields, staleness timeout
+  - **Test Failover** button on config page forces the ambient sensor offline for 30 minutes to verify the fallback chain
+  - Configured via `weather` section in SD card config JSON. API key encrypted with same `$AES$`/`$ENC$` scheme as other passwords
 
 - **Input Pin Validation Delay** — All 4 input pins (LPS, DFT, Y, O) use a configurable debounce/validation delay (default 2 seconds) to prevent false triggers from electrical noise or transient signals:
   - Input pins are polled every 500ms via `onCheckInputQueue()` (direct GPIO polling, no ISR attachment required)
@@ -1073,7 +1090,7 @@ If the new firmware causes a crash boot loop, the boot watchdog automatically re
 
 ## MQTT Topics
 
-The controller publishes to a configurable MQTT broker (default `192.168.0.46:1883`). The topic prefix defaults to `goodman` but is configurable via `system.mqttPrefix` in config JSON or the config page, allowing multiple units on the same broker (e.g., `unit1/temps`, `unit2/temps`).
+The controller publishes to a configurable MQTT broker (default `192.168.0.46:1883`) using **QoS 1** (at-least-once delivery) for all publishes and subscribes. The topic prefix defaults to `goodman` but is configurable via `system.mqttPrefix` in config JSON or the config page, allowing multiple units on the same broker (e.g., `unit1/temps`, `unit2/temps`).
 
 Subscribe with `mosquitto_sub -t "goodman/#"` to receive all topics (replace `goodman` with your configured prefix).
 
