@@ -105,6 +105,8 @@ void MQTTHandler::publishState() {
     }
 
     doc["heatRuntimeMin"] = _controller->getHeatRuntimeMs() / 60000UL;
+    doc["defrostBand"] = _controller->getActiveDefrostBandString();
+    doc["defrostBandThresholdMin"] = _controller->getActiveRuntimeThresholdMs() / 60000UL;
     doc["defrost"] = _controller->isSoftwareDefrostActive();
     doc["lpsFault"] = _controller->isLPSFaultActive();
     doc["lowTemp"] = _controller->isLowTempActive();

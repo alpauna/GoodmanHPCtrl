@@ -13,9 +13,15 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _yWasActive(false)
     , _cntActivated(false)
     , _cntShortCycleMs(DEFAULT_CNT_SHORT_CYCLE_MS)
-    , _defrostMinRuntimeMs(DEFROST_MIN_RUNTIME_MS)
-    , _defrostExitTempF(DEFROST_EXIT_F)
-    , _heatRuntimeThresholdMs(HEAT_RUNTIME_THRESHOLD_MS)
+    , _coldMaxTempF(DEFROST_COLD_MAX_TEMP_F)
+    , _warmMinTempF(DEFROST_WARM_MIN_TEMP_F)
+    , _defrostBands{
+        {DEFROST_COLD_RUNTIME_MS, DEFROST_COLD_MIN_RUNTIME_MS, DEFROST_COLD_EXIT_F},
+        {DEFROST_MID_RUNTIME_MS,  DEFROST_MID_MIN_RUNTIME_MS,  DEFROST_MID_EXIT_F},
+        {DEFROST_WARM_RUNTIME_MS, DEFROST_WARM_MIN_RUNTIME_MS, DEFROST_WARM_EXIT_F}
+      }
+    , _activeDefrostBand(DefrostBandName::WARM)
+    , _defrostSnapshotBand{DEFROST_WARM_RUNTIME_MS, DEFROST_WARM_MIN_RUNTIME_MS, DEFROST_WARM_EXIT_F}
     , _heatRuntimeMs(0)
     , _heatRuntimeLastTick(0)
     , _heatRuntimeLastLogMs(0)
@@ -1522,31 +1528,67 @@ void GoodmanHP::validateOutputStates() {
     }
 }
 
-void GoodmanHP::setDefrostMinRuntimeMs(uint32_t ms) {
-    _defrostMinRuntimeMs = ms;
-    Log.info("HP", "Defrost min runtime set to %lu ms", ms);
+void GoodmanHP::setColdMaxTempF(float f) {
+    _coldMaxTempF = f;
+    Log.info("HP", "Defrost cold max temp set to %.1fF", f);
 }
 
-uint32_t GoodmanHP::getDefrostMinRuntimeMs() const {
-    return _defrostMinRuntimeMs;
+float GoodmanHP::getColdMaxTempF() const {
+    return _coldMaxTempF;
 }
 
-void GoodmanHP::setDefrostExitTempF(float f) {
-    _defrostExitTempF = f;
-    Log.info("HP", "Defrost exit temp set to %.1fF", f);
+void GoodmanHP::setWarmMinTempF(float f) {
+    _warmMinTempF = f;
+    Log.info("HP", "Defrost warm min temp set to %.1fF", f);
 }
 
-float GoodmanHP::getDefrostExitTempF() const {
-    return _defrostExitTempF;
+float GoodmanHP::getWarmMinTempF() const {
+    return _warmMinTempF;
 }
 
-void GoodmanHP::setHeatRuntimeThresholdMs(uint32_t ms) {
-    _heatRuntimeThresholdMs = ms;
-    Log.info("HP", "Heat runtime threshold set to %lu ms (%lu min)", ms, ms / 60000UL);
+void GoodmanHP::setDefrostBand(DefrostBandName band, const DefrostBand& params) {
+    int idx = (int)band;
+    _defrostBands[idx] = params;
+    static const char* names[] = {"COLD", "MID", "WARM"};
+    Log.info("HP", "Defrost band %s: runtime=%lu min, minDefrost=%lu s, exit=%.1fF",
+             names[idx], params.runtimeThresholdMs / 60000UL,
+             params.minRuntimeMs / 1000UL, params.exitTempF);
 }
 
-uint32_t GoodmanHP::getHeatRuntimeThresholdMs() const {
-    return _heatRuntimeThresholdMs;
+GoodmanHP::DefrostBand GoodmanHP::getDefrostBand(DefrostBandName band) const {
+    return _defrostBands[(int)band];
+}
+
+GoodmanHP::DefrostBandName GoodmanHP::getActiveDefrostBand() const {
+    return _activeDefrostBand;
+}
+
+const char* GoodmanHP::getActiveDefrostBandString() const {
+    static const char* names[] = {"Cold", "Mid", "Warm"};
+    return names[(int)_activeDefrostBand];
+}
+
+uint32_t GoodmanHP::getActiveRuntimeThresholdMs() const {
+    return _defrostBands[(int)_activeDefrostBand].runtimeThresholdMs;
+}
+
+uint32_t GoodmanHP::getActiveMinRuntimeMs() const {
+    return _defrostSnapshotBand.minRuntimeMs;
+}
+
+float GoodmanHP::getActiveExitTempF() const {
+    return _defrostSnapshotBand.exitTempF;
+}
+
+GoodmanHP::DefrostBandName GoodmanHP::selectDefrostBand() {
+    TempSensor* ambient = getTempSensor("AMBIENT_TEMP");
+    if (ambient == nullptr || !ambient->isValid()) {
+        return DefrostBandName::WARM;  // No ambient data = most conservative
+    }
+    float temp = ambient->getValue();
+    if (temp <= _coldMaxTempF) return DefrostBandName::COLD;
+    if (temp >= _warmMinTempF) return DefrostBandName::WARM;
+    return DefrostBandName::MID;
 }
 
 void GoodmanHP::checkHighSuctionTemp() {
@@ -1707,7 +1749,10 @@ void GoodmanHP::startStateValidation() {
 
 void GoodmanHP::restoreSoftwareDefrost() {
     _softwareDefrost = true;
-    Log.warn("HP", "Software defrost state restored from config");
+    // Snapshot band on restore (will re-snapshot when defrost actually starts)
+    _activeDefrostBand = selectDefrostBand();
+    _defrostSnapshotBand = _defrostBands[(int)_activeDefrostBand];
+    Log.warn("HP", "Software defrost state restored from config (band=%s)", getActiveDefrostBandString());
 }
 
 void GoodmanHP::setStateChangeCallback(StateChangeCallback cb) {
@@ -1854,7 +1899,7 @@ void GoodmanHP::checkDefrostNeeded() {
         return;  // Don't check exit conditions during Phase 2
     }
 
-    // If software defrost is active, check exit conditions
+    // If software defrost is active, check exit conditions using snapshotted band
     if (_softwareDefrost) {
         // Guard: _defrostStartTick is only set when Phase 3 begins.
         // If still 0, defrost never reached active phase (Y dropped during Phase 1/2).
@@ -1865,8 +1910,8 @@ void GoodmanHP::checkDefrostNeeded() {
 
         uint32_t elapsed = now - _defrostStartTick;
 
-        // Enforce minimum runtime
-        if (elapsed < _defrostMinRuntimeMs) {
+        // Enforce minimum runtime (from snapshotted band)
+        if (elapsed < _defrostSnapshotBand.minRuntimeMs) {
             return;
         }
 
@@ -1877,17 +1922,19 @@ void GoodmanHP::checkDefrostNeeded() {
             return;
         }
 
-        // Check condenser temp every 1 minute
+        // Check condenser temp every 1 minute (exit temp from snapshotted band)
         if (now - _defrostLastCondCheckTick >= DEFROST_COND_CHECK_MS) {
             _defrostLastCondCheckTick = now;
             TempSensor* condenser = getTempSensor("CONDENSER_TEMP");
             if (condenser != nullptr && condenser->isValid()) {
                 float condTemp = condenser->getValue();
-                Log.info("HP", "Defrost condenser check: %.1fF (target > %.1fF, elapsed %lu sec)",
-                         condTemp, _defrostExitTempF, elapsed / 1000UL);
-                if (condTemp >= _defrostExitTempF) {
-                    Log.info("HP", "Defrost complete: condenser %.1fF >= %.1fF",
-                             condTemp, _defrostExitTempF);
+                Log.info("HP", "Defrost condenser check: %.1fF (target > %.1fF, band=%s, elapsed %lu sec)",
+                         condTemp, _defrostSnapshotBand.exitTempF,
+                         getActiveDefrostBandString(), elapsed / 1000UL);
+                if (condTemp >= _defrostSnapshotBand.exitTempF) {
+                    Log.info("HP", "Defrost complete: condenser %.1fF >= %.1fF (band=%s)",
+                             condTemp, _defrostSnapshotBand.exitTempF,
+                             getActiveDefrostBandString());
                     stopSoftwareDefrost();
                     return;
                 }
@@ -1896,10 +1943,15 @@ void GoodmanHP::checkDefrostNeeded() {
         return;
     }
 
-    // Check if heat runtime threshold reached
-    if (_heatRuntimeMs >= _heatRuntimeThresholdMs) {
-        Log.info("HP", "Heat runtime %lu min >= %lu min threshold, starting defrost",
-                 _heatRuntimeMs / 60000UL, _heatRuntimeThresholdMs / 60000UL);
+    // Select band from current ambient temperature
+    _activeDefrostBand = selectDefrostBand();
+    const DefrostBand& band = _defrostBands[(int)_activeDefrostBand];
+
+    // Check if heat runtime threshold reached (band-specific)
+    if (_heatRuntimeMs >= band.runtimeThresholdMs) {
+        Log.info("HP", "Heat runtime %lu min >= %lu min threshold (band=%s), starting defrost",
+                 _heatRuntimeMs / 60000UL, band.runtimeThresholdMs / 60000UL,
+                 getActiveDefrostBandString());
         startSoftwareDefrost();
     }
 }
@@ -1916,7 +1968,13 @@ void GoodmanHP::startSoftwareDefrost() {
         return;
     }
 
-    Log.info("HP", "Starting defrost transition (%lu s RV short cycle)", _rvShortCycleMs / 1000UL);
+    // Snapshot active band params for stable exit criteria during defrost
+    _defrostSnapshotBand = _defrostBands[(int)_activeDefrostBand];
+    Log.info("HP", "Starting defrost transition (band=%s, minRT=%lu s, exit=%.1fF, %lu s RV short cycle)",
+             getActiveDefrostBandString(),
+             _defrostSnapshotBand.minRuntimeMs / 1000UL,
+             _defrostSnapshotBand.exitTempF,
+             _rvShortCycleMs / 1000UL);
 
     // Turn off CNT and FAN during pressure equalization
     cnt->turnOff();
@@ -2065,7 +2123,8 @@ String GoodmanHP::forceDefrost() {
     if (_lowTemp) return "Low temp protection active";
     if (_rvFail) return "RV fail active";
 
-    Log.warn("HP", "FORCE DEFROST initiated from web interface");
+    _activeDefrostBand = selectDefrostBand();
+    Log.warn("HP", "FORCE DEFROST initiated from web interface (band=%s)", getActiveDefrostBandString());
     startSoftwareDefrost();
     return "";
 }

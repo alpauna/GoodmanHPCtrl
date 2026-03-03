@@ -213,9 +213,18 @@ ProjectInfo proj = {
   false,              // rvFail: not latched
   30000,              // rvShortCycleMs: 30s default
   30000,              // cntShortCycleMs: 30s default
-  180000,             // defrostMinRuntimeMs: 3 min default
-  60.0f,              // defrostExitTempF: 60°F default
-  5400000,            // heatRuntimeThresholdMs: 90 min default
+  // Adaptive defrost bands
+  23.0f,              // defrostColdMaxTempF: Cold ≤ 23°F
+  31.0f,              // defrostWarmMinTempF: Warm ≥ 31°F
+  1800000,            // defrostColdRuntimeMs: Cold 30 min
+  120000,             // defrostColdMinRuntimeMs: Cold 2 min
+  45.0f,              // defrostColdExitTempF: Cold 45°F
+  3600000,            // defrostMidRuntimeMs: Mid 60 min
+  180000,             // defrostMidMinRuntimeMs: Mid 3 min
+  55.0f,              // defrostMidExitTempF: Mid 55°F
+  5400000,            // defrostWarmRuntimeMs: Warm 90 min
+  180000,             // defrostWarmMinRuntimeMs: Warm 3 min
+  60.0f,              // defrostWarmExitTempF: Warm 60°F
   false,              // softwareDefrost: not active
   30000,              // stateValidationMs: 30s default
   2000,               // inputDelayMs: 2s default
@@ -736,9 +745,14 @@ void setup() {
       hpController.setHighSuctionTempThreshold(proj.highSuctionTempThreshold);
       hpController.setRvShortCycleMs(proj.rvShortCycleMs);
       hpController.setCntShortCycleMs(proj.cntShortCycleMs);
-      hpController.setDefrostMinRuntimeMs(proj.defrostMinRuntimeMs);
-      hpController.setDefrostExitTempF(proj.defrostExitTempF);
-      hpController.setHeatRuntimeThresholdMs(proj.heatRuntimeThresholdMs);
+      hpController.setColdMaxTempF(proj.defrostColdMaxTempF);
+      hpController.setWarmMinTempF(proj.defrostWarmMinTempF);
+      hpController.setDefrostBand(GoodmanHP::DefrostBandName::COLD,
+          {proj.defrostColdRuntimeMs, proj.defrostColdMinRuntimeMs, proj.defrostColdExitTempF});
+      hpController.setDefrostBand(GoodmanHP::DefrostBandName::MID,
+          {proj.defrostMidRuntimeMs, proj.defrostMidMinRuntimeMs, proj.defrostMidExitTempF});
+      hpController.setDefrostBand(GoodmanHP::DefrostBandName::WARM,
+          {proj.defrostWarmRuntimeMs, proj.defrostWarmMinRuntimeMs, proj.defrostWarmExitTempF});
       hpController.setStateValidationMs(proj.stateValidationMs);
       if (proj.rvFail) hpController.setRvFail();  // Restore latched state
       if (proj.softwareDefrost) hpController.restoreSoftwareDefrost();  // Resume defrost after reboot

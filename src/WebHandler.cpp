@@ -533,6 +533,8 @@ void WebHandler::setupRoutes() {
         }
 
         doc["heatRuntimeMin"] = _hpController->getHeatRuntimeMs() / 60000UL;
+        doc["defrostBand"] = _hpController->getActiveDefrostBandString();
+        doc["defrostBandThresholdMin"] = _hpController->getActiveRuntimeThresholdMs() / 60000UL;
         doc["defrost"] = _hpController->isSoftwareDefrostActive();
         doc["lpsFault"] = _hpController->isLPSFaultActive();
         doc["lowTemp"] = _hpController->isLowTempActive();
@@ -1125,9 +1127,17 @@ void WebHandler::setupRoutes() {
                 doc["rvFail"] = proj->rvFail;
                 doc["rvShortCycleSec"] = proj->rvShortCycleMs / 1000;
                 doc["cntShortCycleSec"] = proj->cntShortCycleMs / 1000;
-                doc["defrostMinRuntimeSec"] = proj->defrostMinRuntimeMs / 1000;
-                doc["defrostExitTempF"] = proj->defrostExitTempF;
-                doc["heatRuntimeThresholdMin"] = proj->heatRuntimeThresholdMs / 60000;
+                doc["defrostColdMaxTemp"] = proj->defrostColdMaxTempF;
+                doc["defrostWarmMinTemp"] = proj->defrostWarmMinTempF;
+                doc["defrostColdRuntimeMin"] = proj->defrostColdRuntimeMs / 60000;
+                doc["defrostColdMinRuntimeSec"] = proj->defrostColdMinRuntimeMs / 1000;
+                doc["defrostColdExitTempF"] = proj->defrostColdExitTempF;
+                doc["defrostMidRuntimeMin"] = proj->defrostMidRuntimeMs / 60000;
+                doc["defrostMidMinRuntimeSec"] = proj->defrostMidMinRuntimeMs / 1000;
+                doc["defrostMidExitTempF"] = proj->defrostMidExitTempF;
+                doc["defrostWarmRuntimeMin"] = proj->defrostWarmRuntimeMs / 60000;
+                doc["defrostWarmMinRuntimeSec"] = proj->defrostWarmMinRuntimeMs / 1000;
+                doc["defrostWarmExitTempF"] = proj->defrostWarmExitTempF;
                 doc["stateValidationSec"] = proj->stateValidationMs / 1000;
                 doc["inputDelaySec"] = proj->inputDelayMs / 1000;
                 doc["apFallbackMinutes"] = proj->apFallbackSeconds / 60;
@@ -1169,6 +1179,7 @@ void WebHandler::setupRoutes() {
         });
 
         // Upload saves firmware to SD card (no reboot)
+        // Buffer in PSRAM during recv to avoid concurrent SD access from async task
         _server.on("/update", HTTP_POST, [this](AsyncWebServerRequest *request) {
             if (!checkAuth(request)) return;
             request->send(200, "text/plain", _otaUploadOk ? "OK" : "FAIL: upload error");
@@ -1176,27 +1187,39 @@ void WebHandler::setupRoutes() {
         }, nullptr, [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
             if (index == 0) {
                 _otaUploadOk = false;
-                _otaFile = SD.open("/firmware.new", FILE_WRITE);
-                if (!_otaFile) {
-                    Log.error("OTA", "Failed to open /firmware.new for writing");
+                if (_otaBuffer) { free(_otaBuffer); _otaBuffer = nullptr; }
+                if (total == 0 || total > 2 * 1024 * 1024) {
+                    Log.error("OTA", "Invalid firmware size: %u", total);
                     return;
                 }
-                Log.info("OTA", "Saving firmware to SD (%u bytes)", total);
+                _otaBuffer = (uint8_t*)heap_caps_malloc(total, MALLOC_CAP_SPIRAM);
+                if (!_otaBuffer) {
+                    Log.error("OTA", "Failed to allocate %u bytes in PSRAM", total);
+                    return;
+                }
+                _otaTotal = total;
+                Log.info("OTA", "Receiving firmware (%u bytes) into PSRAM", total);
             }
-            if (_otaFile) {
-                if (_otaFile.write(data, len) != len) {
-                    Log.error("OTA", "SD write failed at offset %u", index);
-                    _otaFile.close();
+            if (_otaBuffer && index + len <= _otaTotal) {
+                memcpy(_otaBuffer + index, data, len);
+            }
+            if (index + len == total && _otaBuffer) {
+                File fw = SD.open("/firmware.new", FILE_WRITE);
+                if (!fw) {
+                    Log.error("OTA", "Failed to open /firmware.new for writing");
+                    free(_otaBuffer); _otaBuffer = nullptr;
+                    return;
+                }
+                size_t written = fw.write(_otaBuffer, _otaTotal);
+                fw.close();
+                free(_otaBuffer); _otaBuffer = nullptr;
+                if (written != _otaTotal) {
+                    Log.error("OTA", "SD write failed (%u of %u)", written, _otaTotal);
                     SD.remove("/firmware.new");
-                    _otaFile = File();
+                    return;
                 }
-            }
-            if (index + len == total) {
-                if (_otaFile) {
-                    _otaFile.close();
-                    Log.info("OTA", "Firmware saved to SD");
-                    _otaUploadOk = true;
-                }
+                Log.info("OTA", "Firmware saved to SD");
+                _otaUploadOk = true;
             }
         });
 
@@ -1912,27 +1935,42 @@ void WebHandler::setupRoutes() {
             _hpController->setCntShortCycleMs(cntSC);
         }
 
-        uint32_t dfMinSec = data["defrostMinRuntimeSec"] | (int)(proj->defrostMinRuntimeMs / 1000);
-        uint32_t dfMinMs = dfMinSec * 1000UL;
-        if (dfMinMs != proj->defrostMinRuntimeMs) {
-            proj->defrostMinRuntimeMs = dfMinMs;
-            _hpController->setDefrostMinRuntimeMs(dfMinMs);
-        }
+        // Adaptive defrost band breakpoints
+        float coldMax = data["defrostColdMaxTemp"] | proj->defrostColdMaxTempF;
+        float warmMin = data["defrostWarmMinTemp"] | proj->defrostWarmMinTempF;
+        if (coldMax >= warmMin) coldMax = warmMin - 1.0f;  // Enforce gap
+        proj->defrostColdMaxTempF = coldMax;
+        proj->defrostWarmMinTempF = warmMin;
+        _hpController->setColdMaxTempF(coldMax);
+        _hpController->setWarmMinTempF(warmMin);
 
-        float dfExitTemp = data["defrostExitTempF"] | proj->defrostExitTempF;
-        if (dfExitTemp != proj->defrostExitTempF) {
-            proj->defrostExitTempF = dfExitTemp;
-            _hpController->setDefrostExitTempF(dfExitTemp);
-        }
-
-        uint32_t hrtMin = data["heatRuntimeThresholdMin"] | (int)(proj->heatRuntimeThresholdMs / 60000);
-        if (hrtMin < 1) hrtMin = 1;
-        if (hrtMin > 90) hrtMin = 90;
-        uint32_t hrtMs = hrtMin * 60000UL;
-        if (hrtMs != proj->heatRuntimeThresholdMs) {
-            proj->heatRuntimeThresholdMs = hrtMs;
-            _hpController->setHeatRuntimeThresholdMs(hrtMs);
-        }
+        // Helper lambda for band params
+        auto parseBand = [&](const char* rtKey, const char* minKey, const char* exitKey,
+                            uint32_t& rtMs, uint32_t& minMs, float& exitF,
+                            GoodmanHP::DefrostBandName bandName) {
+            uint32_t rtMin = data[rtKey] | (int)(rtMs / 60000);
+            if (rtMin < 1) rtMin = 1;
+            if (rtMin > 120) rtMin = 120;
+            rtMs = rtMin * 60000UL;
+            uint32_t minSec = data[minKey] | (int)(minMs / 1000);
+            if (minSec < 30) minSec = 30;
+            if (minSec > 600) minSec = 600;
+            minMs = minSec * 1000UL;
+            float exit = data[exitKey] | exitF;
+            if (exit < 30.0f) exit = 30.0f;
+            if (exit > 120.0f) exit = 120.0f;
+            exitF = exit;
+            _hpController->setDefrostBand(bandName, {rtMs, minMs, exitF});
+        };
+        parseBand("defrostColdRuntimeMin", "defrostColdMinRuntimeSec", "defrostColdExitTempF",
+                  proj->defrostColdRuntimeMs, proj->defrostColdMinRuntimeMs, proj->defrostColdExitTempF,
+                  GoodmanHP::DefrostBandName::COLD);
+        parseBand("defrostMidRuntimeMin", "defrostMidMinRuntimeSec", "defrostMidExitTempF",
+                  proj->defrostMidRuntimeMs, proj->defrostMidMinRuntimeMs, proj->defrostMidExitTempF,
+                  GoodmanHP::DefrostBandName::MID);
+        parseBand("defrostWarmRuntimeMin", "defrostWarmMinRuntimeSec", "defrostWarmExitTempF",
+                  proj->defrostWarmRuntimeMs, proj->defrostWarmMinRuntimeMs, proj->defrostWarmExitTempF,
+                  GoodmanHP::DefrostBandName::WARM);
 
         uint32_t svSec = data["stateValidationSec"] | (int)(proj->stateValidationMs / 1000);
         if (svSec > 300) svSec = 300;

@@ -178,10 +178,11 @@ void DisplayManager::drawPageStatus() {
         _display->printf("%luh %lum %lus", h, m, sec);
     }
 
-    // Heat runtime
+    // Heat runtime with band info
     _display->setCursor(0, 50);
     uint32_t rtMin = _hp->getHeatRuntimeMs() / 60000UL;
-    _display->printf("Heat RT: %lu min", rtMin);
+    uint32_t thrMin = _hp->getActiveRuntimeThresholdMs() / 60000UL;
+    _display->printf("HRT: %lu/%lum (%s)", rtMin, thrMin, _hp->getActiveDefrostBandString());
 }
 
 void DisplayManager::drawPageTemps() {

@@ -239,9 +239,17 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["cntShortCycleSec"] = proj->cntShortCycleMs / 1000;
         doc["stateValidationSec"] = proj->stateValidationMs / 1000;
         doc["inputDelaySec"] = proj->inputDelayMs / 1000;
-        doc["defrostMinRuntimeSec"] = proj->defrostMinRuntimeMs / 1000;
-        doc["defrostExitTempF"] = proj->defrostExitTempF;
-        doc["heatRuntimeThresholdMin"] = proj->heatRuntimeThresholdMs / 60000;
+        doc["defrostColdMaxTemp"] = proj->defrostColdMaxTempF;
+        doc["defrostWarmMinTemp"] = proj->defrostWarmMinTempF;
+        doc["defrostColdRuntimeMin"] = proj->defrostColdRuntimeMs / 60000;
+        doc["defrostColdMinRuntimeSec"] = proj->defrostColdMinRuntimeMs / 1000;
+        doc["defrostColdExitTempF"] = proj->defrostColdExitTempF;
+        doc["defrostMidRuntimeMin"] = proj->defrostMidRuntimeMs / 60000;
+        doc["defrostMidMinRuntimeSec"] = proj->defrostMidMinRuntimeMs / 1000;
+        doc["defrostMidExitTempF"] = proj->defrostMidExitTempF;
+        doc["defrostWarmRuntimeMin"] = proj->defrostWarmRuntimeMs / 60000;
+        doc["defrostWarmMinRuntimeSec"] = proj->defrostWarmMinRuntimeMs / 1000;
+        doc["defrostWarmExitTempF"] = proj->defrostWarmExitTempF;
         doc["apFallbackMinutes"] = proj->apFallbackSeconds / 60;
         doc["apPassword"] = proj->apPassword;
         doc["maxLogSize"] = proj->maxLogSize;
@@ -489,27 +497,41 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         }
     }
 
-    uint32_t dfMinSec = data["defrostMinRuntimeSec"] | (int)(proj->defrostMinRuntimeMs / 1000);
-    uint32_t dfMinMs = dfMinSec * 1000UL;
-    if (dfMinMs != proj->defrostMinRuntimeMs) {
-        proj->defrostMinRuntimeMs = dfMinMs;
-        ctx->hpController->setDefrostMinRuntimeMs(dfMinMs);
-    }
+    // Adaptive defrost band breakpoints
+    float coldMax = data["defrostColdMaxTemp"] | proj->defrostColdMaxTempF;
+    float warmMin = data["defrostWarmMinTemp"] | proj->defrostWarmMinTempF;
+    if (coldMax >= warmMin) coldMax = warmMin - 1.0f;
+    proj->defrostColdMaxTempF = coldMax;
+    proj->defrostWarmMinTempF = warmMin;
+    ctx->hpController->setColdMaxTempF(coldMax);
+    ctx->hpController->setWarmMinTempF(warmMin);
 
-    float dfExitTemp = data["defrostExitTempF"] | proj->defrostExitTempF;
-    if (dfExitTemp != proj->defrostExitTempF) {
-        proj->defrostExitTempF = dfExitTemp;
-        ctx->hpController->setDefrostExitTempF(dfExitTemp);
-    }
-
-    uint32_t hrtMin = data["heatRuntimeThresholdMin"] | (int)(proj->heatRuntimeThresholdMs / 60000);
-    if (hrtMin < 1) hrtMin = 1;
-    if (hrtMin > 90) hrtMin = 90;
-    uint32_t hrtMs = hrtMin * 60000UL;
-    if (hrtMs != proj->heatRuntimeThresholdMs) {
-        proj->heatRuntimeThresholdMs = hrtMs;
-        ctx->hpController->setHeatRuntimeThresholdMs(hrtMs);
-    }
+    auto parseBandHttps = [&](const char* rtKey, const char* minKey, const char* exitKey,
+                        uint32_t& rtMs, uint32_t& minMs, float& exitF,
+                        GoodmanHP::DefrostBandName bandName) {
+        uint32_t rtMin2 = data[rtKey] | (int)(rtMs / 60000);
+        if (rtMin2 < 1) rtMin2 = 1;
+        if (rtMin2 > 120) rtMin2 = 120;
+        rtMs = rtMin2 * 60000UL;
+        uint32_t minSec = data[minKey] | (int)(minMs / 1000);
+        if (minSec < 30) minSec = 30;
+        if (minSec > 600) minSec = 600;
+        minMs = minSec * 1000UL;
+        float exit2 = data[exitKey] | exitF;
+        if (exit2 < 30.0f) exit2 = 30.0f;
+        if (exit2 > 120.0f) exit2 = 120.0f;
+        exitF = exit2;
+        ctx->hpController->setDefrostBand(bandName, {rtMs, minMs, exitF});
+    };
+    parseBandHttps("defrostColdRuntimeMin", "defrostColdMinRuntimeSec", "defrostColdExitTempF",
+              proj->defrostColdRuntimeMs, proj->defrostColdMinRuntimeMs, proj->defrostColdExitTempF,
+              GoodmanHP::DefrostBandName::COLD);
+    parseBandHttps("defrostMidRuntimeMin", "defrostMidMinRuntimeSec", "defrostMidExitTempF",
+              proj->defrostMidRuntimeMs, proj->defrostMidMinRuntimeMs, proj->defrostMidExitTempF,
+              GoodmanHP::DefrostBandName::MID);
+    parseBandHttps("defrostWarmRuntimeMin", "defrostWarmMinRuntimeSec", "defrostWarmExitTempF",
+              proj->defrostWarmRuntimeMs, proj->defrostWarmMinRuntimeMs, proj->defrostWarmExitTempF,
+              GoodmanHP::DefrostBandName::WARM);
 
     // Clear RV Fail
     bool clearRvFail = data["clearRvFail"] | false;
@@ -826,40 +848,58 @@ static esp_err_t updateGetHandler(httpd_req_t* req) {
 static esp_err_t updatePostHandler(httpd_req_t* req) {
     if (!checkHttpsAuth(req)) return ESP_OK;
 
-    int remaining = req->content_len;
-    if (remaining <= 0) {
+    int total = req->content_len;
+    if (total <= 0) {
         httpd_resp_send(req, "FAIL: no data", HTTPD_RESP_USE_STRLEN);
         return ESP_OK;
     }
+    if (total > 2 * 1024 * 1024) {
+        httpd_resp_send(req, "FAIL: firmware too large (2MB max)", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
 
+    // Buffer firmware in PSRAM during TLS recv to avoid concurrent SD access.
+    // The httpd task runs on a separate FreeRTOS task from the Arduino loop;
+    // interleaving SD writes (via SPI) with Logger/tSaveRuntime causes SPI
+    // bus corruption and device hangs since Arduino SD is not thread-safe.
+    uint8_t* fwBuf = (uint8_t*)heap_caps_malloc(total, MALLOC_CAP_SPIRAM);
+    if (!fwBuf) {
+        httpd_resp_send(req, "FAIL: out of PSRAM", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    Log.info("OTA", "Receiving firmware (%d bytes) into PSRAM", total);
+
+    int received = 0;
+    while (received < total) {
+        int ret = httpd_req_recv(req, (char*)(fwBuf + received), total - received);
+        if (ret <= 0) {
+            free(fwBuf);
+            httpd_resp_send(req, "FAIL: receive error", HTTPD_RESP_USE_STRLEN);
+            return ESP_OK;
+        }
+        received += ret;
+    }
+
+    // All data received — write to SD in one operation (minimal contention window)
     File fw = SD.open("/firmware.new", FILE_WRITE);
     if (!fw) {
+        free(fwBuf);
         httpd_resp_send(req, "FAIL: SD open error", HTTPD_RESP_USE_STRLEN);
         return ESP_OK;
     }
 
-    Log.info("OTA", "Saving firmware to SD (%d bytes)", remaining);
+    Log.info("OTA", "Writing firmware to SD...");
+    size_t written = fw.write(fwBuf, total);
+    fw.close();
+    free(fwBuf);
 
-    char buf[1024];
-    while (remaining > 0) {
-        int toRead = remaining > (int)sizeof(buf) ? (int)sizeof(buf) : remaining;
-        int ret = httpd_req_recv(req, buf, toRead);
-        if (ret <= 0) {
-            fw.close();
-            SD.remove("/firmware.new");
-            httpd_resp_send(req, "FAIL: receive error", HTTPD_RESP_USE_STRLEN);
-            return ESP_OK;
-        }
-        if (fw.write((uint8_t*)buf, ret) != (size_t)ret) {
-            fw.close();
-            SD.remove("/firmware.new");
-            httpd_resp_send(req, "FAIL: SD write error", HTTPD_RESP_USE_STRLEN);
-            return ESP_OK;
-        }
-        remaining -= ret;
+    if (written != (size_t)total) {
+        SD.remove("/firmware.new");
+        httpd_resp_send(req, "FAIL: SD write error", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
     }
 
-    fw.close();
     Log.info("OTA", "Firmware saved to SD");
     httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
@@ -1289,6 +1329,8 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     }
 
     doc["heatRuntimeMin"] = ctx->hpController->getHeatRuntimeMs() / 60000UL;
+    doc["defrostBand"] = ctx->hpController->getActiveDefrostBandString();
+    doc["defrostBandThresholdMin"] = ctx->hpController->getActiveRuntimeThresholdMs() / 60000UL;
     doc["defrost"] = ctx->hpController->isSoftwareDefrostActive();
     doc["lpsFault"] = ctx->hpController->isLPSFaultActive();
     doc["lowTemp"] = ctx->hpController->isLowTempActive();
@@ -2470,6 +2512,7 @@ HttpsServerHandle httpsStart(const uint8_t* cert, size_t certLen,
     cfg.prvtkey_len = keyLen + 1;
     cfg.port_secure = 443;
     cfg.httpd.max_uri_handlers = 50;
+    cfg.httpd.stack_size = 16384;  // Default 10240 too tight for TLS + SD ops
 
     httpd_handle_t server = nullptr;
     esp_err_t err = httpd_ssl_start(&server, &cfg);

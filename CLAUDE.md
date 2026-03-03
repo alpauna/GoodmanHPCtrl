@@ -88,10 +88,19 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
   - RV (reversing valve) automatically controlled: ON in COOL mode, OFF in HEAT/OFF mode
   - W (auxiliary heat) automatically controlled: ON in DEFROST, ERROR (HEAT only), LOW_TEMP (HEAT only), and RV_FAIL (HEAT only) modes; never turned on in COOL mode
   - Auto-activates CNT relay when Y input becomes active, with 5-minute short cycle protection: if CNT was off for less than 5 minutes, enforces a 30-second delay before reactivation; if off for 5+ minutes (or never activated), CNT activates immediately
-  - **Automatic defrost (3-phase sequencing)**: After accumulated CNT runtime in HEAT mode exceeds `_heatRuntimeThresholdMs` (default 90 min, configurable 30–90 min), initiates software defrost via a 3-phase output sequence:
+  - **Automatic defrost (3-phase sequencing with adaptive bands)**: Defrost timing adapts to ambient temperature using 3 configurable bands. When accumulated CNT runtime in HEAT mode exceeds the active band's runtime threshold, initiates software defrost via a 3-phase output sequence:
+    - **Adaptive defrost bands**: Two breakpoint temperatures (`_coldMaxTempF` default 23°F, `_warmMinTempF` default 31°F) divide ambient into 3 bands. `selectDefrostBand()` reads AMBIENT_TEMP (3-tier fallback: sensor/weather/ESP32) and returns the active band. Defaults to Warm (most conservative) when no ambient data available.
+
+      | Band | Ambient Range | Runtime Threshold | Min Defrost | Exit Temp |
+      |------|--------------|-------------------|-------------|-----------|
+      | Cold | ≤ 23°F | 30 min | 2 min | 45°F |
+      | Mid  | 23–31°F | 60 min | 3 min | 55°F |
+      | Warm | ≥ 31°F | 90 min | 3 min | 60°F |
+
+    - **Band snapshot**: When defrost starts, the active band's parameters are snapshotted into `_defrostSnapshotBand`. All exit criteria (min runtime, condenser exit temp) use the snapshot, preventing mid-cycle parameter jumps if ambient drifts.
     - **Phase 1** (`_defrostTransition`): All outputs off (CNT, FAN, W, RV) for pressure equalization. Duration: `_rvShortCycleMs` (default 30s, configurable).
     - **Phase 2** (`_defrostCntPending`): RV and W turned on, CNT remains off for short cycle delay. Duration: `_cntShortCycleMs` (default 30s, configurable).
-    - **Phase 3**: CNT turned on, defrost fully active. Runs for at least `defrostMinRuntimeMs` (default 3 min, configurable), then exits when CONDENSER_TEMP >= `defrostExitTempF` (default 60°F, configurable) or 15-min safety timeout.
+    - **Phase 3**: CNT turned on, defrost fully active. Runs for at least the snapshotted band's `minRuntimeMs`, then exits when CONDENSER_TEMP >= snapshotted band's `exitTempF` or 15-min safety timeout.
     - Runtime resets on COOL mode or after defrost completes. Runtime persists to SD card every 5 min via `tSaveRuntime` task.
     - **Defrost state persistence**: `_softwareDefrost` is persisted to `heatpump.defrost.active` in config JSON via `tSaveRuntime` (every 5 min, on change detection). On boot, `restoreSoftwareDefrost()` sets `_softwareDefrost = true` without initiating transitions. When Y activates in HEAT mode, `updateState()` sees the flag and transitions to DEFROST, restarting from Phase 1.
     - **Y drop during defrost entry**: All outputs off (including W), transition flags cleared, but `_softwareDefrost` stays set. Defrost restarts from Phase 1 when Y reactivates in HEAT mode.
@@ -110,7 +119,7 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
   - **State validation delay**: After any state transition, holds the new state for a configurable period (default 30s) before allowing another normal-priority change. OFF and ERROR bypass the timer (high priority). HEAT, COOL, DEFROST, LOW_TEMP are gated. LOW_TEMP output protection (CNT/FAN/RV off) is immediate but state label deferred until validation completes. Dashboard "State Hold" pill with countdown. Configurable via `heatpump.stateValidation.delayMs` (0–300s, live)
   - **Output state validation**: Every 10s, `validateOutputStates()` verifies outputs against a table-driven expected-state map. Global invariants: W off when O active, CNT off during faults, CNT off when no ambient data available. Per-state table with auto-correction. Logs errors on mismatch, "State check OK" every 30s when clean. Skips during transitions/lockout/override
   - **Ambient temperature fallback (3-tier)**: When AMBIENT_TEMP sensor is invalid, `_tskCheckTemps` (10s) uses cached weather data if fresh, otherwise falls back to ESP32 internal die temp (`temperatureRead()`). `enum class AmbientSource { SENSOR, WEATHER, INTERNAL }` tracks current source. Weather data cached in `_weatherTempF` with staleness timeout (`_weatherStaleMs`, default 30 min). Sources: MQTT subscription (plain float payload) or OpenWeatherMap HTTP API (`tFetchWeather`, configurable interval, default 10 min). `setAmbientFailoverTest(bool)` forces sensor invalid for testing (30 min auto-cancel via `tFailoverTestEnd`). State validator enforces CNT OFF when no ambient data available (sensor invalid + no weather). `ambientSource`, `weatherTempF`, `weatherTempAgeSec`, `failoverTest` in `/state` JSON.
-  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `restoreSoftwareDefrost()`, `isDefrostTransitionActive()`, `isDefrostCntPendingActive()`, `isDefrostExitingActive()`, `getDefrostTransitionRemainingMs()`, `getDefrostCntPendingRemainingMs()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `isLowTempPendingEntry()`, `isLowTempPendingExit()`, `getLowTempPendingRemainingMs()`, `setLowTempThreshold()`, `getLowTempThreshold()`, `setDefrostMinRuntimeMs()`, `getDefrostMinRuntimeMs()`, `setDefrostExitTempF()`, `getDefrostExitTempF()`, `setHeatRuntimeThresholdMs()`, `getHeatRuntimeThresholdMs()`, `isStateValidating()`, `getStateValidationRemainingMs()`, `setStateValidationMs()`, `getStateValidationMs()`
+  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `restoreSoftwareDefrost()`, `isDefrostTransitionActive()`, `isDefrostCntPendingActive()`, `isDefrostExitingActive()`, `getDefrostTransitionRemainingMs()`, `getDefrostCntPendingRemainingMs()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `isLowTempPendingEntry()`, `isLowTempPendingExit()`, `getLowTempPendingRemainingMs()`, `setLowTempThreshold()`, `getLowTempThreshold()`, `setColdMaxTempF()`, `getColdMaxTempF()`, `setWarmMinTempF()`, `getWarmMinTempF()`, `setDefrostBand()`, `getDefrostBand()`, `getActiveDefrostBand()`, `getActiveDefrostBandString()`, `getActiveRuntimeThresholdMs()`, `getActiveMinRuntimeMs()`, `getActiveExitTempF()`, `isStateValidating()`, `getStateValidationRemainingMs()`, `setStateValidationMs()`, `getStateValidationMs()`
 - **OutPin** (`OutPin.h/cpp`): Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
 - **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, and confirmed-state debouncing. `isActive()` returns the debounced/validated state (not live GPIO). On pin change: ISR queues event → `_tGetInputs` (500ms) reads live GPIO and starts a configurable delay task (default 10s) → after delay, GPIO is re-read to validate the pin is still in the expected state. Mismatches are discarded as false triggers and logged as warnings. Both activation and deactivation go through the full delay. Configurable via `heatpump.inputDelay.ms` (0–60s, live). Methods: `readLiveState()` (bypass debounce), `setDelay(ms)`, `getDelay()`, `setPendingState()`.
 - **TempSensor** (`TempSensor.h/cpp`): Temperature sensor wrapper with encapsulated state and callbacks. Supports OneWire (via `update()`) and external sources like MCP9600 I2C thermocouple (via `updateValue()`):
@@ -140,7 +149,7 @@ I2C: SDA=GPIO8, SCL=GPIO9 — MCP9600 thermocouple amplifier at 0x67 (LIQUID_TEM
 - **MQTT** (`MQTTHandler` wrapping AsyncMqttClient) to configurable broker, default `192.168.0.46:1883`
   - `goodman/log` — log messages (Logger output)
   - `goodman/temps` — all valid temp sensor values as JSON, published on any sensor change. Format: `{"COMPRESSOR_TEMP":72.5,"SUCTION_TEMP":65.2,"LIQUID_TEMP":185.3,...}`
-  - `goodman/state` — state + inputs/outputs as JSON, published on state transitions. Format: `{"state":"HEAT","inputs":{...},"outputs":{...},"heatRuntimeMin":42,"defrost":false,"defrostTransition":false,"defrostCntPending":false,"defrostExiting":false,"lpsFault":false,"lowTemp":false}`
+  - `goodman/state` — state + inputs/outputs as JSON, published on state transitions. Format: `{"state":"HEAT","inputs":{...},"outputs":{...},"heatRuntimeMin":42,"defrostBand":"Mid","defrostBandThresholdMin":60,"defrost":false,"defrostTransition":false,"defrostCntPending":false,"defrostExiting":false,"lpsFault":false,"lowTemp":false}`
   - `goodman/fault` — fault events as JSON, published when faults activate/clear. Format: `{"fault":"LPS","message":"Low refrigerant pressure","active":true}`
   - Configurable weather topic subscription (e.g., `homeassistant/sensor/outdoor_temp/state`) — parses plain float payload as outdoor temp for ambient fallback
 
@@ -166,9 +175,18 @@ struct ProjectInfo {
     bool rvFail;                 // Latched RV fail flag (persisted)
     uint32_t rvShortCycleMs;     // RV pressure equalization delay in defrost transition (default 30000)
     uint32_t cntShortCycleMs;    // CNT short cycle delay on Y activation (default 30000)
-    uint32_t defrostMinRuntimeMs; // Defrost minimum runtime in ms (default 180000 = 3 min)
-    float defrostExitTempF;      // Condenser temp cutoff to end defrost in F (default 60.0)
-    uint32_t heatRuntimeThresholdMs; // Heat runtime threshold to trigger defrost in ms (default 5400000 = 90 min)
+    // Adaptive defrost bands (Cold / Mid / Warm)
+    float defrostColdMaxTempF;   // Band breakpoint: ≤ this = Cold (default 23°F)
+    float defrostWarmMinTempF;   // Band breakpoint: ≥ this = Warm (default 31°F)
+    uint32_t defrostColdRuntimeMs;    // Cold: runtime threshold ms (default 1800000 = 30 min)
+    uint32_t defrostColdMinRuntimeMs; // Cold: min defrost ms (default 120000 = 2 min)
+    float defrostColdExitTempF;       // Cold: condenser cutoff (default 45°F)
+    uint32_t defrostMidRuntimeMs;     // Mid: runtime threshold ms (default 3600000 = 60 min)
+    uint32_t defrostMidMinRuntimeMs;  // Mid: min defrost ms (default 180000 = 3 min)
+    float defrostMidExitTempF;        // Mid: condenser cutoff (default 55°F)
+    uint32_t defrostWarmRuntimeMs;    // Warm: runtime threshold ms (default 5400000 = 90 min)
+    uint32_t defrostWarmMinRuntimeMs; // Warm: min defrost ms (default 180000 = 3 min)
+    float defrostWarmExitTempF;       // Warm: condenser cutoff (default 60°F)
     bool softwareDefrost;        // Persisted software defrost state (survives reboot)
     uint32_t stateValidationMs;  // State validation delay in ms (default 30000 = 30s)
     uint32_t inputDelayMs;       // Input pin validation delay in ms (default 10000 = 10s)
@@ -233,7 +251,14 @@ JSON config stored on SD card at `/config.txt` (Arduino SD library, SPI interfac
     "lowTemp": { "threshold": 20.0 },
     "highSuctionTemp": { "threshold": 140.0, "rvFail": false },
     "shortCycle": { "rv": 30000, "cnt": 30000 },
-    "defrost": { "minRuntimeMs": 180000, "exitTempF": 60.0, "heatRuntimeThresholdMs": 5400000, "active": false },
+    "defrost": {
+      "active": false,
+      "coldMaxTemp": 23.0,
+      "warmMinTemp": 31.0,
+      "cold": { "runtimeThresholdMs": 1800000, "minRuntimeMs": 120000, "exitTempF": 45.0 },
+      "mid":  { "runtimeThresholdMs": 3600000, "minRuntimeMs": 180000, "exitTempF": 55.0 },
+      "warm": { "runtimeThresholdMs": 5400000, "minRuntimeMs": 180000, "exitTempF": 60.0 }
+    },
     "stateValidation": { "delayMs": 30000 },
     "inputDelay": { "ms": 10000 }
   },
