@@ -182,9 +182,11 @@ function update(d){
   banner.style.backgroundColor=color;
   setText('stateName',d.state||'--');
   var rt=d.heatRuntimeMin||0;
+  var thr=d.defrostBandThresholdMin||90;
+  var band=d.defrostBand||'Warm';
   var hrs=Math.floor(rt/60);
   var mins=rt%60;
-  setText('stateRuntime','Heat Runtime: '+(hrs>0?hrs+'h ':'')+mins+'m');
+  setText('stateRuntime','Heat RT: '+(hrs>0?hrs+'h ':'')+mins+'m / '+thr+'m ('+band+')');
 
   // Faults / Protection
   setPill('fStartup',d.startupLockout);

@@ -239,9 +239,17 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["cntShortCycleSec"] = proj->cntShortCycleMs / 1000;
         doc["stateValidationSec"] = proj->stateValidationMs / 1000;
         doc["inputDelaySec"] = proj->inputDelayMs / 1000;
-        doc["defrostMinRuntimeSec"] = proj->defrostMinRuntimeMs / 1000;
-        doc["defrostExitTempF"] = proj->defrostExitTempF;
-        doc["heatRuntimeThresholdMin"] = proj->heatRuntimeThresholdMs / 60000;
+        doc["defrostColdMaxTemp"] = proj->defrostColdMaxTempF;
+        doc["defrostWarmMinTemp"] = proj->defrostWarmMinTempF;
+        doc["defrostColdRuntimeMin"] = proj->defrostColdRuntimeMs / 60000;
+        doc["defrostColdMinRuntimeSec"] = proj->defrostColdMinRuntimeMs / 1000;
+        doc["defrostColdExitTempF"] = proj->defrostColdExitTempF;
+        doc["defrostMidRuntimeMin"] = proj->defrostMidRuntimeMs / 60000;
+        doc["defrostMidMinRuntimeSec"] = proj->defrostMidMinRuntimeMs / 1000;
+        doc["defrostMidExitTempF"] = proj->defrostMidExitTempF;
+        doc["defrostWarmRuntimeMin"] = proj->defrostWarmRuntimeMs / 60000;
+        doc["defrostWarmMinRuntimeSec"] = proj->defrostWarmMinRuntimeMs / 1000;
+        doc["defrostWarmExitTempF"] = proj->defrostWarmExitTempF;
         doc["apFallbackMinutes"] = proj->apFallbackSeconds / 60;
         doc["apPassword"] = proj->apPassword;
         doc["maxLogSize"] = proj->maxLogSize;
@@ -482,27 +490,41 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         }
     }
 
-    uint32_t dfMinSec = data["defrostMinRuntimeSec"] | (int)(proj->defrostMinRuntimeMs / 1000);
-    uint32_t dfMinMs = dfMinSec * 1000UL;
-    if (dfMinMs != proj->defrostMinRuntimeMs) {
-        proj->defrostMinRuntimeMs = dfMinMs;
-        ctx->hpController->setDefrostMinRuntimeMs(dfMinMs);
-    }
+    // Adaptive defrost band breakpoints
+    float coldMax = data["defrostColdMaxTemp"] | proj->defrostColdMaxTempF;
+    float warmMin = data["defrostWarmMinTemp"] | proj->defrostWarmMinTempF;
+    if (coldMax >= warmMin) coldMax = warmMin - 1.0f;
+    proj->defrostColdMaxTempF = coldMax;
+    proj->defrostWarmMinTempF = warmMin;
+    ctx->hpController->setColdMaxTempF(coldMax);
+    ctx->hpController->setWarmMinTempF(warmMin);
 
-    float dfExitTemp = data["defrostExitTempF"] | proj->defrostExitTempF;
-    if (dfExitTemp != proj->defrostExitTempF) {
-        proj->defrostExitTempF = dfExitTemp;
-        ctx->hpController->setDefrostExitTempF(dfExitTemp);
-    }
-
-    uint32_t hrtMin = data["heatRuntimeThresholdMin"] | (int)(proj->heatRuntimeThresholdMs / 60000);
-    if (hrtMin < 1) hrtMin = 1;
-    if (hrtMin > 90) hrtMin = 90;
-    uint32_t hrtMs = hrtMin * 60000UL;
-    if (hrtMs != proj->heatRuntimeThresholdMs) {
-        proj->heatRuntimeThresholdMs = hrtMs;
-        ctx->hpController->setHeatRuntimeThresholdMs(hrtMs);
-    }
+    auto parseBandHttps = [&](const char* rtKey, const char* minKey, const char* exitKey,
+                        uint32_t& rtMs, uint32_t& minMs, float& exitF,
+                        GoodmanHP::DefrostBandName bandName) {
+        uint32_t rtMin2 = data[rtKey] | (int)(rtMs / 60000);
+        if (rtMin2 < 1) rtMin2 = 1;
+        if (rtMin2 > 120) rtMin2 = 120;
+        rtMs = rtMin2 * 60000UL;
+        uint32_t minSec = data[minKey] | (int)(minMs / 1000);
+        if (minSec < 30) minSec = 30;
+        if (minSec > 600) minSec = 600;
+        minMs = minSec * 1000UL;
+        float exit2 = data[exitKey] | exitF;
+        if (exit2 < 30.0f) exit2 = 30.0f;
+        if (exit2 > 120.0f) exit2 = 120.0f;
+        exitF = exit2;
+        ctx->hpController->setDefrostBand(bandName, {rtMs, minMs, exitF});
+    };
+    parseBandHttps("defrostColdRuntimeMin", "defrostColdMinRuntimeSec", "defrostColdExitTempF",
+              proj->defrostColdRuntimeMs, proj->defrostColdMinRuntimeMs, proj->defrostColdExitTempF,
+              GoodmanHP::DefrostBandName::COLD);
+    parseBandHttps("defrostMidRuntimeMin", "defrostMidMinRuntimeSec", "defrostMidExitTempF",
+              proj->defrostMidRuntimeMs, proj->defrostMidMinRuntimeMs, proj->defrostMidExitTempF,
+              GoodmanHP::DefrostBandName::MID);
+    parseBandHttps("defrostWarmRuntimeMin", "defrostWarmMinRuntimeSec", "defrostWarmExitTempF",
+              proj->defrostWarmRuntimeMs, proj->defrostWarmMinRuntimeMs, proj->defrostWarmExitTempF,
+              GoodmanHP::DefrostBandName::WARM);
 
     // Clear RV Fail
     bool clearRvFail = data["clearRvFail"] | false;
@@ -1239,6 +1261,8 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
     }
 
     doc["heatRuntimeMin"] = ctx->hpController->getHeatRuntimeMs() / 60000UL;
+    doc["defrostBand"] = ctx->hpController->getActiveDefrostBandString();
+    doc["defrostBandThresholdMin"] = ctx->hpController->getActiveRuntimeThresholdMs() / 60000UL;
     doc["defrost"] = ctx->hpController->isSoftwareDefrostActive();
     doc["lpsFault"] = ctx->hpController->isLPSFaultActive();
     doc["lowTemp"] = ctx->hpController->isLowTempActive();

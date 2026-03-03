@@ -494,7 +494,7 @@ function renderFlags(d){
   }
   // Heat runtime (always show if > 0)
   if(d.heatRuntimeMin>0){
-    h+='<span class="flag green on">Heat Runtime '+d.heatRuntimeMin+'m</span>';
+    h+='<span class="flag green on">Heat RT '+d.heatRuntimeMin+'m/'+(d.defrostBandThresholdMin||90)+'m ('+(d.defrostBand||'Warm')+')</span>';
   }
   document.getElementById('flagBox').innerHTML=h;
 }

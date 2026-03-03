@@ -14,14 +14,28 @@ class GoodmanHP {
   public:
     enum class State { OFF, COOL, HEAT, DEFROST, ERROR, LOW_TEMP };
     enum class AmbientSource { SENSOR, WEATHER, INTERNAL };
+    enum class DefrostBandName { COLD, MID, WARM };
+    struct DefrostBand {
+        uint32_t runtimeThresholdMs;
+        uint32_t minRuntimeMs;
+        float exitTempF;
+    };
     typedef std::function<void(State newState, State oldState)> StateChangeCallback;
     typedef std::function<void(bool active)> LPSFaultCallback;
 
-    // Defrost constants
-    static const uint32_t HEAT_RUNTIME_THRESHOLD_MS = 90UL * 60 * 1000;  // 90 min
-    static const uint32_t DEFROST_MIN_RUNTIME_MS = 3UL * 60 * 1000;      // 3 min minimum defrost
+    // Defrost constants — per-band defaults
+    static const uint32_t DEFROST_COLD_RUNTIME_MS = 30UL * 60 * 1000;    // 30 min
+    static const uint32_t DEFROST_COLD_MIN_RUNTIME_MS = 2UL * 60 * 1000; // 2 min
+    static constexpr float DEFROST_COLD_EXIT_F = 45.0f;
+    static const uint32_t DEFROST_MID_RUNTIME_MS = 60UL * 60 * 1000;     // 60 min
+    static const uint32_t DEFROST_MID_MIN_RUNTIME_MS = 3UL * 60 * 1000;  // 3 min
+    static constexpr float DEFROST_MID_EXIT_F = 55.0f;
+    static const uint32_t DEFROST_WARM_RUNTIME_MS = 90UL * 60 * 1000;    // 90 min
+    static const uint32_t DEFROST_WARM_MIN_RUNTIME_MS = 3UL * 60 * 1000; // 3 min
+    static constexpr float DEFROST_WARM_EXIT_F = 60.0f;
+    static constexpr float DEFROST_COLD_MAX_TEMP_F = 23.0f;
+    static constexpr float DEFROST_WARM_MIN_TEMP_F = 31.0f;
     static const uint32_t DEFROST_TIMEOUT_MS = 15UL * 60 * 1000;         // 15 min safety timeout
-    static constexpr float DEFROST_EXIT_F = 60.0f;
     static const uint32_t DEFROST_COND_CHECK_MS = 60UL * 1000;            // 1 min condenser recheck
     static constexpr float DEFAULT_LOW_TEMP_F = 20.0f;
     static const uint32_t LOW_TEMP_VALIDATION_MS = 10UL * 60 * 1000;  // 10 min validation delay
@@ -153,13 +167,18 @@ class GoodmanHP {
     uint32_t getHeatTransitionRemainingMs() const;
     uint32_t getHeatCntPendingRemainingMs() const;
 
-    // Configurable defrost parameters
-    void setDefrostMinRuntimeMs(uint32_t ms);
-    uint32_t getDefrostMinRuntimeMs() const;
-    void setDefrostExitTempF(float f);
-    float getDefrostExitTempF() const;
-    void setHeatRuntimeThresholdMs(uint32_t ms);
-    uint32_t getHeatRuntimeThresholdMs() const;
+    // Adaptive defrost band parameters
+    void setColdMaxTempF(float f);
+    float getColdMaxTempF() const;
+    void setWarmMinTempF(float f);
+    float getWarmMinTempF() const;
+    void setDefrostBand(DefrostBandName band, const DefrostBand& params);
+    DefrostBand getDefrostBand(DefrostBandName band) const;
+    DefrostBandName getActiveDefrostBand() const;
+    const char* getActiveDefrostBandString() const;
+    uint32_t getActiveRuntimeThresholdMs() const;
+    uint32_t getActiveMinRuntimeMs() const;
+    float getActiveExitTempF() const;
 
     // State validation timer (prevents rapid state cycling)
     bool isStateValidating() const;
@@ -195,9 +214,12 @@ class GoodmanHP {
     bool _cntActivated;
 
     uint32_t _cntShortCycleMs;  // Configurable CNT short cycle delay (default 30s)
-    uint32_t _defrostMinRuntimeMs;  // Configurable defrost min runtime (default 3 min)
-    float _defrostExitTempF;        // Configurable condenser temp cutoff (default 60°F)
-    uint32_t _heatRuntimeThresholdMs; // Configurable heat runtime threshold for defrost (default 90 min)
+    // Adaptive defrost bands
+    float _coldMaxTempF;                  // Band breakpoint: ≤ this = Cold
+    float _warmMinTempF;                  // Band breakpoint: ≥ this = Warm
+    DefrostBand _defrostBands[3];         // [COLD, MID, WARM]
+    DefrostBandName _activeDefrostBand;   // Currently selected band
+    DefrostBand _defrostSnapshotBand;     // Snapshot when defrost starts
 
     // Heat runtime accumulation & automatic defrost
     uint32_t _heatRuntimeMs;
@@ -264,6 +286,7 @@ class GoodmanHP {
     StateChangeCallback _stateChangeCb;
     LPSFaultCallback _lpsFaultCb;
 
+    DefrostBandName selectDefrostBand();
     void checkLPSFault();
     void checkAmbientTemp();
     void checkCompressorTemp();

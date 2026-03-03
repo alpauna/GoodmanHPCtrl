@@ -444,9 +444,12 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.rvFail = false;
         proj.rvShortCycleMs = 30000;
         proj.cntShortCycleMs = 30000;
-        proj.defrostMinRuntimeMs = 180000;
-        proj.defrostExitTempF = 60.0f;
-        proj.heatRuntimeThresholdMs = 5400000;
+        // Legacy defaults — Warm band values
+        proj.defrostColdMaxTempF = 23.0f;
+        proj.defrostWarmMinTempF = 31.0f;
+        proj.defrostColdRuntimeMs = 1800000;   proj.defrostColdMinRuntimeMs = 120000;  proj.defrostColdExitTempF = 45.0f;
+        proj.defrostMidRuntimeMs = 3600000;    proj.defrostMidMinRuntimeMs = 180000;   proj.defrostMidExitTempF = 55.0f;
+        proj.defrostWarmRuntimeMs = 5400000;   proj.defrostWarmMinRuntimeMs = 180000;  proj.defrostWarmExitTempF = 60.0f;
         proj.softwareDefrost = false;
         proj.stateValidationMs = 30000;
         proj.inputDelayMs = 2000;
@@ -459,17 +462,52 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.rvFail = heatpump["highSuctionTemp"]["rvFail"] | false;
         proj.rvShortCycleMs = heatpump["shortCycle"]["rv"] | 30000;
         proj.cntShortCycleMs = heatpump["shortCycle"]["cnt"] | 30000;
-        proj.defrostMinRuntimeMs = heatpump["defrost"]["minRuntimeMs"] | 180000;
-        proj.defrostExitTempF = heatpump["defrost"]["exitTempF"] | 60.0f;
-        proj.heatRuntimeThresholdMs = heatpump["defrost"]["heatRuntimeThresholdMs"] | 5400000;
-        proj.softwareDefrost = heatpump["defrost"]["active"] | false;
+        // Adaptive defrost bands — migrate from old single-value fields if needed
+        JsonObject defrost = heatpump["defrost"];
+        if (defrost["cold"].is<JsonObject>()) {
+            // New band format
+            proj.defrostColdMaxTempF = defrost["coldMaxTemp"] | 23.0f;
+            proj.defrostWarmMinTempF = defrost["warmMinTemp"] | 31.0f;
+            proj.defrostColdRuntimeMs = defrost["cold"]["runtimeThresholdMs"] | 1800000;
+            proj.defrostColdMinRuntimeMs = defrost["cold"]["minRuntimeMs"] | 120000;
+            proj.defrostColdExitTempF = defrost["cold"]["exitTempF"] | 45.0f;
+            proj.defrostMidRuntimeMs = defrost["mid"]["runtimeThresholdMs"] | 3600000;
+            proj.defrostMidMinRuntimeMs = defrost["mid"]["minRuntimeMs"] | 180000;
+            proj.defrostMidExitTempF = defrost["mid"]["exitTempF"] | 55.0f;
+            proj.defrostWarmRuntimeMs = defrost["warm"]["runtimeThresholdMs"] | 5400000;
+            proj.defrostWarmMinRuntimeMs = defrost["warm"]["minRuntimeMs"] | 180000;
+            proj.defrostWarmExitTempF = defrost["warm"]["exitTempF"] | 60.0f;
+        } else {
+            // Migrate from old single-value fields: old values become Warm band
+            uint32_t oldRuntimeMs = defrost["heatRuntimeThresholdMs"] | 5400000;
+            uint32_t oldMinMs = defrost["minRuntimeMs"] | 180000;
+            float oldExitF = defrost["exitTempF"] | 60.0f;
+            proj.defrostColdMaxTempF = 23.0f;
+            proj.defrostWarmMinTempF = 31.0f;
+            // Warm = old values; Mid/Cold derived proportionally
+            proj.defrostWarmRuntimeMs = oldRuntimeMs;
+            proj.defrostWarmMinRuntimeMs = oldMinMs;
+            proj.defrostWarmExitTempF = oldExitF;
+            proj.defrostMidRuntimeMs = (oldRuntimeMs * 2) / 3;  // ~67% of warm
+            proj.defrostMidMinRuntimeMs = oldMinMs;
+            proj.defrostMidExitTempF = oldExitF - 5.0f;
+            proj.defrostColdRuntimeMs = oldRuntimeMs / 3;        // ~33% of warm
+            proj.defrostColdMinRuntimeMs = oldMinMs > 60000 ? oldMinMs - 60000 : oldMinMs;  // 1 min less
+            proj.defrostColdExitTempF = oldExitF - 15.0f;
+            Serial.println("Config migration: old single-value defrost -> band format");
+        }
+        proj.softwareDefrost = defrost["active"] | false;
         proj.stateValidationMs = heatpump["stateValidation"]["delayMs"] | 30000;
         proj.inputDelayMs = heatpump["inputDelay"]["ms"] | 2000;
     }
-    Serial.printf("Read heatpump: lowTemp=%.1fF highSuct=%.1fF rvFail=%d rvSC=%lu cntSC=%lu defrostMin=%lu defrostExit=%.1fF\n",
+    Serial.printf("Read heatpump: lowTemp=%.1fF highSuct=%.1fF rvFail=%d rvSC=%lu cntSC=%lu\n",
                   proj.lowTempThreshold, proj.highSuctionTempThreshold, proj.rvFail,
-                  proj.rvShortCycleMs, proj.cntShortCycleMs,
-                  proj.defrostMinRuntimeMs, proj.defrostExitTempF);
+                  proj.rvShortCycleMs, proj.cntShortCycleMs);
+    Serial.printf("  Defrost bands: cold(%lum/%lus/%.0fF) mid(%lum/%lus/%.0fF) warm(%lum/%lus/%.0fF) breaks=%.0f/%.0fF\n",
+                  proj.defrostColdRuntimeMs/60000UL, proj.defrostColdMinRuntimeMs/1000UL, proj.defrostColdExitTempF,
+                  proj.defrostMidRuntimeMs/60000UL, proj.defrostMidMinRuntimeMs/1000UL, proj.defrostMidExitTempF,
+                  proj.defrostWarmRuntimeMs/60000UL, proj.defrostWarmMinRuntimeMs/1000UL, proj.defrostWarmExitTempF,
+                  proj.defrostColdMaxTempF, proj.defrostWarmMinTempF);
 
     // Load temp history capture interval
     proj.tempHistoryIntervalSec = doc["tempHistory"]["intervalSec"] | 120;
@@ -691,10 +729,21 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     hpShortCycle["rv"] = proj.rvShortCycleMs;
     hpShortCycle["cnt"] = proj.cntShortCycleMs;
     JsonObject hpDefrost = heatpump["defrost"].to<JsonObject>();
-    hpDefrost["minRuntimeMs"] = proj.defrostMinRuntimeMs;
-    hpDefrost["exitTempF"] = proj.defrostExitTempF;
-    hpDefrost["heatRuntimeThresholdMs"] = proj.heatRuntimeThresholdMs;
     hpDefrost["active"] = proj.softwareDefrost;
+    hpDefrost["coldMaxTemp"] = proj.defrostColdMaxTempF;
+    hpDefrost["warmMinTemp"] = proj.defrostWarmMinTempF;
+    JsonObject dfCold = hpDefrost["cold"].to<JsonObject>();
+    dfCold["runtimeThresholdMs"] = proj.defrostColdRuntimeMs;
+    dfCold["minRuntimeMs"] = proj.defrostColdMinRuntimeMs;
+    dfCold["exitTempF"] = proj.defrostColdExitTempF;
+    JsonObject dfMid = hpDefrost["mid"].to<JsonObject>();
+    dfMid["runtimeThresholdMs"] = proj.defrostMidRuntimeMs;
+    dfMid["minRuntimeMs"] = proj.defrostMidMinRuntimeMs;
+    dfMid["exitTempF"] = proj.defrostMidExitTempF;
+    JsonObject dfWarm = hpDefrost["warm"].to<JsonObject>();
+    dfWarm["runtimeThresholdMs"] = proj.defrostWarmRuntimeMs;
+    dfWarm["minRuntimeMs"] = proj.defrostWarmMinRuntimeMs;
+    dfWarm["exitTempF"] = proj.defrostWarmExitTempF;
     JsonObject hpStateVal = heatpump["stateValidation"].to<JsonObject>();
     hpStateVal["delayMs"] = proj.stateValidationMs;
     JsonObject hpInputDelay = heatpump["inputDelay"].to<JsonObject>();
@@ -855,10 +904,25 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     hpShortCycle["rv"] = proj.rvShortCycleMs;
     hpShortCycle["cnt"] = proj.cntShortCycleMs;
     JsonObject hpDefrost = heatpump["defrost"].to<JsonObject>();
-    hpDefrost["minRuntimeMs"] = proj.defrostMinRuntimeMs;
-    hpDefrost["exitTempF"] = proj.defrostExitTempF;
-    hpDefrost["heatRuntimeThresholdMs"] = proj.heatRuntimeThresholdMs;
     hpDefrost["active"] = proj.softwareDefrost;
+    hpDefrost["coldMaxTemp"] = proj.defrostColdMaxTempF;
+    hpDefrost["warmMinTemp"] = proj.defrostWarmMinTempF;
+    // Remove old single-value keys (migration cleanup)
+    hpDefrost.remove("minRuntimeMs");
+    hpDefrost.remove("exitTempF");
+    hpDefrost.remove("heatRuntimeThresholdMs");
+    JsonObject dfColdUpd = hpDefrost["cold"].to<JsonObject>();
+    dfColdUpd["runtimeThresholdMs"] = proj.defrostColdRuntimeMs;
+    dfColdUpd["minRuntimeMs"] = proj.defrostColdMinRuntimeMs;
+    dfColdUpd["exitTempF"] = proj.defrostColdExitTempF;
+    JsonObject dfMidUpd = hpDefrost["mid"].to<JsonObject>();
+    dfMidUpd["runtimeThresholdMs"] = proj.defrostMidRuntimeMs;
+    dfMidUpd["minRuntimeMs"] = proj.defrostMidMinRuntimeMs;
+    dfMidUpd["exitTempF"] = proj.defrostMidExitTempF;
+    JsonObject dfWarmUpd = hpDefrost["warm"].to<JsonObject>();
+    dfWarmUpd["runtimeThresholdMs"] = proj.defrostWarmRuntimeMs;
+    dfWarmUpd["minRuntimeMs"] = proj.defrostWarmMinRuntimeMs;
+    dfWarmUpd["exitTempF"] = proj.defrostWarmExitTempF;
     JsonObject hpStateValUpd = heatpump["stateValidation"].to<JsonObject>();
     hpStateValUpd["delayMs"] = proj.stateValidationMs;
     JsonObject hpInputDelayUpd = heatpump["inputDelay"].to<JsonObject>();
