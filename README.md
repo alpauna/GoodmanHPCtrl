@@ -1278,6 +1278,9 @@ All bug reports in [`docs/bugs/`](docs/bugs/).
 | [BUG-004](docs/bugs/004-w-on-during-defrost-phase1.md) | W relay turned ON during defrost Phase 1 — race condition in `updateState()` where W control block ran before Phase 1 restart set `_defrostTransition=true`. Validator auto-corrected. 6 occurrences (Feb 25–Mar 1). | Medium | `46d3a0f` |
 | [BUG-005](docs/bugs/005-fan-off-after-manual-override-exit.md) | FAN not restored after manual override exit — `_yWasActive` not reset so Y activation edge never re-fired. Validator auto-corrected. 1 occurrence (Feb 25). | Low | `f7f3cf4` |
 | [BUG-006](docs/bugs/006-fan-validator-fight-during-state-validation.md) | FAN validator fight during state validation window — validator enforced OFF rules against stale state label while FAN was correct for pending HEAT transition. Double-correction. 2 occurrences (Feb 28). | Low | `f7f3cf4` |
+| [BUG-007](docs/bugs/007-rv-off-under-pressure-no-equalization.md) | RV relay turned off under pressure without equalization delay — 9 code paths called `rv->turnOff()` directly while system still under compressor discharge pressure. Fix: `safeRvOff()` helper defers RV off until `_rvShortCycleMs` after CNT off. | Medium | `2b8a199` |
+| [BUG-008](docs/bugs/008-ota-upload-hangs-device.md) | OTA upload hangs device — HTTPS httpd task does `httpd_req_recv()` + `SD.write()` in tight loop, concurrent SD access from main loop tasks corrupts SPI bus → deadlock. Fix: buffer firmware in PSRAM, single SD write. | High | `a75ab7b` |
+| [BUG-009](docs/bugs/009-defrost-triggers-in-off-state.md) | Defrost triggers in OFF state — `checkDefrostNeeded()` had no state guard before runtime threshold check, allowing defrost to start while Y inactive. Y-abort safety gate caught it within 500ms. Fix: gate new-defrost trigger on `State::HEAT`. 1 occurrence (Mar 3). | Low | pending |
 
 ## Dependencies
 

@@ -1866,6 +1866,9 @@ void GoodmanHP::checkDefrostNeeded() {
         return;
     }
 
+    // Only trigger new defrost while in HEAT state (Y active, compressor running)
+    if (_state != State::HEAT) return;
+
     // Select band from current ambient temperature
     _activeDefrostBand = selectDefrostBand();
     const DefrostBand& band = _defrostBands[(int)_activeDefrostBand];
