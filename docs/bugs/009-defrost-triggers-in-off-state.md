@@ -4,7 +4,7 @@
 **Severity**: Low (self-correcting)
 **Status**: Fixed
 **Affected versions**: v1.0 through v1.2-rc9
-**Fixed in**: pending
+**Fixed in**: `932b969` (v1.2-rc15)
 
 ## Symptom
 
