@@ -6,13 +6,13 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 
 | Page | Screenshot |
 |------|-----------|
-| Home | ![Home](docs/screenshots/home.png?v=5) |
-| Dashboard | ![Dashboard](docs/screenshots/dashboard.png?v=7) |
-| Pins | ![Pins](docs/screenshots/pins.png?v=2) |
-| Configuration | ![Configuration](docs/screenshots/config.png?v=5) |
-| OTA Update | ![OTA Update](docs/screenshots/update.png?v=4) |
-| Log | ![Log](docs/screenshots/log.png?v=1) |
-| Heap | ![Heap](docs/screenshots/heap.png?v=1) |
+| Home | ![Home](docs/screenshots/home.png?v=6) |
+| Dashboard | ![Dashboard](docs/screenshots/dashboard.png?v=8) |
+| Pins | ![Pins](docs/screenshots/pins.png?v=3) |
+| Configuration | ![Configuration](docs/screenshots/config.png?v=6) |
+| OTA Update | ![OTA Update](docs/screenshots/update.png?v=5) |
+| Log | ![Log](docs/screenshots/log.png?v=2) |
+| Heap | ![Heap](docs/screenshots/heap.png?v=2) |
 
 ## Features
 
