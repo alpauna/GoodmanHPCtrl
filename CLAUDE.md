@@ -147,7 +147,7 @@ Inputs: LPS=GPIO15, DFT=GPIO16, Y=GPIO17, O=GPIO18
 Outputs: FAN=GPIO4, CNT=GPIO5 (3s delay), W=GPIO6, RV=GPIO7
 OneWire bus: GPIO21
 I2C: SDA=GPIO8, SCL=GPIO9 — MCP9600 thermocouple amplifier at 0x67 (LIQUID_TEMP)
-CAN bus: TX=GPIO13, RX=GPIO14 — ESP32 TWAI at 250 kbps (enabled via `can.enabled` config)
+CAN bus: TX=GPIO38, RX=GPIO14 — ESP32 TWAI at 250 kbps via SN65HVD230DR transceiver (enabled via `can.enabled` config)
 
 ### Networking
 
@@ -160,7 +160,7 @@ CAN bus: TX=GPIO13, RX=GPIO14 — ESP32 TWAI at 250 kbps (enabled via `can.enabl
   - `goodman/state` — state + inputs/outputs as JSON, published on state transitions. Format: `{"state":"HEAT","inputs":{...},"outputs":{...},"heatRuntimeMin":42,"defrostBand":"Mid","defrostBandThresholdMin":60,"defrost":false,"defrostTransition":false,"defrostCntPending":false,"defrostExiting":false,"lpsFault":false,"lowTemp":false}`
   - `goodman/fault` — fault events as JSON, published when faults activate/clear. Format: `{"fault":"LPS","message":"Low refrigerant pressure","active":true}`
   - Configurable weather topic subscription (e.g., `homeassistant/sensor/outdoor_temp/state`) — parses plain float payload as outdoor temp for ambient fallback
-- **CAN bus** (`CANBus` class wrapping ESP32 TWAI driver) at 250 kbps on GPIO13 (TX) / GPIO14 (RX), node 0x03 (HP_CTRL)
+- **CAN bus** (`CANBus` class wrapping ESP32 TWAI driver) at 250 kbps on GPIO38 (TX) / GPIO14 (RX) via SN65HVD230DR transceiver, node 0x03 (HP_CTRL)
   - `0x200` (TX, 2s) — HP state: state enum, output bits, fault bits, protection bits, heat runtime, input bits, defrost band + ambient source
   - `0x201` (TX, 2s) — HP temps: AMBIENT, CONDENSER, SUCTION, LIQUID as int16×10 (big-endian), -9999 = invalid
   - `0x3FF` (TX, 5s) — Heartbeat: node ID + uptime seconds

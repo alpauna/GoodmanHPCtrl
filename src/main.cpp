@@ -158,7 +158,7 @@ const u_int8_t _oPin = GPIO_NUM_18;
 const u_int8_t ONE_WIRE_BUS = GPIO_NUM_21;
 
 // CAN bus
-static const gpio_num_t PIN_CAN_TX = GPIO_NUM_13;
+static const gpio_num_t PIN_CAN_TX = GPIO_NUM_38;
 static const gpio_num_t PIN_CAN_RX = GPIO_NUM_14;
 CANBus canBus(&ts, PIN_CAN_TX, PIN_CAN_RX);
 

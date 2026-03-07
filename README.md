@@ -321,7 +321,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | MAX6675 CLK | 39 | Output | SPI thermocouple clock (software SPI) |
 | MAX6675 CS | 40 | Output | SPI thermocouple chip select |
 | MAX6675 DO | 41 | Input | SPI thermocouple data out |
-| CAN TX | 13 | Output | CAN bus transmit (TWAI) |
+| CAN TX | 38 | Output | CAN bus transmit (TWAI) |
 | CAN RX | 14 | Input | CAN bus receive (TWAI) |
 
 **I2C Devices:**

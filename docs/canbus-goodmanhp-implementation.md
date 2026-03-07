@@ -14,7 +14,7 @@ GoodmanHPCtrl joins a CAN bus network as **node 0x03 (HP_CTRL)** at 250 kbps usi
 
 | Signal | GPIO | Direction |
 |--------|------|-----------|
-| CAN TX | GPIO 13 | Output (to SN65HVD230DR pin 1 "D") |
+| CAN TX | GPIO 38 | Output (to SN65HVD230DR pin 1 "D") |
 | CAN RX | GPIO 14 | Input (from SN65HVD230DR pin 4 "R") |
 
 ## CAN Transceiver — SN65HVD230DR
@@ -48,7 +48,7 @@ The SN65HVD230DR (TI, SOIC-8) is the physical layer interface between the ESP32 
 
 | SN65HVD230DR Pin | Name | Connection | Notes |
 |------------------|------|------------|-------|
-| 1 | D (TXD) | ESP32 GPIO 13 | CAN transmit data input — drives dominant/recessive on bus |
+| 1 | D (TXD) | ESP32 GPIO 38 | CAN transmit data input — drives dominant/recessive on bus |
 | 2 | GND | Ground | Common ground with ESP32 |
 | 3 | VCC | 3.3V | ESP32 3.3V rail — add 100nF bypass cap to GND |
 | 4 | R (RXD) | ESP32 GPIO 14 | CAN receive data output — dominant=low, recessive=high |
@@ -67,7 +67,7 @@ Each end of the CAN bus requires a 120 ohm termination resistor between CANH and
                           SN65HVD230DR
 ESP32-S3                 +---------+
                          |         |
-GPIO 13 (TX) -----> D  1|         |8  Rs ---+--- GND
+GPIO 38 (TX) -----> D  1|         |8  Rs ---+--- GND
                          |         |        |
                    GND  2|         |7  CANH -----> CAN Bus H
                          |         |               (120R term)

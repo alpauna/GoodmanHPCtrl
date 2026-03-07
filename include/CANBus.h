@@ -32,7 +32,7 @@ enum class CANNodeId : uint8_t {
 
 class CANBus {
 public:
-    CANBus(Scheduler* ts, gpio_num_t txPin = GPIO_NUM_13, gpio_num_t rxPin = GPIO_NUM_14);
+    CANBus(Scheduler* ts, gpio_num_t txPin = GPIO_NUM_38, gpio_num_t rxPin = GPIO_NUM_14);
 
     bool begin(twai_timing_config_t timing = TWAI_TIMING_CONFIG_250KBITS());
     void stop();
