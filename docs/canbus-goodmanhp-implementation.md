@@ -14,8 +14,71 @@ GoodmanHPCtrl joins a CAN bus network as **node 0x03 (HP_CTRL)** at 250 kbps usi
 
 | Signal | GPIO | Direction |
 |--------|------|-----------|
-| CAN TX | GPIO 13 | Output |
-| CAN RX | GPIO 14 | Input |
+| CAN TX | GPIO 13 | Output (to SN65HVD230DR pin 1 "D") |
+| CAN RX | GPIO 14 | Input (from SN65HVD230DR pin 4 "R") |
+
+## CAN Transceiver — SN65HVD230DR
+
+The SN65HVD230DR (TI, SOIC-8) is the physical layer interface between the ESP32 TWAI controller and the CAN bus. It operates at 3.3V — no level shifter needed for the ESP32-S3.
+
+### Key Specs
+
+| Parameter | Value |
+|-----------|-------|
+| Supply Voltage | 3.0–3.6V |
+| Data Rate | Up to 1 Mbps (250 kbps used) |
+| Bus Nodes | Up to 120 |
+| ESD Protection | +/-15kV HBM |
+| Standby Current | 650 uA typical |
+| Operating Temp | -40 to 125°C |
+| Package | SOIC-8 |
+
+### Pin Configuration
+
+```
+              +---------+
+     D    1  |o        |  8   Rs
+    GND   2  |         |  7   CANH
+    VCC   3  |         |  6   CANL
+     R    4  |         |  5   Vref
+              +---------+
+```
+
+### Wiring to ESP32-S3
+
+| SN65HVD230DR Pin | Name | Connection | Notes |
+|------------------|------|------------|-------|
+| 1 | D (TXD) | ESP32 GPIO 13 | CAN transmit data input — drives dominant/recessive on bus |
+| 2 | GND | Ground | Common ground with ESP32 |
+| 3 | VCC | 3.3V | ESP32 3.3V rail — add 100nF bypass cap to GND |
+| 4 | R (RXD) | ESP32 GPIO 14 | CAN receive data output — dominant=low, recessive=high |
+| 5 | Vref | — | VCC/2 reference output (1.65V) — leave unconnected or use for split termination |
+| 6 | CANL | CAN bus low | Twisted pair to bus, 120 ohm termination at each end |
+| 7 | CANH | CAN bus high | Twisted pair to bus, 120 ohm termination at each end |
+| 8 | Rs | GND | High-speed mode (tie to GND for 250 kbps). Optional: 10k–100k to GND for slope control to reduce EMI |
+
+### Bus Termination
+
+Each end of the CAN bus requires a 120 ohm termination resistor between CANH and CANL. For a 3-node network (AThermostat, Display, GoodmanHPCtrl), place termination at the two physically furthest nodes. Alternatively, split termination can be used: two 60 ohm resistors in series with a 4.7nF cap from the midpoint to GND for improved EMI.
+
+### Schematic
+
+```
+                          SN65HVD230DR
+ESP32-S3                 +---------+
+                         |         |
+GPIO 13 (TX) -----> D  1|         |8  Rs ---+--- GND
+                         |         |        |
+                   GND  2|         |7  CANH -----> CAN Bus H
+                         |         |               (120R term)
+            3.3V ---+--- VCC 3|         |6  CANL -----> CAN Bus L
+                    |    |         |               (120R term)
+                  100nF  R  4|         |5  Vref (NC)
+                    |    |         |
+                   GND   +---------+
+                         |
+GPIO 14 (RX) <-----------+
+```
 
 ## Configuration
 
