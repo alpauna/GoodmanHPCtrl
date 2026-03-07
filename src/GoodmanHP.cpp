@@ -2055,6 +2055,22 @@ String GoodmanHP::forceDefrost() {
     return "";
 }
 
+float GoodmanHP::getSubcoolingF() const {
+    auto it1 = _tempSensorMap.find("CONDENSER_TEMP");
+    auto it2 = _tempSensorMap.find("LIQUID_TEMP");
+    if (it1 == _tempSensorMap.end() || it2 == _tempSensorMap.end()) return 0.0f;
+    if (!it1->second->isValid() || !it2->second->isValid()) return 0.0f;
+    return it1->second->getValue() - it2->second->getValue();
+}
+
+bool GoodmanHP::isSubcoolingValid() const {
+    auto it1 = _tempSensorMap.find("CONDENSER_TEMP");
+    auto it2 = _tempSensorMap.find("LIQUID_TEMP");
+    if (it1 == _tempSensorMap.end() || it2 == _tempSensorMap.end()) return false;
+    if (!it1->second->isValid() || !it2->second->isValid()) return false;
+    return (_state == State::HEAT || _state == State::COOL || _state == State::DEFROST);
+}
+
 // Static callback delegates to instance method
 bool GoodmanHP::outPinRuntimeCallback(OutPin* pin, uint32_t onDuration) {
     if (_instance != nullptr) {

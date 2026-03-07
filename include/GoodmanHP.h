@@ -193,6 +193,10 @@ class GoodmanHP {
     String setManualOutput(const String& name, bool on);
     String forceDefrost();
 
+    // Subcooling calculation (CONDENSER_TEMP - LIQUID_TEMP)
+    float getSubcoolingF() const;
+    bool isSubcoolingValid() const;
+
     void restoreSoftwareDefrost();
 
     void setStateChangeCallback(StateChangeCallback cb);

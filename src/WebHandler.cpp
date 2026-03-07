@@ -573,6 +573,8 @@ void WebHandler::setupRoutes() {
         }
         doc["failoverTest"] = _hpController->isAmbientFailoverTestActive();
         doc["failoverTestRemainSec"] = _hpController->getFailoverTestRemainingSec();
+        if (_hpController->isSubcoolingValid())
+            doc["subcoolingF"] = serialized(String(_hpController->getSubcoolingF(), 1));
         doc["stateValidating"] = _hpController->isStateValidating();
         doc["stateValidationRemainSec"] = _hpController->getStateValidationRemainingMs() / 1000;
         doc["manualOverride"] = _hpController->isManualOverrideActive();

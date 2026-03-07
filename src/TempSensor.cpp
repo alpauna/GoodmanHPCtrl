@@ -212,6 +212,7 @@ String TempSensor::getDefaultDescription(uint8_t index) {
         case 2: return "AMBIENT_TEMP";
         case 3: return "CONDENSER_TEMP";
         case 4: return "LIQUID_TEMP";
+        case 5: return "VAPOR_TEMP";
         default: return "SENSOR_" + String(index);
     }
 }

@@ -152,8 +152,8 @@ This will auto shut off after <span class='countdown' id='countdown'>30:00</span
 </div>
 <script>
 var stateColors={'COOL':'#2196F3','HEAT':'#f44336','DEFROST':'#ff9800','OFF':'#9e9e9e','ERROR':'#d32f2f','LOW_TEMP':'#7b1fa2'};
-var roles=['COMPRESSOR_TEMP','SUCTION_TEMP','AMBIENT_TEMP','CONDENSER_TEMP','LIQUID_TEMP'];
-var roleLabels={'COMPRESSOR_TEMP':'Compressor','SUCTION_TEMP':'Suction','AMBIENT_TEMP':'Ambient','CONDENSER_TEMP':'Condenser','LIQUID_TEMP':'Liquid Line'};
+var roles=['COMPRESSOR_TEMP','SUCTION_TEMP','AMBIENT_TEMP','CONDENSER_TEMP','LIQUID_TEMP','VAPOR_TEMP'];
+var roleLabels={'COMPRESSOR_TEMP':'Compressor','SUCTION_TEMP':'Suction','AMBIENT_TEMP':'Ambient','CONDENSER_TEMP':'Condenser','LIQUID_TEMP':'Liquid Line','VAPOR_TEMP':'Vapor Line'};
 var drivers=['','MCP9600','MAX6675','Other'];
 var driverLabels={'':'Unassigned','MCP9600':'MCP9600 (I2C Thermocouple)','MAX6675':'MAX6675 (SPI Thermocouple)','Other':'Other'};
 var manualActive=false;

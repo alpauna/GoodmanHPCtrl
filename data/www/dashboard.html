@@ -152,7 +152,8 @@ var stateColors={
 };
 var tempNames={
   'COMPRESSOR_TEMP':'Compressor','SUCTION_TEMP':'Suction',
-  'AMBIENT_TEMP':'Ambient','CONDENSER_TEMP':'Condenser','LIQUID_TEMP':'Liquid Line'
+  'AMBIENT_TEMP':'Ambient','CONDENSER_TEMP':'Condenser','LIQUID_TEMP':'Liquid Line',
+  'VAPOR_TEMP':'Vapor Line'
 };
 
 function setDot(id,on){
@@ -235,7 +236,7 @@ function update(d){
   // Temps
   var tc=document.getElementById('temps');
   var ts=d.temps||{};
-  var order=['AMBIENT_TEMP','COMPRESSOR_TEMP','SUCTION_TEMP','CONDENSER_TEMP','LIQUID_TEMP'];
+  var order=['AMBIENT_TEMP','COMPRESSOR_TEMP','SUCTION_TEMP','CONDENSER_TEMP','LIQUID_TEMP','VAPOR_TEMP'];
   var weatherActive=d.ambientSource==='weather';
   var html='';
   for(var i=0;i<order.length;i++){
@@ -256,6 +257,9 @@ function update(d){
     var wStyle=weatherActive?' style="color:#4CAF50"':'';
     var lbl=weatherActive?'Weather Amb (active)':'Weather Amb';
     html+="<div class='temp-row'><span class='temp-name'"+wStyle+">"+lbl+"</span><span class='temp-value'"+wStyle+">"+parseFloat(d.weatherTempF).toFixed(1)+"&deg;F <small style='font-size:11px;color:var(--text-muted)'>"+agoStr+"</small></span></div>";
+  }
+  if(d.subcoolingF!==undefined){
+    html+="<div class='temp-row'><span class='temp-name' style='font-style:italic'>Subcooling</span><span class='temp-value'>"+parseFloat(d.subcoolingF).toFixed(1)+"&deg;F</span></div>";
   }
   tc.innerHTML=html;
 
@@ -318,7 +322,8 @@ var chartSensors=[
   {key:'COMPRESSOR_TEMP',dir:'compressor',color:'#f44336'},
   {key:'SUCTION_TEMP',dir:'suction',color:'#4CAF50'},
   {key:'CONDENSER_TEMP',dir:'condenser',color:'#ff9800'},
-  {key:'LIQUID_TEMP',dir:'liquid',color:'#9C27B0'}
+  {key:'LIQUID_TEMP',dir:'liquid',color:'#9C27B0'},
+  {key:'VAPOR_TEMP',dir:'vapor',color:'#00BCD4'}
 ];
 var chartData={};
 var chartCanvases={};

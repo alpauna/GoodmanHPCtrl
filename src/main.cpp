@@ -1169,8 +1169,10 @@ static const TempCsvEntry tempCsvEntries[] = {
     {"COMPRESSOR_TEMP", "compressor"},
     {"SUCTION_TEMP",    "suction"},
     {"CONDENSER_TEMP",  "condenser"},
-    {"LIQUID_TEMP",     "liquid"}
+    {"LIQUID_TEMP",     "liquid"},
+    {"VAPOR_TEMP",      "vapor"}
 };
+static const int NUM_CSV_ENTRIES = sizeof(tempCsvEntries) / sizeof(tempCsvEntries[0]);
 
 void onLogTempsCSV() {
     if (!config.isSDCardInitialized()) return;
@@ -1185,7 +1187,7 @@ void onLogTempsCSV() {
     if (strcmp(today, _tempsCsvDate) != 0) {
         strncpy(_tempsCsvDate, today, sizeof(_tempsCsvDate));
         if (!SD.exists("/temps")) SD.mkdir("/temps");
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < NUM_CSV_ENTRIES; i++) {
             char dir[32];
             snprintf(dir, sizeof(dir), "/temps/%s", tempCsvEntries[i].dirName);
             if (!SD.exists(dir)) SD.mkdir(dir);
@@ -1196,7 +1198,7 @@ void onLogTempsCSV() {
     time_t epoch = mktime(&timeinfo);
     TempSensorMap& temps = hpController.getTempSensorMap();
 
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < NUM_CSV_ENTRIES; i++) {
         auto it = temps.find(tempCsvEntries[i].sensorKey);
         if (it == temps.end() || it->second == nullptr || !it->second->isValid()) continue;
 
@@ -1225,7 +1227,7 @@ void cleanOldTempFiles(int maxAgeDays) {
     time_t now = mktime(&timeinfo);
     time_t cutoff = now - ((time_t)maxAgeDays * 86400);
 
-    for (int s = 0; s < 5; s++) {
+    for (int s = 0; s < NUM_CSV_ENTRIES; s++) {
         char dirPath[32];
         snprintf(dirPath, sizeof(dirPath), "/temps/%s", tempCsvEntries[s].dirName);
 

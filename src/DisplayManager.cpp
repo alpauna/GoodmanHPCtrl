@@ -195,12 +195,13 @@ void DisplayManager::drawPageTemps() {
         {"SUCT", "SUCTION_TEMP"},
         {"AMB",  "AMBIENT_TEMP"},
         {"COND", "CONDENSER_TEMP"},
-        {"LIQ",  "LIQUID_TEMP"}
+        {"LIQ",  "LIQUID_TEMP"},
+        {"VAPR", "VAPOR_TEMP"}
     };
 
     TempSensorMap& temps = _hp->getTempSensorMap();
     int y = 12;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 6; i++) {
         _display->setCursor(0, y);
         _display->print(sensors[i].abbr);
         _display->print(": ");
@@ -210,7 +211,7 @@ void DisplayManager::drawPageTemps() {
         } else {
             _display->print("---");
         }
-        y += 10;
+        y += 9;
     }
 }
 
