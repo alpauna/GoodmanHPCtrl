@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Embedded HVAC controller for Goodman heatpumps (cooling, heating, defrost modes) running on ESP32. Controls 4 relay outputs (FAN, CNT, W, RV) based on 4 input signals (LPS, DFT, Y, O), 4 OneWire temperature sensors (COMPRESSOR, SUCTION, AMBIENT, CONDENSER), and 1 MCP9600 I2C thermocouple (LIQUID). Provides a REST API, WebSocket, and MQTT interface for remote monitoring and control.
+Embedded HVAC controller for Goodman heatpumps (cooling, heating, defrost modes) running on ESP32. Controls 4 relay outputs (FAN, CNT, W, RV) based on 4 input signals (LPS, DFT, Y, O), up to 6 OneWire temperature sensors (COMPRESSOR, SUCTION, AMBIENT, CONDENSER, LIQUID, VAPOR), and 1 MCP9600 I2C thermocouple (LIQUID fallback). Provides a REST API, WebSocket, and MQTT interface for remote monitoring and control.
 
 ## Build Commands
 
@@ -80,7 +80,7 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
 - **GoodmanHP** (`GoodmanHP.h/cpp`): Central controller managing input/output pin maps, temperature sensors, and heat pump state machine. Contains:
   - `std::map<String, InputPin*>` for input pins (LPS, DFT, Y, O)
   - `std::map<String, OutPin*>` for output pins (FAN, CNT, W, RV)
-  - `TempSensorMap` for temperature sensors (COMPRESSOR, SUCTION, AMBIENT, CONDENSER via OneWire; LIQUID via MCP9600 I2C thermocouple)
+  - `TempSensorMap` for temperature sensors (COMPRESSOR, SUCTION, AMBIENT, CONDENSER, LIQUID, VAPOR via OneWire; LIQUID also supported via MCP9600 I2C thermocouple fallback)
   - Pin methods: `addInput()`, `addOutput()`, `getInput()`, `getOutput()`, `getInputMap()`, `getOutputMap()`
   - Temp methods: `addTempSensor()`, `getTempSensor()`, `getTempSensorMap()`, `clearTempSensors()`
   - State machine: OFF, COOL (Y+O active), HEAT (Y active only), DEFROST
@@ -119,7 +119,8 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
   - **State validation delay**: After any state transition, holds the new state for a configurable period (default 30s) before allowing another normal-priority change. OFF and ERROR bypass the timer (high priority). HEAT, COOL, DEFROST, LOW_TEMP are gated. LOW_TEMP output protection (CNT/FAN/RV off) is immediate but state label deferred until validation completes. Dashboard "State Hold" pill with countdown. Configurable via `heatpump.stateValidation.delayMs` (0–300s, live)
   - **Output state validation**: Every 10s, `validateOutputStates()` verifies outputs against a table-driven expected-state map. Global invariants: W off when O active, CNT off during faults, CNT off when no ambient data available. Per-state table with auto-correction. Logs errors on mismatch, "State check OK" every 30s when clean. Skips during transitions/lockout/override
   - **Ambient temperature fallback (3-tier)**: When AMBIENT_TEMP sensor is invalid, `_tskCheckTemps` (10s) uses cached weather data if fresh, otherwise falls back to ESP32 internal die temp (`temperatureRead()`). `enum class AmbientSource { SENSOR, WEATHER, INTERNAL }` tracks current source. Weather data cached in `_weatherTempF` with staleness timeout (`_weatherStaleMs`, default 30 min). Sources: MQTT subscription (plain float payload) or OpenWeatherMap HTTP API (`tFetchWeather`, configurable interval, default 10 min). `setAmbientFailoverTest(bool)` forces sensor invalid for testing (30 min auto-cancel via `tFailoverTestEnd`). State validator enforces CNT OFF when no ambient data available (sensor invalid + no weather). `ambientSource`, `weatherTempF`, `weatherTempAgeSec`, `failoverTest` in `/state` JSON.
-  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `restoreSoftwareDefrost()`, `isDefrostTransitionActive()`, `isDefrostCntPendingActive()`, `isDefrostExitingActive()`, `getDefrostTransitionRemainingMs()`, `getDefrostCntPendingRemainingMs()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `isLowTempPendingEntry()`, `isLowTempPendingExit()`, `getLowTempPendingRemainingMs()`, `setLowTempThreshold()`, `getLowTempThreshold()`, `setColdMaxTempF()`, `getColdMaxTempF()`, `setWarmMinTempF()`, `getWarmMinTempF()`, `setDefrostBand()`, `getDefrostBand()`, `getActiveDefrostBand()`, `getActiveDefrostBandString()`, `getActiveRuntimeThresholdMs()`, `getActiveMinRuntimeMs()`, `getActiveExitTempF()`, `isStateValidating()`, `getStateValidationRemainingMs()`, `setStateValidationMs()`, `getStateValidationMs()`
+  - **Subcooling calculation**: `getSubcoolingF()` returns `CONDENSER_TEMP - LIQUID_TEMP` (how much refrigerant has subcooled past saturation). `isSubcoolingValid()` returns true when both sensors are valid and compressor is running (HEAT, COOL, or DEFROST). Relevant for TXV systems. `subcoolingF` included in `/state` JSON when valid.
+  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `restoreSoftwareDefrost()`, `isDefrostTransitionActive()`, `isDefrostCntPendingActive()`, `isDefrostExitingActive()`, `getDefrostTransitionRemainingMs()`, `getDefrostCntPendingRemainingMs()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `isLowTempPendingEntry()`, `isLowTempPendingExit()`, `getLowTempPendingRemainingMs()`, `setLowTempThreshold()`, `getLowTempThreshold()`, `setColdMaxTempF()`, `getColdMaxTempF()`, `setWarmMinTempF()`, `getWarmMinTempF()`, `setDefrostBand()`, `getDefrostBand()`, `getActiveDefrostBand()`, `getActiveDefrostBandString()`, `getActiveRuntimeThresholdMs()`, `getActiveMinRuntimeMs()`, `getActiveExitTempF()`, `isStateValidating()`, `getStateValidationRemainingMs()`, `setStateValidationMs()`, `getStateValidationMs()`, `getSubcoolingF()`, `isSubcoolingValid()`
 - **OutPin** (`OutPin.h/cpp`): Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
 - **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, and confirmed-state debouncing. `isActive()` returns the debounced/validated state (not live GPIO). On pin change: ISR queues event → `_tGetInputs` (500ms) reads live GPIO and starts a configurable delay task (default 10s) → after delay, GPIO is re-read to validate the pin is still in the expected state. Mismatches are discarded as false triggers and logged as warnings. Both activation and deactivation go through the full delay. Configurable via `heatpump.inputDelay.ms` (0–60s, live). Methods: `readLiveState()` (bypass debounce), `setDelay(ms)`, `getDelay()`, `setPendingState()`.
 - **TempSensor** (`TempSensor.h/cpp`): Temperature sensor wrapper with encapsulated state and callbacks. Supports OneWire (via `update()`) and external sources like MCP9600 I2C thermocouple (via `updateValue()`):
@@ -131,7 +132,7 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
     - `stringToAddress(String&, uint8_t*)` — Parse hex string to DeviceAddress
     - `printAddress(uint8_t*)` — Print address to Serial in hex format
     - `discoverSensors(DallasTemperature*, TempSensorMap&, updateCb, changeCb)` — Enumerate OneWire bus and populate TempSensorMap. Logs via Logger (ONEWIRE tag) instead of Serial
-    - `getDefaultDescription(uint8_t index)` — Returns sensor name by index (COMPRESSOR_TEMP, SUCTION_TEMP, AMBIENT_TEMP, CONDENSER_TEMP)
+    - `getDefaultDescription(uint8_t index)` — Returns sensor name by index (0=COMPRESSOR_TEMP, 1=SUCTION_TEMP, 2=AMBIENT_TEMP, 3=CONDENSER_TEMP, 4=LIQUID_TEMP, 5=VAPOR_TEMP)
   - **OneWire auto-merge**: After `loadTempConfig()`, `setup()` enumerates the OneWire bus and merges any devices whose address is not already in the config-loaded TempSensorMap. New sensors get the first available default name. Logged as `[INFO] [MAIN] OneWire: new sensor <name> (<addr>)`. If no OneWire devices are found on the bus, a warning is logged: `[WARN] [MAIN] OneWire: no devices found on GPIO <pin>`
 
 ### GPIO Pin Mapping (ESP32-S3)
@@ -320,7 +321,7 @@ When WiFi connection fails for `apFallbackSeconds` (default 600 = 10 min), the s
 | Page | Content |
 |------|---------|
 | 0 - Status | State banner, WiFi IP, uptime, heat runtime. Shows AP credentials when `_apModeActive` (held 3x longer) |
-| 1 - Temps | All 5 temperature sensors (COMP, SUCT, AMB, COND, LIQ) |
+| 1 - Temps | All 6 temperature sensors (COMP, SUCT, AMB, COND, LIQ, VAPR) with 9px spacing |
 | 2 - I/O | Input states (LPS, DFT, Y, O) and output states (FAN, CNT, W, RV) |
 | 3 - System | Free heap, CPU load (both cores), PSRAM, WiFi RSSI |
 | 4 - Protections | Active protections: LPS fault, low temp, RV fail, defrost, SC protect, comp over temp, suction low, startup lockout |

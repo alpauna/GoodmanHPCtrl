@@ -17,7 +17,8 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 ## Features
 
 - **Relay control** — 4 output pins (FAN, Contactor, W-Heat, Reversing Valve) driven by 4 input signals (Low Pressure Switch, Defrost, Y-Cool, O-Heat)
-- **Temperature monitoring** — 4 OneWire (Dallas DS18B20) sensors (compressor, suction, ambient, condenser) + liquid line thermocouple with auto-detection priority: MAX6675 SPI > MAX31850K OneWire > MCP9600 I2C. OneWire sensors discovered on the bus are automatically merged with saved config on boot — new devices get default names and appear immediately without a config reset
+- **Temperature monitoring** — Up to 6 OneWire (Dallas DS18B20) sensors (compressor, suction, ambient, condenser, liquid, vapor) + liquid line thermocouple fallback with auto-detection priority: MAX6675 SPI > MAX31850K OneWire > MCP9600 I2C. OneWire sensors discovered on the bus are automatically merged with saved config on boot — new devices get default names and appear immediately without a config reset
+- **Subcooling calculation** — Real-time subcooling diagnostic (CONDENSER_TEMP - LIQUID_TEMP) displayed on dashboard when both sensors are valid and compressor is running. Relevant for TXV systems to verify proper refrigerant charge
 - **Ambient temp fallback** — 3-tier failover chain for ambient temperature: local OneWire sensor → weather data (MQTT subscription or OpenWeatherMap HTTP API, or both simultaneously) → ESP32 internal die temp. Actively fails up to the best available source every cycle. Configurable staleness timeout, test failover button, dashboard source indicator
 - **Remote access** — REST API, WebSocket, and MQTT (QoS 1) for monitoring and control
 - **HTTPS/SSL** — Self-signed ECC P-256 certificate on port 443 for secure `/config`, `/update`, and `/ftp` endpoints. Graceful fallback to HTTP-only if no certs found on SD card
@@ -28,7 +29,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
   - ![SC](docs/screenshots/pill-sc.png) **SC** (Short Cycle) — Shown on CNT output. Green when inactive, red when CNT short cycle protection delay is active (CNT was off < 5 min, waiting 30s before reactivation)
   - ![DFH](docs/screenshots/pill-dfh.png) **DFH** (Defrost Hold) — Shown on CNT, W, and RV outputs during the 3-phase defrost entry and exit transitions. On RV and W: red during entry Phase 1 or exit Phase 1 (pressure equalization). On CNT: red during entry Phase 2 or exit Phase 2 (waiting for CNT short cycle before compressor starts)
 - **Pin table with manual override** — Auth-protected `/pins` page showing all GPIO inputs, outputs, and temperatures in a table. "Normal Mode Lockout" checkbox enables manual output control, bypassing the state machine for up to 30 minutes (auto-timeout). CNT enforces short cycle protection even in manual mode. Single auth prompt covers the entire lockout session. "Force Defrost" button triggers a software defrost cycle from HEAT mode (requires no active faults or manual override)
-- **Temperature history** — Configurable CSV logging interval (30s-5min, default 2min) per sensor to SD card (`/temps/<sensor>/YYYY-MM-DD.csv`), rolling Canvas line charts on dashboard with 1h/6h/24h/7d timeframe selector, auto-purge after 31 days
+- **Temperature history** — Configurable CSV logging interval (30s-5min, default 2min) per sensor to SD card (`/temps/<sensor>/YYYY-MM-DD.csv`), rolling Canvas line charts on dashboard (6 sensors) with 1h/6h/24h/7d timeframe selector, auto-purge after 31 days
 - **Web-based configuration** — HTML pages served from `/www/` on SD card for configuration, OTA updates, and monitoring
 - **FTP server** — SimpleFTPServer with timed enable/disable (10/30/60 min) from config page. Configurable password (encrypted on SD card); defaults to `admin`/`admin` when not set. Defaults to OFF; auto-disables after timeout
 - **OTA updates** — Firmware upload saves to SD card (`/firmware.new`), then apply to flash. Automatically backs up running firmware with build date metadata before flashing. Supports manual revert and automatic crash recovery (see [Crash Recovery](#crash-recovery))
@@ -288,7 +289,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | `GoodmanHP` | Central controller with pin maps, temp sensors, and state machine |
 | `InputPin` | Digital/analog input with polling-based validation delay, confirmed-state debouncing, callbacks |
 | `OutPin` | Output relay with delay, PWM support, state tracking, hardware state validation |
-| `TempSensor` | Temperature sensor with callbacks; supports OneWire (DS18B20), I2C (MCP9600), and SPI (MAX6675) |
+| `TempSensor` | Temperature sensor with callbacks; supports OneWire (DS18B20), I2C (MCP9600), and SPI (MAX6675). 6 default names: COMPRESSOR, SUCTION, AMBIENT, CONDENSER, LIQUID, VAPOR |
 | `Config` | SD card and JSON configuration management |
 | `Logger` | Multi-output logging with tar.gz rotation, ring buffer, and WebSocket streaming |
 | `WebHandler` | AsyncWebServer (port 80) with REST API, WebSocket, and HTTPS redirects |
@@ -663,10 +664,10 @@ This prompts for system name, MQTT prefix, WiFi, and MQTT credentials, then writ
 - Enabled by default; toggle via `POST /log/config?websocket=true|false`
 
 **Temperature history CSV logging:**
-- Logs all 5 temperature sensors (ambient, compressor, suction, condenser, liquid) at a configurable interval (30s-5min, default 2min)
+- Logs all 6 temperature sensors (ambient, compressor, suction, condenser, liquid, vapor) at a configurable interval (30s-5min, default 2min)
 - Per-sensor CSV files: `/temps/<sensor>/YYYY-MM-DD.csv` (e.g., `/temps/ambient/2026-02-11.csv`)
 - CSV format (no header): `epoch_seconds,temperature_fahrenheit`
-- ~56 KB/day per sensor, ~8.5 MB/month total across all sensors
+- ~56 KB/day per sensor, ~10 MB/month total across all 6 sensors
 - Auto-purges CSV files older than 31 days
 - Access via `GET /temps/history?sensor=<name>` API endpoint
 
@@ -1049,7 +1050,8 @@ Returns the full controller state as JSON. Used by the dashboard for real-time p
   "stateValidationRemainSec": 0,
   "manualOverride": false,
   "manualOverrideRemainSec": 0,
-  "temps": { "AMBIENT_TEMP": 48.1, "COMPRESSOR_TEMP": 72.5, "SUCTION_TEMP": 65.2, "CONDENSER_TEMP": 38.7, "LIQUID_TEMP": 185.3 },
+  "temps": { "AMBIENT_TEMP": 48.1, "COMPRESSOR_TEMP": 72.5, "SUCTION_TEMP": 65.2, "CONDENSER_TEMP": 38.7, "LIQUID_TEMP": 185.3, "VAPOR_TEMP": 52.0 },
+  "subcoolingF": -146.6,
   "cpuLoad0": 23,
   "cpuLoad1": 50,
   "freeHeap": 159232,
@@ -1085,6 +1087,7 @@ Returns the full controller state as JSON. Used by the dashboard for real-time p
 | `wifiIP` | string | Device IP address |
 | `apMode` | bool | Whether the device is in AP fallback mode |
 | `buildDate` | string | Firmware build date and time (compile timestamp) |
+| `subcoolingF` | number | Subcooling in °F (CONDENSER_TEMP - LIQUID_TEMP). Only present when both sensors are valid and compressor is running (HEAT/COOL/DEFROST) |
 | `safeMode` | bool | Whether the device is in safe mode (crash recovery or forced) |
 | `crashBootCount` | number | Number of consecutive crash boots (resets after 30s stable uptime) |
 | `resetReason` | string | ESP32 reset reason (e.g., `POWERON`, `SW_RESET`, `PANIC`, `INT_WDT`) |
