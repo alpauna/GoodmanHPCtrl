@@ -85,6 +85,8 @@ struct ProjectInfo {
     uint32_t weatherStaleMinutes;    // Max age before cached weather value expires (default 30)
     uint32_t weatherRefreshMinutes;  // HTTP fetch interval in minutes (default 10, range 1-60)
     float internalTempOffsetF;       // ESP32 internal temp offset in °F (default 0, range -50 to 50)
+    // CAN bus
+    bool canEnabled;                 // Enable CAN bus for thermostat communication (default false)
 };
 
 class Config {

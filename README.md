@@ -20,7 +20,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **Temperature monitoring** — Up to 6 OneWire (Dallas DS18B20) sensors (compressor, suction, ambient, condenser, liquid, vapor) + liquid line thermocouple fallback with auto-detection priority: MAX6675 SPI > MAX31850K OneWire > MCP9600 I2C. OneWire sensors discovered on the bus are automatically merged with saved config on boot — new devices get default names and appear immediately without a config reset
 - **Subcooling calculation** — Real-time subcooling diagnostic (CONDENSER_TEMP - LIQUID_TEMP) displayed on dashboard when both sensors are valid and compressor is running. Relevant for TXV systems to verify proper refrigerant charge
 - **Ambient temp fallback** — 3-tier failover chain for ambient temperature: local OneWire sensor → weather data (MQTT subscription or OpenWeatherMap HTTP API, or both simultaneously) → ESP32 internal die temp. Actively fails up to the best available source every cycle. Configurable staleness timeout, test failover button, dashboard source indicator
-- **Remote access** — REST API, WebSocket, and MQTT (QoS 1) for monitoring and control
+- **Remote access** — REST API, WebSocket, MQTT (QoS 1), and CAN bus for monitoring and control
 - **HTTPS/SSL** — Self-signed ECC P-256 certificate on port 443 for secure `/config`, `/update`, and `/ftp` endpoints. Graceful fallback to HTTP-only if no certs found on SD card
 - **Dark/light theme** — Configurable dark/light theme with shared `theme.css` stylesheet. Persisted to SD card config, cached in localStorage for flash-free page loads. Instant preview on config page
 - **Admin password protection** — HTTP Basic Auth on sensitive endpoints (`/config`, `/update`, `/ftp`). No password = open access
@@ -40,6 +40,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **I2C bus** — Initialized on GPIO8 (SDA) / GPIO9 (SCL) with automatic device scan at startup and `/i2c/scan` API endpoint
 - **PSRAM support** — All heap allocations routed through PSRAM when available
 - **WiFi AP fallback** — Configurable timeout (default 10 minutes) before switching to Access Point mode for OTA recovery and reconfiguration
+- **CAN bus integration** — Optional CAN bus (ESP32 TWAI, 250 kbps) replaces physical Y/O thermostat wires with CAN messages from AThermostat. Publishes HP state, temperatures, and heartbeat. 10-second timeout safety shuts down compressor if CAN communication is lost. DFT/LPS safety inputs always remain physical. Configurable via `can.enabled` in config JSON. See `docs/canbus-goodmanhp-implementation.md`
 - **Multi-unit support** — Configurable system name (max 20 chars, alphanumeric + spaces) and MQTT topic prefix. System name is used as the web UI brand, AP SSID, OLED display name, HTTPS auth realm, and SSL certificate CN. Multiple controllers can publish to the same MQTT broker with unique prefixes (e.g., `unit1/temps`, `unit2/temps`)
 - **FreeRTOS compatible** — Uses `vTaskDelay()` instead of `delay()` for proper RTOS task yielding
 
@@ -320,6 +321,8 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | MAX6675 CLK | 39 | Output | SPI thermocouple clock (software SPI) |
 | MAX6675 CS | 40 | Output | SPI thermocouple chip select |
 | MAX6675 DO | 41 | Input | SPI thermocouple data out |
+| CAN TX | 13 | Output | CAN bus transmit (TWAI) |
+| CAN RX | 14 | Input | CAN bus receive (TWAI) |
 
 **I2C Devices:**
 

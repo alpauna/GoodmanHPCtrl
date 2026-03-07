@@ -582,14 +582,13 @@ void GoodmanHP::checkSuctionTemp() {
 }
 
 void GoodmanHP::checkYAndActivateCNT() {
-    InputPin* y = getInput("Y");
     OutPin* cnt = getOutput("CNT");
 
-    if (y == nullptr || cnt == nullptr) {
+    if (cnt == nullptr) {
         return;
     }
 
-    bool yActive = y->isActive();
+    bool yActive = isYActive();
 
     OutPin* fan = getOutput("FAN");
 
@@ -664,18 +663,21 @@ void GoodmanHP::updateState() {
     if (_lpsFault || _lowTemp) return;
 
     InputPin* dft = getInput("DFT");
-    InputPin* y = getInput("Y");
-    InputPin* o = getInput("O");
 
-    if (dft == nullptr || y == nullptr || o == nullptr) {
+    // Use helper methods (respects CAN mode)
+    bool yActive = isYActive();
+    bool oActive = isOActive();
+
+    // DFT still requires physical pin (local safety device)
+    if (dft == nullptr) {
         return;
     }
 
     State newState = State::OFF;
 
-    if (_softwareDefrost && y->isActive() && !o->isActive()) {
+    if (_softwareDefrost && yActive && !oActive) {
         newState = State::DEFROST;
-    } else if (_softwareDefrost && y->isActive() && o->isActive()) {
+    } else if (_softwareDefrost && yActive && oActive) {
         // Thermostat switched to COOL during pending defrost — cancel defrost
         Log.info("HP", "COOL mode requested during defrost, cancelling defrost and clearing heat runtime");
         OutPin* cnt = getOutput("CNT");
@@ -689,9 +691,9 @@ void GoodmanHP::updateState() {
         _defrostExiting = false;
         resetHeatRuntime();
         newState = State::COOL;
-    } else if (y->isActive() && o->isActive()) {
+    } else if (yActive && oActive) {
         newState = State::COOL;
-    } else if (y->isActive()) {
+    } else if (yActive) {
         // If _softwareDefrost is set, re-enter DEFROST is handled above
         newState = State::HEAT;
     }
@@ -801,7 +803,7 @@ void GoodmanHP::updateState() {
             if (newState == State::DEFROST) {
                 fan->turnOff();
                 Log.info("HP", "FAN turned OFF for DEFROST mode");
-            } else if (oldState == State::DEFROST && y->isActive() && !_defrostExiting && !_coolTransition) {
+            } else if (oldState == State::DEFROST && yActive && !_defrostExiting && !_coolTransition) {
                 // Leaving defrost with Y still active and no transition pending
                 fan->turnOn();
                 Log.info("HP", "FAN turned ON (defrost complete, Y active)");
@@ -827,13 +829,41 @@ const char* GoodmanHP::getStateString() {
 }
 
 bool GoodmanHP::isYActive() {
+    if (_canMode) {
+        // Timeout safety: if CAN messages stop, shut down
+        if (millis() - _canLastRxTick > CAN_TIMEOUT_MS) return false;
+        return _canYActive;
+    }
     InputPin* y = getInput("Y");
     return y != nullptr && y->isActive();
 }
 
 bool GoodmanHP::isOActive() {
+    if (_canMode) {
+        if (millis() - _canLastRxTick > CAN_TIMEOUT_MS) return false;
+        return _canOActive;
+    }
     InputPin* o = getInput("O");
     return o != nullptr && o->isActive();
+}
+
+void GoodmanHP::setCANMode(bool enabled) {
+    _canMode = enabled;
+    Log.info("HP", "CAN mode %s", enabled ? "enabled" : "disabled");
+}
+
+bool GoodmanHP::isCANMode() const {
+    return _canMode;
+}
+
+void GoodmanHP::setCANInputState(bool yActive, bool oActive) {
+    _canYActive = yActive;
+    _canOActive = oActive;
+    _canLastRxTick = millis();
+}
+
+uint32_t GoodmanHP::getCANLastRxTick() const {
+    return _canLastRxTick;
 }
 
 bool GoodmanHP::isLPSActive() {
@@ -1735,8 +1765,7 @@ void GoodmanHP::checkDefrostNeeded() {
     uint32_t now = millis();
 
     // Safety: abort any defrost/exit sequence if Y is not active
-    InputPin* yPin = getInput("Y");
-    bool yActive = (yPin != nullptr && yPin->isActive());
+    bool yActive = isYActive();
     if (!yActive && (_defrostExiting || _defrostTransition || _defrostCntPending)) {
         if (_defrostExiting || _defrostTransition || _defrostCntPending) {
             OutPin* w = getOutput("W");
@@ -1918,8 +1947,7 @@ void GoodmanHP::stopSoftwareDefrost() {
     OutPin* fan = getOutput("FAN");
 
     // Safety: if Y is not active, just clean up — no exit transition
-    InputPin* y = getInput("Y");
-    if (y == nullptr || !y->isActive()) {
+    if (!isYActive()) {
         Log.info("HP", "Defrost stopped (Y inactive), no exit transition");
         if (cnt != nullptr) { cnt->turnOff(); _cntActivated = false; }
         if (fan != nullptr) fan->turnOff();

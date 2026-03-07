@@ -24,6 +24,7 @@
 #include "OtaUtils.h"
 #include <max6675.h>
 #include <HTTPClient.h>
+#include "CANBus.h"
 
 extern const char compile_date[] = __DATE__ " " __TIME__;
 IPAddress _MQTT_HOST_DEFAULT = IPAddress(192, 168, 0, 46);
@@ -156,6 +157,11 @@ const u_int8_t _oPin = GPIO_NUM_18;
 #endif
 const u_int8_t ONE_WIRE_BUS = GPIO_NUM_21;
 
+// CAN bus
+static const gpio_num_t PIN_CAN_TX = GPIO_NUM_13;
+static const gpio_num_t PIN_CAN_RX = GPIO_NUM_14;
+CANBus canBus(&ts, PIN_CAN_TX, PIN_CAN_RX);
+
 // ProjectInfo is defined in Config.h
 
 void tempSensorUpdateCallback(TempSensor *sensor);
@@ -238,7 +244,17 @@ ProjectInfo proj = {
   "Goodman HP",       // systemName: default system name
   "goodman",          // mqttPrefix: default MQTT topic prefix
   0,                  // sessionTimeoutMinutes: disabled by default
-  2                   // pollIntervalSec: 2 second default
+  2,                  // pollIntervalSec: 2 second default
+  // Weather ambient temperature fallback — initialized from config
+  "none",              // weatherSource
+  "",                  // weatherMqttTopic
+  "",                  // weatherApiKey
+  "",                  // weatherZipCode
+  "US",                // weatherCountry
+  30,                  // weatherStaleMinutes
+  10,                  // weatherRefreshMinutes
+  0.0f,                // internalTempOffsetF
+  false                // canEnabled: off by default
 };
 
 
@@ -304,6 +320,11 @@ Task tRebootStable(REBOOT_STABLE_MS, TASK_ONCE, []() {
 // Backfill temp history from SD after NTP sync
 void onBackfillTempHistory();
 Task tBackfillTempHistory(5 * TASK_SECOND, 12, &onBackfillTempHistory, &ts, false); // retry every 5s up to 12 times (60s)
+
+// CAN bus publish task — sends state and temps every 2 seconds
+void onCanPublish();
+void onCanReceive(uint32_t id, const uint8_t* data, uint8_t len);
+Task tCanPublish(2 * TASK_SECOND, TASK_FOREVER, &onCanPublish, &ts, false);
 
 
 
@@ -1024,6 +1045,18 @@ void setup() {
     hpController.begin();
     hpController.handleBootRvHold(rvWasOnAtBoot, cntWasOnAtBoot);
 
+    // CAN bus — replaces physical Y/O inputs with CAN-provided mode when enabled
+    if (proj.canEnabled) {
+        hpController.setCANMode(true);
+        if (canBus.begin()) {
+            canBus.onReceive(onCanReceive);
+            tCanPublish.enable();
+            Log.info("MAIN", "CAN bus enabled (TX=GPIO%d RX=GPIO%d)", PIN_CAN_TX, PIN_CAN_RX);
+        } else {
+            Log.error("MAIN", "CAN bus init failed");
+        }
+    }
+
     tRuntime.enable();
     _tGetInputs.enable();
     tSaveRuntime.enable();
@@ -1329,6 +1362,104 @@ void printIdleStatus() {
   } else {
     Serial.printf("WIFI Signal: %d (%d DBm) Memory %lf\r\n ", getSignalQuality(), (int32_t)WiFi.RSSI(), ESP.getFreePsram() * MB_MULTIPLIER);
   }
+}
+
+// ---- CAN bus publish task ----
+void onCanPublish() {
+    if (!canBus.isRunning()) return;
+
+    // 0x200: HP State
+    uint8_t state = (uint8_t)hpController.getState();
+
+    uint8_t outputs = 0;
+    auto& outMap = hpController.getOutputMap();
+    if (outMap.count("FAN") && outMap["FAN"] && outMap["FAN"]->isOn()) outputs |= 0x01;
+    if (outMap.count("CNT") && outMap["CNT"] && outMap["CNT"]->isOn()) outputs |= 0x02;
+    if (outMap.count("W")   && outMap["W"]   && outMap["W"]->isOn())   outputs |= 0x04;
+    if (outMap.count("RV")  && outMap["RV"]  && outMap["RV"]->isOn())  outputs |= 0x08;
+    if (outMap.count("AUX") && outMap["AUX"] && outMap["AUX"]->isOn()) outputs |= 0x10;
+
+    uint8_t faults = 0;
+    if (hpController.isLPSFaultActive())         faults |= 0x01;
+    if (hpController.isLowTempActive())          faults |= 0x02;
+    if (hpController.isCompressorOverTempActive()) faults |= 0x04;
+    if (hpController.isSuctionLowTempActive())   faults |= 0x08;
+    if (hpController.isRvFailActive())           faults |= 0x10;
+    if (hpController.isHighSuctionTempActive())  faults |= 0x20;
+
+    uint8_t prots = 0;
+    if (hpController.isSoftwareDefrostActive())    prots |= 0x01;
+    if (hpController.isDefrostTransitionActive())  prots |= 0x02;
+    if (hpController.isDefrostCntPendingActive())  prots |= 0x04;
+    if (hpController.isDefrostExitingActive())     prots |= 0x08;
+    if (hpController.isStartupLockoutActive())     prots |= 0x10;
+    if (hpController.isShortCycleProtectionActive()) prots |= 0x20;
+    if (hpController.isManualOverrideActive())     prots |= 0x40;
+    if (hpController.isStateValidating())          prots |= 0x80;
+
+    uint16_t rtMin = hpController.getHeatRuntimeMs() / 60000;
+
+    uint8_t inputs = 0;
+    if (hpController.isLPSActive()) inputs |= 0x01;
+    if (hpController.isDFTActive()) inputs |= 0x02;
+    if (hpController.isYActive())   inputs |= 0x04;
+    if (hpController.isOActive())   inputs |= 0x08;
+
+    uint8_t bandSrc = ((uint8_t)hpController.getActiveDefrostBand() & 0x03)
+                    | (((uint8_t)hpController.getAmbientSource() & 0x03) << 2);
+
+    canBus.sendHPState(state, outputs, faults, prots, rtMin, inputs, bandSrc);
+
+    // 0x201: HP Temps (4 most critical, int16 x10)
+    auto& temps = hpController.getTempSensorMap();
+    auto packTemp = [&](const char* key) -> int16_t {
+        auto it = temps.find(key);
+        if (it == temps.end() || !it->second || !it->second->isValid()) return -9999;
+        return (int16_t)(it->second->getValue() * 10);
+    };
+    canBus.sendHPTemps(packTemp("AMBIENT_TEMP"), packTemp("CONDENSER_TEMP"),
+                       packTemp("SUCTION_TEMP"), packTemp("LIQUID_TEMP"));
+}
+
+// ---- CAN bus receive handler ----
+void onCanReceive(uint32_t id, const uint8_t* data, uint8_t len) {
+    switch (id) {
+        case CAN_ID_THERMO_STATE: {
+            // AThermostat mode -> virtual Y/O
+            if (len >= 6 && hpController.isCANMode()) {
+                uint8_t mode = data[0];  // 0=off,1=heat,2=cool,3=auto,4=fan
+                uint8_t flags = data[5];
+                bool forceNoHP = flags & 0x02;
+
+                bool yActive = false, oActive = false;
+                if (!forceNoHP) {
+                    switch (mode) {
+                        case 1: yActive = true; oActive = false; break;  // HEAT
+                        case 2: yActive = true; oActive = true;  break;  // COOL
+                        default: break;  // OFF, AUTO, FAN = no compressor
+                    }
+                }
+
+                hpController.setCANInputState(yActive, oActive);
+
+                // Force defrost from thermostat
+                if (flags & 0x04) {
+                    hpController.forceDefrost();
+                }
+            }
+            break;
+        }
+        case CAN_ID_HEARTBEAT:
+            if (len >= 5) {
+                uint8_t nodeId = data[0];
+                uint32_t uptime = ((uint32_t)data[1] << 24) | ((uint32_t)data[2] << 16)
+                                | ((uint32_t)data[3] << 8) | data[4];
+                Log.debug("CAN", "Heartbeat: node=0x%02X uptime=%lus", nodeId, uptime);
+            }
+            break;
+        default:
+            break;
+    }
 }
 
 void loop() {

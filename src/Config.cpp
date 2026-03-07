@@ -596,6 +596,10 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
                   proj.weatherZipCode.c_str(), proj.weatherCountry.c_str(),
                   proj.weatherStaleMinutes, proj.weatherRefreshMinutes);
 
+    // Load CAN bus settings
+    proj.canEnabled = doc["can"]["enabled"] | false;
+    Serial.printf("Read CAN: enabled=%d\n", proj.canEnabled);
+
     // Load admin password (encrypted same as WiFi/MQTT passwords)
     const char* adminPw = doc["admin"]["password"];
     String adminPwStr = (adminPw != nullptr && strlen(adminPw) > 0) ? String(adminPw) : "";
@@ -978,6 +982,10 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     weatherUpd["staleMinutes"] = proj.weatherStaleMinutes;
     weatherUpd["refreshMinutes"] = proj.weatherRefreshMinutes;
     weatherUpd["internalTempOffsetF"] = serialized(String(proj.internalTempOffsetF, 1));
+
+    // CAN bus
+    JsonObject canObj = doc["can"].to<JsonObject>();
+    canObj["enabled"] = proj.canEnabled;
 
     JsonObject admin = doc["admin"].to<JsonObject>();
     admin["password"] = encryptPassword(_adminPasswordHash);

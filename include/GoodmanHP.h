@@ -197,6 +197,12 @@ class GoodmanHP {
     float getSubcoolingF() const;
     bool isSubcoolingValid() const;
 
+    // CAN mode — replace physical Y/O with CAN-provided mode
+    void setCANMode(bool enabled);
+    bool isCANMode() const;
+    void setCANInputState(bool yActive, bool oActive);
+    uint32_t getCANLastRxTick() const;
+
     void restoreSoftwareDefrost();
 
     void setStateChangeCallback(StateChangeCallback cb);
@@ -282,6 +288,13 @@ class GoodmanHP {
     uint32_t _stateValidationStart;
     uint32_t _stateValidationMs;  // default 30000
     uint32_t _lastValidationLogTick;
+
+    // CAN mode — virtual Y/O from CAN bus
+    bool _canMode = false;
+    bool _canYActive = false;
+    bool _canOActive = false;
+    uint32_t _canLastRxTick = 0;
+    static const uint32_t CAN_TIMEOUT_MS = 10000;  // 10s safe shutdown if CAN lost
 
     bool _manualOverride;
     uint32_t _manualOverrideStart;

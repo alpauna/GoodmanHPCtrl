@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Embedded HVAC controller for Goodman heatpumps (cooling, heating, defrost modes) running on ESP32. Controls 4 relay outputs (FAN, CNT, W, RV) based on 4 input signals (LPS, DFT, Y, O), up to 6 OneWire temperature sensors (COMPRESSOR, SUCTION, AMBIENT, CONDENSER, LIQUID, VAPOR), and 1 MCP9600 I2C thermocouple (LIQUID fallback). Provides a REST API, WebSocket, and MQTT interface for remote monitoring and control.
+Embedded HVAC controller for Goodman heatpumps (cooling, heating, defrost modes) running on ESP32. Controls 4 relay outputs (FAN, CNT, W, RV) based on 4 input signals (LPS, DFT, Y, O), up to 6 OneWire temperature sensors (COMPRESSOR, SUCTION, AMBIENT, CONDENSER, LIQUID, VAPOR), and 1 MCP9600 I2C thermocouple (LIQUID fallback). Provides a REST API, WebSocket, MQTT, and CAN bus interface for remote monitoring and control.
 
 ## Build Commands
 
@@ -40,12 +40,14 @@ pio test -e freenove_esp32_s3_wroom
 | `src/Logger.cpp` | Multi-output logging with tar.gz rotation |
 | `src/Config.cpp` | SD card and configuration management implementation |
 | `src/TempSensor.cpp` | Temperature sensor class implementation |
+| `src/CANBus.cpp` | CAN bus (TWAI) driver, message send/receive, heartbeat |
 | `include/GoodmanHP.h` | GoodmanHP class with input/output pin maps |
 | `include/OutPin.h` | OutPin class, OutputPinCallback typedef |
 | `include/InputPin.h` | InputPin class, InputResistorType/InputPinType enums, InputPinCallback typedef |
 | `include/Logger.h` | Logger class |
 | `include/Config.h` | Config class for SD card and JSON configuration |
 | `include/TempSensor.h` | TempSensor class for OneWire temperature sensors |
+| `include/CANBus.h` | CANBus class for ESP32 TWAI CAN bus communication |
 | `src/WebHandler.cpp` | Web server and REST API implementation |
 | `include/WebHandler.h` | WebHandler class declaration |
 | `src/MQTTHandler.cpp` | MQTT client, callbacks, and reconnect logic |
@@ -70,6 +72,9 @@ Task-based cooperative scheduling using TaskScheduler with two scheduler instanc
 | `tAPReconnect` | `apFallbackSeconds` | WiFi reconnect attempts while in AP mode (disabled by default) |
 | `tFetchWeather` | configurable (default 10min) | Fetch outdoor temp from OpenWeatherMap HTTP API (disabled when source != "http") |
 | `tFailoverTestEnd` | 30min x1 | One-shot: ends ambient failover test after 30 minutes |
+| `tCanPublish` | 2s | Publish HP state (0x200) and temps (0x201) on CAN bus (enabled when `can.enabled = true`) |
+| CAN `_tPoll` | 10ms | Poll TWAI RX queue for incoming CAN messages (internal to CANBus class) |
+| CAN `_tHeartbeat` | 5s | Send CAN heartbeat (0x3FF, node 0x03) (internal to CANBus class) |
 
 ### Memory Management
 
@@ -120,7 +125,8 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
   - **Output state validation**: Every 10s, `validateOutputStates()` verifies outputs against a table-driven expected-state map. Global invariants: W off when O active, CNT off during faults, CNT off when no ambient data available. Per-state table with auto-correction. Logs errors on mismatch, "State check OK" every 30s when clean. Skips during transitions/lockout/override
   - **Ambient temperature fallback (3-tier)**: When AMBIENT_TEMP sensor is invalid, `_tskCheckTemps` (10s) uses cached weather data if fresh, otherwise falls back to ESP32 internal die temp (`temperatureRead()`). `enum class AmbientSource { SENSOR, WEATHER, INTERNAL }` tracks current source. Weather data cached in `_weatherTempF` with staleness timeout (`_weatherStaleMs`, default 30 min). Sources: MQTT subscription (plain float payload) or OpenWeatherMap HTTP API (`tFetchWeather`, configurable interval, default 10 min). `setAmbientFailoverTest(bool)` forces sensor invalid for testing (30 min auto-cancel via `tFailoverTestEnd`). State validator enforces CNT OFF when no ambient data available (sensor invalid + no weather). `ambientSource`, `weatherTempF`, `weatherTempAgeSec`, `failoverTest` in `/state` JSON.
   - **Subcooling calculation**: `getSubcoolingF()` returns `CONDENSER_TEMP - LIQUID_TEMP` (how much refrigerant has subcooled past saturation). `isSubcoolingValid()` returns true when both sensors are valid and compressor is running (HEAT, COOL, or DEFROST). Relevant for TXV systems. `subcoolingF` included in `/state` JSON when valid.
-  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `restoreSoftwareDefrost()`, `isDefrostTransitionActive()`, `isDefrostCntPendingActive()`, `isDefrostExitingActive()`, `getDefrostTransitionRemainingMs()`, `getDefrostCntPendingRemainingMs()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `isLowTempPendingEntry()`, `isLowTempPendingExit()`, `getLowTempPendingRemainingMs()`, `setLowTempThreshold()`, `getLowTempThreshold()`, `setColdMaxTempF()`, `getColdMaxTempF()`, `setWarmMinTempF()`, `getWarmMinTempF()`, `setDefrostBand()`, `getDefrostBand()`, `getActiveDefrostBand()`, `getActiveDefrostBandString()`, `getActiveRuntimeThresholdMs()`, `getActiveMinRuntimeMs()`, `getActiveExitTempF()`, `isStateValidating()`, `getStateValidationRemainingMs()`, `setStateValidationMs()`, `getStateValidationMs()`, `getSubcoolingF()`, `isSubcoolingValid()`
+  - **CAN bus mode**: When `can.enabled` is true in config, `isYActive()` and `isOActive()` return CAN-derived values from `setCANInputState()` instead of physical pin states. DFT and LPS always remain physical (local safety devices). 10-second CAN timeout: if no 0x100 message received for 10s, `isYActive()` returns false for safe shutdown. CAN mode is config-only (requires save + reboot). Methods: `setCANMode()`, `isCANMode()`, `setCANInputState()`, `getCANLastRxTick()`
+  - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `restoreSoftwareDefrost()`, `isDefrostTransitionActive()`, `isDefrostCntPendingActive()`, `isDefrostExitingActive()`, `getDefrostTransitionRemainingMs()`, `getDefrostCntPendingRemainingMs()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `isLowTempPendingEntry()`, `isLowTempPendingExit()`, `getLowTempPendingRemainingMs()`, `setLowTempThreshold()`, `getLowTempThreshold()`, `setColdMaxTempF()`, `getColdMaxTempF()`, `setWarmMinTempF()`, `getWarmMinTempF()`, `setDefrostBand()`, `getDefrostBand()`, `getActiveDefrostBand()`, `getActiveDefrostBandString()`, `getActiveRuntimeThresholdMs()`, `getActiveMinRuntimeMs()`, `getActiveExitTempF()`, `isStateValidating()`, `getStateValidationRemainingMs()`, `setStateValidationMs()`, `getStateValidationMs()`, `getSubcoolingF()`, `isSubcoolingValid()`, `setCANMode()`, `isCANMode()`, `setCANInputState()`, `getCANLastRxTick()`
 - **OutPin** (`OutPin.h/cpp`): Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
 - **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, and confirmed-state debouncing. `isActive()` returns the debounced/validated state (not live GPIO). On pin change: ISR queues event → `_tGetInputs` (500ms) reads live GPIO and starts a configurable delay task (default 10s) → after delay, GPIO is re-read to validate the pin is still in the expected state. Mismatches are discarded as false triggers and logged as warnings. Both activation and deactivation go through the full delay. Configurable via `heatpump.inputDelay.ms` (0–60s, live). Methods: `readLiveState()` (bypass debounce), `setDelay(ms)`, `getDelay()`, `setPendingState()`.
 - **TempSensor** (`TempSensor.h/cpp`): Temperature sensor wrapper with encapsulated state and callbacks. Supports OneWire (via `update()`) and external sources like MCP9600 I2C thermocouple (via `updateValue()`):
@@ -141,6 +147,7 @@ Inputs: LPS=GPIO15, DFT=GPIO16, Y=GPIO17, O=GPIO18
 Outputs: FAN=GPIO4, CNT=GPIO5 (3s delay), W=GPIO6, RV=GPIO7
 OneWire bus: GPIO21
 I2C: SDA=GPIO8, SCL=GPIO9 — MCP9600 thermocouple amplifier at 0x67 (LIQUID_TEMP)
+CAN bus: TX=GPIO13, RX=GPIO14 — ESP32 TWAI at 250 kbps (enabled via `can.enabled` config)
 
 ### Networking
 
@@ -153,6 +160,15 @@ I2C: SDA=GPIO8, SCL=GPIO9 — MCP9600 thermocouple amplifier at 0x67 (LIQUID_TEM
   - `goodman/state` — state + inputs/outputs as JSON, published on state transitions. Format: `{"state":"HEAT","inputs":{...},"outputs":{...},"heatRuntimeMin":42,"defrostBand":"Mid","defrostBandThresholdMin":60,"defrost":false,"defrostTransition":false,"defrostCntPending":false,"defrostExiting":false,"lpsFault":false,"lowTemp":false}`
   - `goodman/fault` — fault events as JSON, published when faults activate/clear. Format: `{"fault":"LPS","message":"Low refrigerant pressure","active":true}`
   - Configurable weather topic subscription (e.g., `homeassistant/sensor/outdoor_temp/state`) — parses plain float payload as outdoor temp for ambient fallback
+- **CAN bus** (`CANBus` class wrapping ESP32 TWAI driver) at 250 kbps on GPIO13 (TX) / GPIO14 (RX), node 0x03 (HP_CTRL)
+  - `0x200` (TX, 2s) — HP state: state enum, output bits, fault bits, protection bits, heat runtime, input bits, defrost band + ambient source
+  - `0x201` (TX, 2s) — HP temps: AMBIENT, CONDENSER, SUCTION, LIQUID as int16×10 (big-endian), -9999 = invalid
+  - `0x3FF` (TX, 5s) — Heartbeat: node ID + uptime seconds
+  - `0x100` (RX) — Thermostat state from AThermostat: mode, setpoints, flags. When CAN mode enabled, maps thermostat mode to virtual Y/O inputs (HEAT→Y=true/O=false, COOL→Y=true/O=true, OFF/FAN→Y=false/O=false). `forceNoHP` flag overrides all to Y=false/O=false. `defrost` flag triggers `forceDefrost()`
+  - 10-second CAN timeout safety: if no 0x100 received, `isYActive()` returns false → system goes OFF
+  - DFT and LPS always physical — never virtualized over CAN
+  - Enabled via `can.enabled` in config JSON (default false, requires reboot)
+  - See `docs/canbus-goodmanhp-implementation.md` for full byte layout details
 
 ### Configuration
 
@@ -202,6 +218,7 @@ struct ProjectInfo {
     String weatherCountry;       // Country code (default "US")
     uint32_t weatherStaleMinutes; // Max age before cached weather expires (default 30)
     uint32_t weatherRefreshMinutes; // HTTP fetch interval in minutes (default 10, range 1-60)
+    bool canEnabled;             // Enable CAN bus for thermostat communication (default false)
 };
 ```
 
@@ -265,6 +282,7 @@ JSON config stored on SD card at `/config.txt` (Arduino SD library, SPI interfac
   },
   "tempHistory": { "intervalSec": 120 },
   "weather": { "source": "none", "mqttTopic": "", "apiKey": "", "zipCode": "", "country": "US", "staleMinutes": 30, "refreshMinutes": 10 },
+  "can": { "enabled": false },
   "ui": { "theme": "dark" },
   "admin": { "password": "" },
   "sensors": { "temp": { ... } }
@@ -336,7 +354,9 @@ enum AC_STATE { OFF, COOL, HEAT, DEFROST, ERROR, LOW_TEMP }
 
 ### Control Flow Example
 
-Y input pin ISR fires → change queued in `_isrEvent` map → `_tGetInputs` (500ms) calls `onCheckInputQueue()` → reads live GPIO, starts validation delay task (default 10s) → after delay, `Callback()` re-reads GPIO to confirm → if validated, updates `_confirmedActive` and fires `onInput()` callback → `GoodmanHP::update()` reads `isActive()` (confirmed state) and activates CNT output relay (with 3s delay on activation). If GPIO reverts during the delay, the change is discarded as a false trigger.
+**Physical input mode (default):** Y input pin ISR fires → change queued in `_isrEvent` map → `_tGetInputs` (500ms) calls `onCheckInputQueue()` → reads live GPIO, starts validation delay task (default 10s) → after delay, `Callback()` re-reads GPIO to confirm → if validated, updates `_confirmedActive` and fires `onInput()` callback → `GoodmanHP::update()` reads `isActive()` (confirmed state) and activates CNT output relay (with 3s delay on activation). If GPIO reverts during the delay, the change is discarded as a false trigger.
+
+**CAN bus mode (`can.enabled = true`):** TWAI poll task (10ms) receives 0x100 from AThermostat → `onCanReceive()` maps thermostat mode to Y/O booleans → `setCANInputState(yActive, oActive)` stores values and updates `_canLastRxTick` → `GoodmanHP::update()` calls `isYActive()`/`isOActive()` which return CAN-derived values → normal state machine proceeds. If no 0x100 for 10s, `isYActive()` returns false → safe shutdown. DFT/LPS still use physical pins.
 
 ### GoodmanHP Initialization
 
