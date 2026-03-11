@@ -33,6 +33,12 @@ class MQTTHandler {
     String _topicPrefix = "goodman";
     String _weatherTopic;
 
+    // Exponential backoff for reconnect
+    uint32_t _reconnectIntervalSec = 10;    // Current interval (grows on failure)
+    static constexpr uint32_t RECONNECT_MIN_SEC = 10;
+    static constexpr uint32_t RECONNECT_MAX_SEC = 300; // Cap at 5 minutes
+    uint32_t _consecutiveFailures = 0;
+
     void onConnect(bool sessionPresent);
     void onDisconnect(AsyncMqttClientDisconnectReason reason);
     void onSubscribe(uint16_t packetId, uint8_t qos);

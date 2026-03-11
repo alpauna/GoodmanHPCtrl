@@ -29,13 +29,24 @@ void MQTTHandler::begin(const IPAddress& host, uint16_t port,
     _client.setServer(host, port);
     _client.setCredentials(user.c_str(), password.c_str());
 
-    _tReconnect = new Task(10 * TASK_SECOND, TASK_FOREVER, [this]() {
+    _tReconnect = new Task(RECONNECT_MIN_SEC * TASK_SECOND, TASK_FOREVER, [this]() {
         if (_client.connected()) {
             _tReconnect->disable();
             return;
         }
-        Log.info("MQTT", "Connecting to MQTT...");
+        _consecutiveFailures++;
+
+        // Exponential backoff: double interval on each attempt, cap at max
+        uint32_t nextInterval = _reconnectIntervalSec * 2;
+        if (nextInterval > RECONNECT_MAX_SEC)
+            nextInterval = RECONNECT_MAX_SEC;
+
+        Log.info("MQTT", "Connecting to MQTT... (attempt %u, next retry %us)",
+                 _consecutiveFailures, nextInterval);
         _client.connect();
+
+        _reconnectIntervalSec = nextInterval;
+        _tReconnect->setInterval(_reconnectIntervalSec * TASK_SECOND);
     }, _ts, false);
 }
 
@@ -143,7 +154,11 @@ void MQTTHandler::publishFault(const char* fault, const char* message, bool acti
 void MQTTHandler::onConnect(bool sessionPresent) {
     Log.info("MQTT", "Connected to MQTT (session present: %s)", sessionPresent ? "yes" : "no");
     Log.info("MQTT", "IP: %s", WiFi.localIP().toString().c_str());
+    // Reset backoff on successful connection
+    _consecutiveFailures = 0;
+    _reconnectIntervalSec = RECONNECT_MIN_SEC;
     if (_tReconnect) {
+        _tReconnect->setInterval(RECONNECT_MIN_SEC * TASK_SECOND);
         _tReconnect->disable();
     }
     // Subscribe to weather topic if configured
