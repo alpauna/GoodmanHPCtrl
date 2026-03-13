@@ -4,7 +4,7 @@
 **Severity**: High
 **Status**: Fixed
 **Affected versions**: v1.0 through v1.2-rc16
-**Fixed in**: (pending commit)
+**Fixed in**: `0ad4a02`
 
 ## Symptom
 
