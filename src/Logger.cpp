@@ -26,6 +26,7 @@ Logger::Logger()
     , _ringBufferHead(0)
     , _ringBufferCount(0)
 {
+    _mutex = xSemaphoreCreateMutex();
     _ringBuffer.resize(_ringBufferMax);
 }
 
@@ -179,6 +180,8 @@ void Logger::debug(const char* tag, const char* format, ...) {
 }
 
 void Logger::log(Level level, const char* tag, const char* format, va_list args) {
+    if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return;
+
     char msgBuffer[384];
     vsnprintf(msgBuffer, sizeof(msgBuffer), format, args);
 
@@ -207,6 +210,46 @@ void Logger::log(Level level, const char* tag, const char* format, va_list args)
     if (_wsEnabled) {
         writeToWebSocket(_buffer);
     }
+
+    xSemaphoreGive(_mutex);
+}
+
+String Logger::getLogJson(size_t limit) const {
+    // Snapshot entries under mutex to avoid race with addToRingBuffer
+    std::vector<String> entries;
+    if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+        size_t count = _ringBufferCount;
+        if (limit == 0 || limit > count) limit = count;
+        size_t startOffset = count - limit;
+        entries.reserve(limit);
+        for (size_t i = 0; i < limit; i++) {
+            size_t idx = (_ringBufferHead + _ringBuffer.size() - count + startOffset + i) % _ringBuffer.size();
+            entries.push_back(_ringBuffer[idx]);
+        }
+        xSemaphoreGive(_mutex);
+    }
+
+    // Build JSON outside mutex
+    String json = "{\"count\":" + String(entries.size()) + ",\"entries\":[";
+    for (size_t i = 0; i < entries.size(); i++) {
+        if (i > 0) json += ",";
+        json += "\"";
+        const String& entry = entries[i];
+        for (size_t j = 0; j < entry.length(); j++) {
+            char c = entry[j];
+            switch (c) {
+                case '"':  json += "\\\""; break;
+                case '\\': json += "\\\\"; break;
+                case '\n': json += "\\n"; break;
+                case '\r': json += "\\r"; break;
+                case '\t': json += "\\t"; break;
+                default:   json += c; break;
+            }
+        }
+        json += "\"";
+    }
+    json += "]}";
+    return json;
 }
 
 void Logger::writeToSerial(const char* msg) {

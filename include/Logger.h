@@ -7,6 +7,7 @@ class AsyncWebSocket;  // forward declaration — full include in Logger.cpp
 #include <SD.h>
 #include <ESP32-targz.h>
 #include <vector>
+#include <freertos/semphr.h>
 
 class Logger {
 public:
@@ -37,6 +38,7 @@ public:
     const std::vector<String>& getRingBuffer() const;
     size_t getRingBufferHead() const;
     size_t getRingBufferCount() const;
+    String getLogJson(size_t limit = 0) const;
 
     void enableSerial(bool enable);
     void enableMqtt(bool enable);
@@ -80,6 +82,7 @@ private:
     size_t _ringBufferMax;
     size_t _ringBufferHead;
     size_t _ringBufferCount;
+    mutable SemaphoreHandle_t _mutex;
 
     char _buffer[512];
 };

@@ -1761,8 +1761,7 @@ static esp_err_t rootGetHandler(httpd_req_t* req) {
 // --- Log handler (proxy to ring buffer) ---
 
 static esp_err_t logGetHandler(httpd_req_t* req) {
-    size_t count = Log.getRingBufferCount();
-    size_t limit = count;
+    size_t limit = 0;
 
     size_t qLen = httpd_req_get_url_query_len(req);
     if (qLen > 0) {
@@ -1770,39 +1769,13 @@ static esp_err_t logGetHandler(httpd_req_t* req) {
         if (qBuf && httpd_req_get_url_query_str(req, qBuf, qLen + 1) == ESP_OK) {
             char val[16] = {};
             if (httpd_query_key_value(qBuf, "limit", val, sizeof(val)) == ESP_OK) {
-                size_t l = atoi(val);
-                if (l < limit) limit = l;
+                limit = atoi(val);
             }
         }
         free(qBuf);
     }
 
-    const auto& buffer = Log.getRingBuffer();
-    size_t head = Log.getRingBufferHead();
-    size_t bufSize = buffer.size();
-    size_t startOffset = count - limit;
-
-    String json = "{\"count\":" + String(limit) + ",\"entries\":[";
-    for (size_t i = 0; i < limit; i++) {
-        size_t idx = (head + bufSize - count + startOffset + i) % bufSize;
-        if (i > 0) json += ",";
-        json += "\"";
-        const String& entry = buffer[idx];
-        for (size_t j = 0; j < entry.length(); j++) {
-            char c = entry[j];
-            switch (c) {
-                case '"':  json += "\\\""; break;
-                case '\\': json += "\\\\"; break;
-                case '\n': json += "\\n"; break;
-                case '\r': json += "\\r"; break;
-                case '\t': json += "\\t"; break;
-                default:   json += c; break;
-            }
-        }
-        json += "\"";
-    }
-    json += "]}";
-
+    String json = Log.getLogJson(limit);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json.c_str(), json.length());
     return ESP_OK;
