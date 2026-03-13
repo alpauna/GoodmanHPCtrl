@@ -76,6 +76,13 @@ struct ProjectInfo {
     String mqttPrefix;               // MQTT topic prefix (default "goodman"), topics: prefix/temps, prefix/state, etc.
     uint32_t sessionTimeoutMinutes;  // Session timeout in minutes (0=disabled/Basic Auth, default 0)
     uint8_t pollIntervalSec;         // Dashboard/pins polling interval in seconds (1-10, default 2)
+    // Current monitoring (ADS1115 CT clamp)
+    float compressorOvercurrentAmps; // Compressor overcurrent threshold in amps (0 = disabled)
+    float fanOvercurrentAmps;        // Fan overcurrent threshold in amps (0 = disabled)
+    uint32_t overcurrentDelayMs;     // How long overcurrent must persist before fault (default 5000)
+    float lockedRotorThreshold;      // Locked rotor current threshold in amps (0 = disabled)
+    uint32_t lockedRotorTimeoutMs;   // Max inrush settle time before locked rotor fault (default 5000)
+    bool lockedRotorFault;           // Latched locked rotor fault (persisted, like rvFail)
     // Weather ambient temperature fallback
     String weatherSource;            // "none", "mqtt", or "http" (default "none")
     String weatherMqttTopic;         // MQTT topic for weather temp (e.g., "homeassistant/sensor/outdoor_temp/state")

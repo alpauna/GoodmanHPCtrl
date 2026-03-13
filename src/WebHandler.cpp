@@ -622,6 +622,15 @@ void WebHandler::setupRoutes() {
                 temps[m.first] = m.second->getValue();
         }
 
+        // Current sensors
+        JsonObject current = doc["current"].to<JsonObject>();
+        for (const auto& m : _hpController->getCurrentSensorMap()) {
+            if (m.second != nullptr && m.second->isValid())
+                current[m.first] = serialized(String(m.second->getRMSAmps(), 1));
+        }
+        doc["overcurrent"] = _hpController->isOvercurrentActive();
+        doc["lockedRotor"] = _hpController->isLockedRotorActive();
+
         String json;
         serializeJson(doc, json);
         request->send(200, "application/json", json);
@@ -779,6 +788,15 @@ void WebHandler::setupRoutes() {
             doc["failoverTest"] = _hpController->isAmbientFailoverTestActive();
             doc["stateValidating"] = _hpController->isStateValidating();
             doc["stateValidationRemainSec"] = _hpController->getStateValidationRemainingMs() / 1000;
+            doc["overcurrent"] = _hpController->isOvercurrentActive();
+            doc["lockedRotor"] = _hpController->isLockedRotorActive();
+
+            // Current sensors
+            JsonObject currentObj = doc["current"].to<JsonObject>();
+            for (const auto& m : _hpController->getCurrentSensorMap()) {
+                if (m.second != nullptr && m.second->isValid())
+                    currentObj[m.first] = serialized(String(m.second->getRMSAmps(), 1));
+            }
 
             JsonArray inputs = doc["inputs"].to<JsonArray>();
             for (auto& pair : _hpController->getInputMap()) {

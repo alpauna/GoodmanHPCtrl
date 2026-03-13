@@ -270,6 +270,13 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["safeMode"] = ctx->safeMode ? *(ctx->safeMode) : false;
         doc["sessionTimeoutMinutes"] = proj->sessionTimeoutMinutes;
         doc["pollIntervalSec"] = proj->pollIntervalSec;
+        // Current monitoring
+        doc["compressorOvercurrentAmps"] = proj->compressorOvercurrentAmps;
+        doc["fanOvercurrentAmps"] = proj->fanOvercurrentAmps;
+        doc["overcurrentDelaySec"] = proj->overcurrentDelayMs / 1000;
+        doc["lockedRotorThreshold"] = proj->lockedRotorThreshold;
+        doc["lockedRotorTimeoutSec"] = proj->lockedRotorTimeoutMs / 1000;
+        doc["lockedRotorFault"] = proj->lockedRotorFault;
         // Weather ambient fallback
         doc["weatherSource"] = proj->weatherSource.length() > 0 ? proj->weatherSource : "none";
         doc["weatherMqttTopic"] = proj->weatherMqttTopic;
@@ -533,6 +540,49 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
     if (clearRvFail) {
         ctx->hpController->clearRvFail();
         proj->rvFail = false;
+    }
+
+    // Current monitoring settings (live)
+    float compOC = data["compressorOvercurrentAmps"] | proj->compressorOvercurrentAmps;
+    if (compOC != proj->compressorOvercurrentAmps) {
+        proj->compressorOvercurrentAmps = compOC;
+        CurrentSensor* cs = ctx->hpController->getCurrentSensor("COMPRESSOR_CURRENT");
+        if (cs) cs->setOvercurrentThreshold(compOC);
+    }
+    float fanOC = data["fanOvercurrentAmps"] | proj->fanOvercurrentAmps;
+    if (fanOC != proj->fanOvercurrentAmps) {
+        proj->fanOvercurrentAmps = fanOC;
+        CurrentSensor* fs = ctx->hpController->getCurrentSensor("FAN_CURRENT");
+        if (fs) fs->setOvercurrentThreshold(fanOC);
+    }
+    uint32_t ocDelaySec = data["overcurrentDelaySec"] | (int)(proj->overcurrentDelayMs / 1000);
+    uint32_t ocDelayMs = ocDelaySec * 1000UL;
+    if (ocDelayMs != proj->overcurrentDelayMs) {
+        proj->overcurrentDelayMs = ocDelayMs;
+        for (auto& p : ctx->hpController->getCurrentSensorMap()) {
+            if (p.second) p.second->setOvercurrentDelayMs(ocDelayMs);
+        }
+    }
+    float lrThresh = data["lockedRotorThreshold"] | proj->lockedRotorThreshold;
+    if (lrThresh != proj->lockedRotorThreshold) {
+        proj->lockedRotorThreshold = lrThresh;
+        CurrentSensor* cs = ctx->hpController->getCurrentSensor("COMPRESSOR_CURRENT");
+        if (cs) cs->setLockedRotorThreshold(lrThresh);
+    }
+    uint32_t lrTimeoutSec = data["lockedRotorTimeoutSec"] | (int)(proj->lockedRotorTimeoutMs / 1000);
+    uint32_t lrTimeoutMs = lrTimeoutSec * 1000UL;
+    if (lrTimeoutMs != proj->lockedRotorTimeoutMs) {
+        proj->lockedRotorTimeoutMs = lrTimeoutMs;
+        CurrentSensor* cs = ctx->hpController->getCurrentSensor("COMPRESSOR_CURRENT");
+        if (cs) cs->setLockedRotorTimeoutMs(lrTimeoutMs);
+    }
+    // Clear locked rotor fault
+    bool clearLockedRotor = data["clearLockedRotor"] | false;
+    if (clearLockedRotor) {
+        for (auto& p : ctx->hpController->getCurrentSensorMap()) {
+            if (p.second) p.second->clearLockedRotor();
+        }
+        proj->lockedRotorFault = false;
     }
 
     // AP fallback timeout (live)
@@ -1370,6 +1420,15 @@ static esp_err_t stateGetHandler(httpd_req_t* req) {
             temps[m.first] = m.second->getValue();
     }
 
+    // Current sensors
+    JsonObject current = doc["current"].to<JsonObject>();
+    for (const auto& m : ctx->hpController->getCurrentSensorMap()) {
+        if (m.second != nullptr && m.second->isValid())
+            current[m.first] = serialized(String(m.second->getRMSAmps(), 1));
+    }
+    doc["overcurrent"] = ctx->hpController->isOvercurrentActive();
+    doc["lockedRotor"] = ctx->hpController->isLockedRotorActive();
+
     String json;
     serializeJson(doc, json);
     httpd_resp_set_type(req, "application/json");
@@ -1432,6 +1491,15 @@ static esp_err_t pinsGetHandler(httpd_req_t* req) {
         for (const auto& m : ctx->hpController->getTempSensorMap()) {
             if (m.second != nullptr && m.second->isValid())
                 temps[m.first] = m.second->getValue();
+        }
+
+        // Current sensors
+        doc["overcurrent"] = ctx->hpController->isOvercurrentActive();
+        doc["lockedRotor"] = ctx->hpController->isLockedRotorActive();
+        JsonObject currentObj = doc["current"].to<JsonObject>();
+        for (const auto& m : ctx->hpController->getCurrentSensorMap()) {
+            if (m.second != nullptr && m.second->isValid())
+                currentObj[m.first] = serialized(String(m.second->getRMSAmps(), 1));
         }
 
         String json;

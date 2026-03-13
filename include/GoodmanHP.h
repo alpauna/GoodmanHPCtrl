@@ -9,6 +9,7 @@
 #include "InputPin.h"
 #include "OutPin.h"
 #include "TempSensor.h"
+#include "CurrentSensor.h"
 
 class GoodmanHP {
   public:
@@ -84,6 +85,15 @@ class GoodmanHP {
     TempSensor* getTempSensor(const String& name);
     TempSensorMap& getTempSensorMap();
     void clearTempSensors();
+
+    // Current sensor management
+    void setADS1115(Adafruit_ADS1115* ads) { _ads1115 = ads; }
+    void addCurrentSensor(const String& name, CurrentSensor* sensor);
+    CurrentSensor* getCurrentSensor(const String& name);
+    CurrentSensorMap& getCurrentSensorMap();
+    void readCurrentSensors();
+    bool isOvercurrentActive() const;
+    bool isLockedRotorActive() const;
 
     State getState();
     const char* getStateString();
@@ -218,6 +228,10 @@ class GoodmanHP {
     std::map<String, OutPin*> _outputMap;
     TempSensorMap _tempSensorMap;
 
+    // Current sensors (ADS1115 ADC)
+    Adafruit_ADS1115* _ads1115;
+    CurrentSensorMap _currentSensorMap;
+
     State _state;
     uint32_t _yActiveStartTick;
     bool _yWasActive;
@@ -305,6 +319,7 @@ class GoodmanHP {
 
     DefrostBandName selectDefrostBand();
     void checkLPSFault();
+    void checkCurrentProtections();
     void checkAmbientTemp();
     void checkCompressorTemp();
     void checkSuctionTemp();

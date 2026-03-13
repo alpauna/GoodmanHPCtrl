@@ -4,11 +4,13 @@
 #include "Logger.h"
 
 const char* TempHistory::sensorDirs[MAX_SENSORS] = {
-    "ambient", "compressor", "suction", "condenser", "liquid", "vapor"
+    "ambient", "compressor", "suction", "condenser", "liquid", "vapor",
+    "current_compressor", "current_fan"
 };
 
 const char* TempHistory::sensorKeys[MAX_SENSORS] = {
-    "AMBIENT_TEMP", "COMPRESSOR_TEMP", "SUCTION_TEMP", "CONDENSER_TEMP", "LIQUID_TEMP", "VAPOR_TEMP"
+    "AMBIENT_TEMP", "COMPRESSOR_TEMP", "SUCTION_TEMP", "CONDENSER_TEMP", "LIQUID_TEMP", "VAPOR_TEMP",
+    "COMPRESSOR_CURRENT", "FAN_CURRENT"
 };
 
 void TempHistory::begin() {

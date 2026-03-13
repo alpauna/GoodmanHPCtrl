@@ -85,6 +85,8 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <span class='pill ok' id='fRvFail'>RV Pass</span><button class='btn-clear' id='clearRvFailBtn' style='display:none' onclick='clearRvFail()'>Clear</button>
 <span class='pill ok' id='fAmbFallback'>Amb Sensor</span>
 <span class='pill ok' id='fStateHold'>State Check Hold</span>
+<span class='pill ok' id='fOvercurrentP'>OC Ok</span>
+<span class='pill ok' id='fLockedRotorP'>LR Ok</span>
 </div>
 </div>
 
@@ -113,6 +115,18 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <h3>Temperatures</h3>
 <div id='temps'>
 <div class='temp-row'><span class='temp-name'>Loading...</span></div>
+</div>
+</div>
+
+<div class='card'>
+<h3>Current Monitoring</h3>
+<div class='grid'>
+<div class='indicator'><span class='label'>Compressor</span><span class='val' id='vCompAmps'>-- A</span></div>
+<div class='indicator'><span class='label'>Fan</span><span class='val' id='vFanAmps'>-- A</span></div>
+</div>
+<div class='fault-row' style='margin-top:8px'>
+<span class='pill ok' id='fOvercurrent'>Current Ok</span>
+<span class='pill ok' id='fLockedRotor'>Rotor Ok</span><button class='btn-clear' id='clearLockedRotorBtn' style='display:none' onclick='clearLockedRotor()'>Clear</button>
 </div>
 </div>
 
@@ -153,7 +167,8 @@ var stateColors={
 var tempNames={
   'COMPRESSOR_TEMP':'Compressor','SUCTION_TEMP':'Suction',
   'AMBIENT_TEMP':'Ambient','CONDENSER_TEMP':'Condenser','LIQUID_TEMP':'Liquid Line',
-  'VAPOR_TEMP':'Vapor Line'
+  'VAPOR_TEMP':'Vapor Line',
+  'COMPRESSOR_CURRENT':'Comp Current (A)','FAN_CURRENT':'Fan Current (A)'
 };
 
 function setDot(id,on){
@@ -173,6 +188,14 @@ function clearRvFail(){
   fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clearRvFail:true})}).then(function(r){return r.json();}).then(function(){
     var btn=document.getElementById('clearRvFailBtn');if(btn)btn.style.display='none';
     setPill('fRvFail',false);
+  });
+}
+function clearLockedRotor(){
+  if(!confirm('Clear Locked Rotor fault?'))return;
+  fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clearLockedRotor:true})}).then(function(r){return r.json();}).then(function(){
+    var btn=document.getElementById('clearLockedRotorBtn');if(btn)btn.style.display='none';
+    var el=document.getElementById('fLockedRotor');if(el){el.textContent='Rotor Ok';el.className='pill ok';}
+    var el2=document.getElementById('fLockedRotorP');if(el2){el2.textContent='LR Ok';el2.className='pill ok';}
   });
 }
 
@@ -212,6 +235,9 @@ function update(d){
   setPill('fRvDFH',d.defrostTransition);
   var rvHoldEl=document.getElementById('fRvHold');if(rvHoldEl){rvHoldEl.textContent=d.rvHold&&d.rvHoldRemainSec>0?'Hold: '+d.rvHoldRemainSec+'s':'Hold';rvHoldEl.className='pill '+(d.rvHold?'active':'ok')+' sc-pill';}
   setPill('fCntDFH',d.defrostCntPending);
+  // Overcurrent / Locked Rotor protection pills
+  var ocpEl=document.getElementById('fOvercurrentP');if(ocpEl){ocpEl.textContent=d.overcurrent?'Overcurrent':'OC Ok';ocpEl.className='pill '+(d.overcurrent?'active':'ok');}
+  var lrpEl=document.getElementById('fLockedRotorP');if(lrpEl){lrpEl.textContent=d.lockedRotor?'Locked Rotor':'LR Ok';lrpEl.className='pill '+(d.lockedRotor?'active':'ok');}
 
   // Inputs
   var ins=d.inputs||{};
@@ -262,6 +288,14 @@ function update(d){
     html+="<div class='temp-row'><span class='temp-name' style='font-style:italic'>Subcooling</span><span class='temp-value'>"+parseFloat(d.subcoolingF).toFixed(1)+"&deg;F</span></div>";
   }
   tc.innerHTML=html;
+
+  // Current monitoring
+  var cur=d.current||{};
+  setText('vCompAmps',cur.COMPRESSOR_CURRENT!==undefined?parseFloat(cur.COMPRESSOR_CURRENT).toFixed(1)+' A':'-- A');
+  setText('vFanAmps',cur.FAN_CURRENT!==undefined?parseFloat(cur.FAN_CURRENT).toFixed(1)+' A':'-- A');
+  var ocEl=document.getElementById('fOvercurrent');if(ocEl){ocEl.textContent=d.overcurrent?'Overcurrent!':'Current Ok';ocEl.className='pill '+(d.overcurrent?'active':'ok');}
+  var lrEl=document.getElementById('fLockedRotor');if(lrEl){lrEl.textContent=d.lockedRotor?'Locked Rotor!':'Rotor Ok';lrEl.className='pill '+(d.lockedRotor?'active':'ok');}
+  var lrBtn=document.getElementById('clearLockedRotorBtn');if(lrBtn)lrBtn.style.display=d.lockedRotor?'inline-block':'none';
 
   // System
   setText('vCpu0',d.cpuLoad0!==undefined?d.cpuLoad0+'%':'--%');
@@ -323,7 +357,9 @@ var chartSensors=[
   {key:'SUCTION_TEMP',dir:'suction',color:'#4CAF50'},
   {key:'CONDENSER_TEMP',dir:'condenser',color:'#ff9800'},
   {key:'LIQUID_TEMP',dir:'liquid',color:'#9C27B0'},
-  {key:'VAPOR_TEMP',dir:'vapor',color:'#00BCD4'}
+  {key:'VAPOR_TEMP',dir:'vapor',color:'#00BCD4'},
+  {key:'COMPRESSOR_CURRENT',dir:'current_compressor',color:'#607D8B'},
+  {key:'FAN_CURRENT',dir:'current_fan',color:'#795548'}
 ];
 var chartData={};
 var chartCanvases={};
@@ -505,6 +541,7 @@ function renderAllCharts(){
 function appendLiveTemp(d){
   if(!chartInited) return;
   var ts=d.temps||{};
+  var cur=d.current||{};
   var now=Math.floor(Date.now()/1000);
   if(now-lastAppendEpoch<25) return;
   lastAppendEpoch=now;
@@ -514,7 +551,7 @@ function appendLiveTemp(d){
 
   for(var i=0;i<chartSensors.length;i++){
     var key=chartSensors[i].key;
-    var val=ts[key];
+    var val=ts[key]!==undefined?ts[key]:(cur[key]!==undefined?parseFloat(cur[key]):undefined);
     if(val!==undefined){
       chartData[key].push({t:now,v:val});
       while(chartData[key].length>0&&chartData[key][0].t<cutoff) chartData[key].shift();

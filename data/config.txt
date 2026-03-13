@@ -1,0 +1,41 @@
+{
+  "project": "Goodman Heatpump Control",
+  "created": "Feb 22 2026 11:51:19",
+  "description": "Control Goodman heatpump including defrost mode.",
+  "system": {
+    "name": "Main Goodman HP",
+    "mqttPrefix": "main goodman hp"
+  },
+  "wifi": {
+    "ssid": "MEGA",
+    "password": "testpassword"
+  },
+  "mqtt": {
+    "user": "debian",
+    "password": "mqttpass",
+    "host": "192.168.0.46",
+    "port": 1883
+  },
+  "logging": {
+    "maxLogSize": 52428800,
+    "maxOldLogCount": 10
+  },
+  "runtime": {
+    "heatAccumulatedMs": 0
+  },
+  "timezone": {
+    "gmtOffset": -21600,
+    "daylightOffset": 3600
+  },
+  "heatpump": {
+    "lowTemp": {
+      "threshold": 20.0
+    }
+  },
+  "admin": {
+    "password": ""
+  },
+  "sensors": {
+    "temp": {}
+  }
+}

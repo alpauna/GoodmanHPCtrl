@@ -213,6 +213,21 @@ void DisplayManager::drawPageTemps() {
         }
         y += 9;
     }
+
+    // Current sensors (if available, show at bottom)
+    CurrentSensorMap& currents = _hp->getCurrentSensorMap();
+    if (!currents.empty() && y <= 54) {
+        auto compIt = currents.find("COMPRESSOR_CURRENT");
+        if (compIt != currents.end() && compIt->second != nullptr && compIt->second->isValid()) {
+            _display->setCursor(80, 12);
+            _display->printf("C:%.1fA", compIt->second->getRMSAmps());
+        }
+        auto fanIt = currents.find("FAN_CURRENT");
+        if (fanIt != currents.end() && fanIt->second != nullptr && fanIt->second->isValid()) {
+            _display->setCursor(80, 22);
+            _display->printf("F:%.1fA", fanIt->second->getRMSAmps());
+        }
+    }
 }
 
 void DisplayManager::drawPageIO() {
@@ -307,6 +322,12 @@ void DisplayManager::drawPageProtections() {
         _display->setCursor(0, y);
         _display->printf("* RV Hold (%lus)", _hp->getRvHoldRemainingMs() / 1000);
         y += 10; any = true;
+    }
+    if (_hp->isOvercurrentActive()) {
+        _display->setCursor(0, y); _display->print(F("* Overcurrent")); y += 10; any = true;
+    }
+    if (_hp->isLockedRotorActive()) {
+        _display->setCursor(0, y); _display->print(F("* Locked Rotor")); y += 10; any = true;
     }
     if (_hp->isAmbientFallbackActive()) {
         _display->setCursor(0, y);
