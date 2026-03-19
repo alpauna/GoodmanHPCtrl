@@ -157,6 +157,11 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <div id='charts'></div>
 </div>
 
+<div class='card chart-card'>
+<h3><span>Current History</span></h3>
+<div id='currentCharts'></div>
+</div>
+
 <div class='footer' id='footer'>Connecting...</div>
 </div>
 <script>
@@ -351,26 +356,29 @@ fetchState();
 startPolling(2000);
 
 // ---- Temperature History Charts ----
-var chartSensors=[
-  {key:'AMBIENT_TEMP',dir:'ambient',color:'#2196F3'},
-  {key:'COMPRESSOR_TEMP',dir:'compressor',color:'#f44336'},
-  {key:'SUCTION_TEMP',dir:'suction',color:'#4CAF50'},
-  {key:'CONDENSER_TEMP',dir:'condenser',color:'#ff9800'},
-  {key:'LIQUID_TEMP',dir:'liquid',color:'#9C27B0'},
-  {key:'VAPOR_TEMP',dir:'vapor',color:'#00BCD4'},
-  {key:'COMPRESSOR_CURRENT',dir:'current_compressor',color:'#607D8B'},
-  {key:'FAN_CURRENT',dir:'current_fan',color:'#795548'}
+var tempChartSensors=[
+  {key:'AMBIENT_TEMP',dir:'ambient',color:'#2196F3',unit:'\u00B0F'},
+  {key:'COMPRESSOR_TEMP',dir:'compressor',color:'#f44336',unit:'\u00B0F'},
+  {key:'SUCTION_TEMP',dir:'suction',color:'#4CAF50',unit:'\u00B0F'},
+  {key:'CONDENSER_TEMP',dir:'condenser',color:'#ff9800',unit:'\u00B0F'},
+  {key:'LIQUID_TEMP',dir:'liquid',color:'#9C27B0',unit:'\u00B0F'},
+  {key:'VAPOR_TEMP',dir:'vapor',color:'#00BCD4',unit:'\u00B0F'}
 ];
+var currentChartSensors=[
+  {key:'COMPRESSOR_CURRENT',dir:'current_compressor',color:'#607D8B',unit:' A'},
+  {key:'FAN_CURRENT',dir:'current_fan',color:'#795548',unit:' A'}
+];
+var chartSensors=tempChartSensors.concat(currentChartSensors);
 var chartData={};
 var chartCanvases={};
 var chartInited=false;
 var lastAppendEpoch=0;
 
-function initCharts(){
-  var c=document.getElementById('charts');
+function initChartGroup(containerId,sensors){
+  var c=document.getElementById(containerId);
   c.innerHTML='';
-  for(var i=0;i<chartSensors.length;i++){
-    var s=chartSensors[i];
+  for(var i=0;i<sensors.length;i++){
+    var s=sensors[i];
     chartData[s.key]=[];
     var div=document.createElement('div');
     div.className='chart-container';
@@ -383,6 +391,11 @@ function initCharts(){
     c.appendChild(div);
     chartCanvases[s.key]=cvs;
   }
+}
+
+function initCharts(){
+  initChartGroup('charts',tempChartSensors);
+  initChartGroup('currentCharts',currentChartSensors);
   chartInited=true;
 }
 
@@ -501,7 +514,7 @@ function renderChart(sensorIdx){
     var val=minV+(yR*i/5);
     var y=yPx(val);
     ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(W-pad.right,y);ctx.stroke();
-    ctx.fillText(val.toFixed(0)+'\u00B0F',pad.left-4,y+3);
+    ctx.fillText(val.toFixed(s.unit===' A'?1:0)+s.unit,pad.left-4,y+3);
   }
 
   // X axis labels
@@ -531,7 +544,7 @@ function renderChart(sensorIdx){
   // Current value label
   var lastVal=data[data.length-1].v;
   ctx.fillStyle=s.color;ctx.font='bold 12px Arial';ctx.textAlign='right';
-  ctx.fillText(lastVal.toFixed(1)+'\u00B0F',W-pad.right-4,pad.top+14);
+  ctx.fillText(lastVal.toFixed(1)+s.unit,W-pad.right-4,pad.top+14);
 }
 
 function renderAllCharts(){
