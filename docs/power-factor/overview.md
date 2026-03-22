@@ -130,15 +130,16 @@ CT clamp tip ──┬── 10kΩ ── Vbias (2.5V)
                ├── 10μF ── AINxP
                │
 CT clamp ring ─┬── 10kΩ ── Vbias (2.5V)
-               └───────── AINxN
+               ├── 10μF ── AINxN
 ```
 
 - **Vbias**: 2.5V from resistor divider (2× 1kΩ from 5V) + 100nF + 10μF
   filter caps. Provides DC operating point for the AC-coupled CT signal.
 - **10kΩ bias resistors**: On both differential inputs, sets DC operating
   point at Vbias (2.5V)
-- **10μF coupling cap**: AC-couples the CT signal on the positive input,
-  blocks DC offset from the sensor
+- **10μF coupling caps**: AC-couple on **both** differential inputs for
+  symmetric DC blocking. At 60Hz with 10kΩ bias, high-pass cutoff is 1.6Hz
+  — transparent to the 60Hz signal
 - **SCT-013-030**: 30A primary → 1V secondary. At 30A the differential
   signal is ±1.414V peak (1V RMS). ADS131M04 at PGA=1x with 1.2V reference
   handles ±1.2V — sufficient for typical HVAC loads (< 25A)
@@ -251,12 +252,12 @@ TempHistory: Additional chart sensors for PF and power tracking over time.
 | Ref | Part | Package | LCSC | Qty | Notes |
 |-----|------|---------|------|-----|-------|
 | U_ADC | ADS131M04IRSMR | TQFP-32 | C2904283 | 1 | 4-ch simultaneous ADC |
-| R_bias1–4 | 10kΩ | 0402 | — | 4 | CT clamp bias resistors |
+| R_bias1–6 | 10kΩ | 0402 | — | 6 | CT clamp bias resistors (2 per channel × 3 CT channels) |
 | R_divH | 1kΩ (2×) | 0402 | — | 2 | Vbias divider |
 | R_vdivH | 33kΩ | 0402 | — | 1 | Voltage divider high side |
 | R_vdivL | 1kΩ | 0402 | — | 1 | Voltage divider low side |
 | C_bias | 100nF + 10μF | 0402/0805 | — | 2 | Vbias filter |
-| C_couple | 10μF (2×) | 0805 | — | 2 | CT AC coupling |
+| C_couple | 10μF | 0805 | — | 6 | CT AC coupling (2 per channel × 3 CT channels) |
 | C_vfilt | 100nF | 0402 | — | 1 | Voltage input HF filter |
 | C_bypass | 100nF + 10μF | 0402/0805 | — | 2 | ADC power supply bypass |
 | J_CT1 | 3.5mm TRS jack | — | — | 1 | Compressor CT (SCT-013-030) |

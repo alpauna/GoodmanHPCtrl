@@ -83,6 +83,8 @@ struct ProjectInfo {
     float lockedRotorThreshold;      // Locked rotor current threshold in amps (0 = disabled)
     uint32_t lockedRotorTimeoutMs;   // Max inrush settle time before locked rotor fault (default 5000)
     bool lockedRotorFault;           // Latched locked rotor fault (persisted, like rvFail)
+    float compressorCtRatio;         // CT clamp ratio for compressor (default 30.0 = SCT-013-030)
+    float fanCtRatio;                // CT clamp ratio for fan (default 30.0 = SCT-013-030)
     // Weather ambient temperature fallback
     String weatherSource;            // "none", "mqtt", or "http" (default "none")
     String weatherMqttTopic;         // MQTT topic for weather temp (e.g., "homeassistant/sensor/outdoor_temp/state")

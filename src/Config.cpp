@@ -459,6 +459,8 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.lockedRotorThreshold = 0;
         proj.lockedRotorTimeoutMs = 5000;
         proj.lockedRotorFault = false;
+        proj.compressorCtRatio = 30.0f;
+        proj.fanCtRatio = 30.0f;
         Serial.println("Config migration: old lowTemp format detected, will migrate on next save");
     } else {
         proj.lowTempThreshold = heatpump["lowTemp"]["threshold"] | 20.0f;
@@ -513,6 +515,8 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.lockedRotorThreshold = hpCurrent["lockedRotorThreshold"] | 0.0f;
         proj.lockedRotorTimeoutMs = hpCurrent["lockedRotorTimeoutMs"] | 5000;
         proj.lockedRotorFault = hpCurrent["lockedRotorFault"] | false;
+        proj.compressorCtRatio = hpCurrent["compressorCtRatio"] | 30.0f;
+        proj.fanCtRatio = hpCurrent["fanCtRatio"] | 30.0f;
     }
 
     // Defensive clamping for defrost band values (catches corrupt SD data)
@@ -968,6 +972,8 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     hpCurrentUpd["lockedRotorThreshold"] = proj.lockedRotorThreshold;
     hpCurrentUpd["lockedRotorTimeoutMs"] = proj.lockedRotorTimeoutMs;
     hpCurrentUpd["lockedRotorFault"] = proj.lockedRotorFault;
+    hpCurrentUpd["compressorCtRatio"] = proj.compressorCtRatio;
+    hpCurrentUpd["fanCtRatio"] = proj.fanCtRatio;
 
     JsonObject tempHistObj = doc["tempHistory"].to<JsonObject>();
     tempHistObj["intervalSec"] = proj.tempHistoryIntervalSec;

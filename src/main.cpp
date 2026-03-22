@@ -257,6 +257,8 @@ ProjectInfo proj = {
   0.0f,               // lockedRotorThreshold: disabled
   5000,               // lockedRotorTimeoutMs: 5s default
   false,              // lockedRotorFault: not latched
+  30.0f,              // compressorCtRatio: SCT-013-030
+  30.0f,              // fanCtRatio: SCT-013-030
   // Weather ambient temperature fallback
   "none",              // weatherSource
   "",                  // weatherMqttTopic
@@ -1087,8 +1089,8 @@ void setup() {
     // Add current sensors if ADS1115 found
     if (ads1115Ready) {
       hpController.setADS1115(&ads1115);
-      auto* compCurrent = new CurrentSensor("COMPRESSOR_CURRENT", 0, 30.0f);
-      auto* fanCurrent = new CurrentSensor("FAN_CURRENT", 1, 30.0f);
+      auto* compCurrent = new CurrentSensor("COMPRESSOR_CURRENT", 0, proj.compressorCtRatio);
+      auto* fanCurrent = new CurrentSensor("FAN_CURRENT", 1, proj.fanCtRatio);
       compCurrent->setOvercurrentThreshold(proj.compressorOvercurrentAmps);
       compCurrent->setOvercurrentDelayMs(proj.overcurrentDelayMs);
       compCurrent->setLockedRotorThreshold(proj.lockedRotorThreshold);

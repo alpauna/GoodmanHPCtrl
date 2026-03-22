@@ -95,7 +95,7 @@ crankcase heater).
                        │
                    ┌─ 10kΩ ─┐
                    │         │
-CT tip ── 10μF ──┬─┤         ├─┬── CT ring
+CT tip ── 10μF ──┬─┤         ├─┬── 10μF ── CT ring
                  │ │         │ │
                AINxP      AINxN
                    │         │
@@ -103,6 +103,11 @@ CT tip ── 10μF ──┬─┤         ├─┬── CT ring
                        │
                     2.5V Vbias
 ```
+
+**DC blocking caps on both sides:** 10μF on both tip (AINxP) and ring (AINxN)
+for symmetric DC blocking. At 60Hz with 10kΩ bias resistors, the high-pass
+cutoff is 1.6Hz — transparent to the 60Hz signal. Going smaller than 4.7μF
+risks attenuation (0.1μF + 10kΩ = 159Hz cutoff, would attenuate 60Hz).
 
 **Vbias generation:**
 ```

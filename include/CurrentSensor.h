@@ -31,10 +31,12 @@ class CurrentSensor {
     uint32_t getOvercurrentDelayMs() const { return _overcurrentDelayMs; }
     float getLockedRotorThreshold() const { return _lockedRotorThreshold; }
     uint32_t getLockedRotorTimeoutMs() const { return _lockedRotorTimeoutMs; }
+    float getCtRatio() const { return _ctRatio; }
 
     // Setters
     void setOvercurrentThreshold(float amps);
     void setOvercurrentDelayMs(uint32_t ms) { _overcurrentDelayMs = ms; }
+    void setCtRatio(float ratio) { _ctRatio = ratio; }
     void setLockedRotorThreshold(float amps) { _lockedRotorThreshold = amps; }
     void setLockedRotorTimeoutMs(uint32_t ms) { _lockedRotorTimeoutMs = ms; }
 

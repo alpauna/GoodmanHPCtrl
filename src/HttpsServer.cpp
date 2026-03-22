@@ -277,6 +277,8 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["lockedRotorThreshold"] = proj->lockedRotorThreshold;
         doc["lockedRotorTimeoutSec"] = proj->lockedRotorTimeoutMs / 1000;
         doc["lockedRotorFault"] = proj->lockedRotorFault;
+        doc["compressorCtRatio"] = proj->compressorCtRatio;
+        doc["fanCtRatio"] = proj->fanCtRatio;
         // Weather ambient fallback
         doc["weatherSource"] = proj->weatherSource.length() > 0 ? proj->weatherSource : "none";
         doc["weatherMqttTopic"] = proj->weatherMqttTopic;
@@ -583,6 +585,19 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
             if (p.second) p.second->clearLockedRotor();
         }
         proj->lockedRotorFault = false;
+    }
+    // CT clamp ratios (live)
+    float compCtRatio = data["compressorCtRatio"] | proj->compressorCtRatio;
+    if (compCtRatio != proj->compressorCtRatio) {
+        proj->compressorCtRatio = compCtRatio;
+        CurrentSensor* cs = ctx->hpController->getCurrentSensor("COMPRESSOR_CURRENT");
+        if (cs) cs->setCtRatio(compCtRatio);
+    }
+    float fanCtRatio = data["fanCtRatio"] | proj->fanCtRatio;
+    if (fanCtRatio != proj->fanCtRatio) {
+        proj->fanCtRatio = fanCtRatio;
+        CurrentSensor* fs = ctx->hpController->getCurrentSensor("FAN_CURRENT");
+        if (fs) fs->setCtRatio(fanCtRatio);
     }
 
     // AP fallback timeout (live)
