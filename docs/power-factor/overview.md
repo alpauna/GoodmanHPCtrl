@@ -48,10 +48,26 @@ same instant, eliminating inter-channel phase error entirely.
 
 | Channel | Differential Pair | Function |
 |---------|-------------------|----------|
-| Ch1 | AIN1P / AIN1N | Compressor CT clamp (SCT-013-030) |
-| Ch2 | AIN2P / AIN2N | Fan CT clamp (SCT-013-030) |
+| Ch1 | AIN1P / AIN1N | Compressor CT clamp (SCT-013-030, 30A range) |
+| Ch2 | AIN2P / AIN2N | Fan CT clamp (SCT-013-030, 30A range) |
 | Ch3 | AIN3P / AIN3N | 24VAC voltage reference (resistor divider) |
-| Ch4 | AIN4P / AIN4N | Spare |
+| Ch4 | AIN4P / AIN4N | Crankcase heater CT clamp (SCT-013-005, 5A range) |
+
+**Crankcase heater monitoring (Ch4):** Scroll compressor heat pumps have a
+resistive crankcase heater (typically 40–80W at 240V, drawing 0.17–0.33A)
+that keeps compressor oil warm during off-cycles to prevent liquid refrigerant
+migration. A failed heater leads to oil dilution and compressor slugging on
+cold-weather startup — potentially destroying scroll valves.
+
+The SCT-013-030 (30A range) has poor resolution at sub-amp levels. Use an
+**SCT-013-005** (5A range, 1V output) for the heater channel. Same 3.5mm TRS
+jack, same circuit. Set ADS131M04 PGA to 4x or 8x for optimal sensitivity.
+
+**Heater diagnostics:**
+- Heater ON + compressor OFF = normal (oil warming)
+- Heater OFF + compressor OFF = **failed heater** — log warning/fault
+- Heater ON + compressor ON = wasted energy (some units don't switch it off)
+- Gradual current drop over time = element degradation
 
 ### GPIO Pin Assignment (ESP32-S3)
 
@@ -193,7 +209,9 @@ New fields in `/state` JSON and MQTT `goodman/state` payload:
   "fanWatts": 285,
   "fanVA": 396,
   "fanVAR": 275,
-  "voltageRMS": 24.1
+  "voltageRMS": 24.1,
+  "crankcaseHeaterAmps": 0.29,
+  "crankcaseHeaterOn": true
 }
 ```
 
@@ -241,11 +259,14 @@ TempHistory: Additional chart sensors for PF and power tracking over time.
 | C_couple | 10μF (2×) | 0805 | — | 2 | CT AC coupling |
 | C_vfilt | 100nF | 0402 | — | 1 | Voltage input HF filter |
 | C_bypass | 100nF + 10μF | 0402/0805 | — | 2 | ADC power supply bypass |
-| J_CT1 | 3.5mm TRS jack | — | — | 1 | Compressor CT clamp |
-| J_CT2 | 3.5mm TRS jack | — | — | 1 | Fan CT clamp |
+| J_CT1 | 3.5mm TRS jack | — | — | 1 | Compressor CT (SCT-013-030) |
+| J_CT2 | 3.5mm TRS jack | — | — | 1 | Fan CT (SCT-013-030) |
+| J_CT3 | 3.5mm TRS jack | — | — | 1 | Crankcase heater CT (SCT-013-005) |
 
 CT clamp connectors and Vbias circuit are identical to the existing daughter
-board design — direct integration onto the main PCB.
+board design — direct integration onto the main PCB. The crankcase heater
+channel uses a lower-range CT clamp (SCT-013-005, 5A) for better resolution
+at the sub-amp current levels typical of crankcase heaters.
 
 ## References
 

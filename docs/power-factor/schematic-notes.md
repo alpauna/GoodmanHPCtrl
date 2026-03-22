@@ -84,10 +84,11 @@ COM ───────────┘
   transformer-based reference). The voltage sample is phase-true to the
   actual line voltage.
 
-## CT Clamp Interface (Ch1, Ch2)
+## CT Clamp Interface (Ch1, Ch2, Ch4)
 
-Identical circuit to the existing ADS1115 daughter board. Two 3.5mm TRS
-jacks for SCT-013-030 CT clamps.
+Identical circuit to the existing ADS1115 daughter board. Three 3.5mm TRS
+jacks: two SCT-013-030 (30A, compressor + fan) and one SCT-013-005 (5A,
+crankcase heater).
 
 ```
                     2.5V Vbias
