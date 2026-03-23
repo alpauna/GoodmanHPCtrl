@@ -1,9 +1,9 @@
 # 24V AC Input Circuit Design
 
-**Document Version:** 1.0
-**Date:** 2026-03-22
+**Document Version:** 1.1
+**Date:** 2026-03-23
 **Application:** GoodmanHP HVAC Controller (ESP32-S3)
-**Inputs Protected:** LPS, DFT, Y, O
+**Inputs Protected:** LPS, DFT, Y, O (24V AC triac-driven sources)
 
 ---
 
@@ -15,22 +15,29 @@ All four digital inputs (LPS, DFT, Y, O) use identical 24V AC signal conditionin
 - **Precise 3.3V GPIO clamping** with Zener regulation
 - **Predictable timing** via 1MΩ bleed resistor
 - **Current limiting** to protect ESP32 pins
+- **Phantom triac load network** to prevent floating high when triac output is unloaded
 
 ---
 
 ## Circuit Schematic
 
 ```
-24V AC Input
+24V AC Input (Triac-Driven)
     │
-    └─── R5 (33kΩ) ───┬─── D15 (1N4148) ─── C48 (10µF) ─── D14 (SMF3.3A) ─── R79 (2.2kΩ) ─── IO15
+    └─── R5 (33kΩ) ───┬─── D15 (1N4148) ─── C48 (10µF) ─── D17 (SMF5.0A) ─── R80 (2.2kΩ) ─── IO15
                        │                                                           │
-                    C46 (10µF)                                                    BZT52C3V3
+                    C46 (10µF)                                                    D16 (BZT52C3V3)
                        │                                                           │
                       GND                                                         GND
-                                                           C47 (100nF)
-                                                               │
-                                                              GND
+                                                                        C47 (100nF)
+                                                                            │
+                    Phantom Triac Load (prevents floating)                 GND
+                       │
+                    R (4.7kΩ, RC2010FK-074K7L)
+                       │
+                    C (470nF)
+                       │
+                      GND
 ```
 
 ---
@@ -90,6 +97,29 @@ All four digital inputs (LPS, DFT, Y, O) use identical 24V AC signal conditionin
 - Current through 2.2kΩ at 24V: (24V − 3.3V) / 2.2kΩ = **9.4mA** (safe)
 - Power in Zener: 20.7V × 9.4mA ≈ **195mW** (within 400mW rating)
 - **GPIO voltage clamped to 3.3V ± 0.2V** (Zener tolerance)
+
+---
+
+### Stage 5: Phantom Triac Load Network
+
+| Component | Value | Function | Notes |
+|-----------|-------|----------|-------|
+| **R (Load)** | 4.7kΩ, 0.5W (RC2010FK-074K7L) | Triac output load resistor | Prevents floating high when triac is off |
+| **C (Load)** | 470nF, 16V | AC coupling / ripple filter | Works with load resistor to define impedance |
+
+**Background:**
+Thermostat triac outputs can float capacitively high when unloaded, causing false GPIO activation (known issue: Y input activating unexpectedly due to floating voltage). The phantom load network prevents this by:
+
+1. **Providing a DC load path** when the triac is not actively sinking current
+2. **Pulling the signal toward ground** through the resistor
+3. **Filtering AC ripple** with the capacitor
+4. **Establishing predictable impedance** for the AC signal
+
+**Performance for 24V AC:**
+- Load current (triac off): 24V / 4.7kΩ = **5.1mA continuous**
+- Power dissipation: 24V × 5.1mA = **122mW**
+- Power rating: RC2010FK = **0.5W (500mW)** ✓ **24% utilization** (safe margin)
+- Impedance: 4.7kΩ at DC; capacitive reactance at 60Hz: Xc = 1/(2π × 60 × 470nF) ≈ **5.65kΩ**
 
 ---
 
@@ -160,18 +190,21 @@ A high-voltage TVS (SMF24/SMF30) would clamp at ~20–30V, still above ESP32 saf
 
 ## Bill of Materials (Per Input)
 
-| Qty | Reference | Value | Package | Supplier | Notes |
-|-----|-----------|-------|---------|----------|-------|
-| 1 | R5 | 33kΩ 1/4W | 0603 | LCSC | Current limiting |
-| 1 | C46 | 10µF 50V | 0805 | LCSC | Stage 1 decoupling |
-| 1 | D15 | 1N4148W-7-F | SOD-123FL | LCSC | Fast diode |
-| 1 | C48 | 10µF 50V | 0805 | LCSC | Stage 2 decoupling |
-| 1 | D14 | SMF3.3A | SOD-123FL | LCSC | Reverse polarity TVS |
-| 1 | R79 | 1MΩ 1/4W | 0603 | LCSC | Bleed resistor |
-| 1 | BZT52C3V3 | Zener 3.3V 400mW | SOD-123 | LCSC | Overvoltage clamp |
-| 1 | C47 | 100nF 16V | 0603 | LCSC | GPIO filter |
+| Qty | Reference | Value | Package | LCSC Part # | Notes |
+|-----|-----------|-------|---------|------------|-------|
+| 1 | R5 | 33kΩ 1/4W | 0603 | C22869 | Input current limiting |
+| 1 | C46 | 10µF 50V | 0805 | C45783 | Stage 1 decoupling |
+| 1 | D15 | 1N4148W-7-F | SOD-123FL | C1840 | Transient protection |
+| 1 | C48 | 10µF 50V | 0805 | C45783 | Stage 2 decoupling |
+| 1 | D17 | SMF5.0A | SOD-123FL | C509127 | Reverse polarity TVS |
+| 1 | R80 | 2.2kΩ 1/4W | 0603 | C22838 | Zener current limiting |
+| 1 | D16 | BZT52C3V3 | SOD-123 | C160222 | Overvoltage clamp (3.3V Zener) |
+| 1 | R79 | 1MΩ 1/4W | 0603 | C25791 | Bleed resistor (GPIO discharge) |
+| 1 | C47 | 100nF 16V | 0603 | C57112 | GPIO high-frequency filter |
+| 1 | R (Load) | 4.7kΩ 0.5W | 2010 | C513572 | Phantom triac load resistor (RC2010FK) |
+| 1 | C (Load) | 470nF 16V | 0805 | C49308 | Phantom triac load capacitor |
 
-**Total per input:** ~$0.15 in component cost
+**Total per input:** ~$0.25 in component cost (BOM estimates from LCSC)
 
 ---
 
@@ -235,5 +268,6 @@ A high-voltage TVS (SMF24/SMF30) would clamp at ~20–30V, still above ESP32 saf
 
 | Date | Version | Author | Change |
 |------|---------|--------|--------|
-| 2026-03-22 | 1.0 | Design | Initial circuit finalization for all 4 inputs (LPS, DFT, Y, O) |
+| 2026-03-23 | 1.1 | Design | Added phantom triac load network (Stage 5) to prevent floating high; updated BOM with LCSC part numbers |
+| 2026-03-22 | 1.0 | Design | Initial circuit finalization for all 4 inputs (LPS, DFT, Y, O) with multi-stage protection |
 
