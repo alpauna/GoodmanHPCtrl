@@ -297,6 +297,33 @@ their filtering properties. High impedance at LGS5145 switching frequency
 (~1MHz), resistive absorption above 10MHz. Combined with the existing
 output caps, forms a proper lossy low-pass filter with no resonance risk.
 
+## 3.3V Digital Supply (U22 TLV76133DCYR)
+
+Two recommended changes to the 3.3V LDO section:
+
+**1. Increase C12 from 100nF to at least 1μF (recommend 10μF)**
+
+The TLV76133 datasheet specifies 1μF minimum output capacitance for
+regulator stability. At 100nF the LDO can oscillate under load transients.
+With the ESP32-S3 drawing 300–500mA spikes during WiFi TX, a 10μF output
+cap provides better transient response and keeps the regulator stable.
+
+**2. Add bulk capacitance (22–47μF) on 3.3V near the ESP32**
+
+WiFi TX bursts cause sharp current spikes that sag the 3.3V rail. Without
+bulk capacitance close to the ESP32 power pins, the voltage can dip below
+the brownout detector threshold (~3.0V) causing spurious resets. A 22μF or
+47μF ceramic cap placed as close as possible to the ESP32 VDD pins absorbs
+these transients.
+
+```
+Current:   5V → U22 → C12 (100nF) → 3.3V
+
+Suggested: 5V → U22 → C12 (10μF) → 3.3V ──── C_bulk (22-47μF near ESP32)
+```
+
+Schematic: `docs/schematics/SCH_Schematic1_2-Power_2026-03-22.pdf`
+
 ## PCB Layout Considerations
 
 - Place ADS131M04 close to the CT clamp jacks to minimize analog trace length
