@@ -269,6 +269,32 @@ enough for the 500ms polling interval.
 **Total: 20 components** replacing 28+ components (4× optocouplers, 16×
 resistors, 4× caps, 4× TVS, 1× SN74HC14DR).
 
+## Analog Power Supply (5VPF)
+
+The 5VPF rail feeds the ADS131M04 analog supply. L2 on the main power
+schematic filters 5V → 5VPF, with C7/C8 (1μF) and C9 (22μF) output caps
+and D4 (SMF5.0A) TVS protection.
+
+**Replace L2 (10μH inductor) with a ferrite bead** (~600Ω @ 100MHz, low
+DCR). A 10μH inductor can resonate with the output capacitance (C7/C8/C9),
+creating a tank circuit that amplifies noise at the resonant frequency. A
+ferrite bead is lossy by design — it absorbs HF switching noise from the
+LGS5145 buck converter as heat instead of ringing.
+
+```
+5V ── [ferrite bead] ──┬── 5VPF
+                       │
+                 C7 1μF + C8 1μF + C9 22μF
+                       │
+                      GND
+```
+
+Recommended: BLM18PG601SN1D (Murata, 0603) or equivalent — 600Ω @ 100MHz,
+~0.1Ω DCR, rated well above the ADS131M04 current draw (~15mA). High
+impedance at LGS5145 switching frequency (~1MHz), resistive absorption
+above 10MHz. Combined with the existing output caps, forms a proper lossy
+low-pass filter with no resonance risk.
+
 ## PCB Layout Considerations
 
 - Place ADS131M04 close to the CT clamp jacks to minimize analog trace length
