@@ -68,18 +68,36 @@ Tap the 24VAC transformer secondary directly — already available on the HP
 board as the 24VAC/COM bus.
 
 ```
-24VAC ── 33kΩ ──┬── 100nF ── AIN3N (COM)
+24VAC ── 33kΩ ──┬── TVS_A ── GND
                 │
-               AIN3P
+              10μF (DC blocking)
+                │
+              AIN3P
+                │
+              100nF (HF filter)
+                │
+              AIN3N
                 │
                1kΩ
+                │
+              TVS_B ── GND
+                │
+              220Ω (surge limiting)
                 │
 COM ───────────┘
 ```
 
+TVS = PESD3V3L2BT (dual bidirectional, same as CT channels)
+
 - Ratio: 1:34 → 24V RMS becomes 0.71V RMS (1.0V peak)
+  (220Ω COM resistor is negligible vs 33kΩ — no impact on divider ratio)
 - Within ADS131M04 ±1.2V input range at PGA=1x
+- 10μF coupling cap blocks DC offset from transformer asymmetric loading
+  (high-pass cutoff ~16Hz with 1kΩ — transparent to 60Hz)
 - 100nF across 1kΩ for HF noise rejection
+- 220Ω series resistor on COM limits surge current into TVS_B
+  (33kΩ already limits TVS_A high-side current to < 1mA at peak 24VAC)
+- TVS clamps transients from transformer inrush and line surges
 - **Phase accuracy**: Resistive divider introduces no phase shift (unlike a
   transformer-based reference). The voltage sample is phase-true to the
   actual line voltage.

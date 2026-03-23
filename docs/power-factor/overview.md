@@ -180,17 +180,38 @@ range (e.g., 66Ω burden = 30A effective → select SCT-013-030).
 24VAC from the furnace transformer, divided down to ±1V range for ADC input.
 
 ```
-24VAC ── 33kΩ ──┬── AIN3P
+24VAC ── 33kΩ ──┬── TVS_A ── GND
+                │
+              10μF (DC blocking)
+                │
+              AIN3P
+                │
+              100nF (HF filter)
+                │
+              AIN3N
                 │
                1kΩ
                 │
-COM ────────────┴── AIN3N
+              TVS_B ── GND
+                │
+              220Ω (surge limiting)
+                │
+COM ────────────┘
 ```
 
+TVS = PESD3V3L2BT (dual bidirectional, shared with CT channels)
+
 - Divider ratio: 1k / (33k + 1k) ≈ 1:34
+  (220Ω COM resistor is negligible vs 33kΩ — no impact on divider ratio)
 - 24V RMS → 0.71V RMS at ADC input (1.0V peak) — within ±1.2V PGA=1x range
 - Both inputs referenced to COM (24VAC common/neutral)
-- Add 100nF ceramic cap across 1kΩ for HF noise filtering
+- 10μF coupling cap blocks DC offset from transformer asymmetric loading
+  (high-pass cutoff ~16Hz with 1kΩ — transparent to 60Hz)
+- 100nF ceramic cap across 1kΩ for HF noise filtering
+- 220Ω series resistor on COM limits surge current into TVS_B
+  (33kΩ already limits TVS_A high-side current to < 1mA at peak 24VAC)
+- TVS clamps transients from transformer inrush and line surges before
+  they reach the ADC inputs
 
 ## Software Design
 
@@ -286,8 +307,8 @@ TempHistory: Additional chart sensors for PF and power tracking over time.
 | R_vdivH | 33kΩ | 0402 | — | 1 | Voltage divider high side |
 | R_vdivL | 1kΩ | 0402 | — | 1 | Voltage divider low side |
 | C_bias | 100nF + 10μF | 0402/0805 | — | 2 | Vbias filter |
-| C_couple | 10μF | 0805 | — | 6 | CT AC coupling (2 per channel × 3 CT channels) |
-| D_tvs1–3 | PESD3V3L2BT,215 | SOT-23 | C55440 | 3 | CT input TVS protection (1 per CT channel) |
+| C_couple | 10μF | 0805 | — | 7 | AC coupling / DC blocking (2 per CT channel × 3 + 1 voltage Ch3) |
+| D_tvs1–4 | PESD3V3L2BT,215 | SOT-23 | C55440 | 4 | ADC input TVS protection (1 per channel: 3 CT + 1 voltage) |
 | H_burd1–3 | 2-pin 2.54mm female | THT | — | 3 | CT burden resistor socket (empty for voltage-output CTs) |
 | C_vfilt | 100nF | 0402 | — | 1 | Voltage input HF filter |
 | C_bypass | 100nF + 10μF | 0402/0805 | — | 2 | ADC power supply bypass |
