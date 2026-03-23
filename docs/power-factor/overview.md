@@ -175,43 +175,57 @@ Software CT ratio is configured per-channel via the config page dropdown.
 When using SCT-013-000 with burden, set the dropdown to match the effective
 range (e.g., 66Ω burden = 30A effective → select SCT-013-030).
 
-### Voltage Reference Circuit (Ch3)
+### Voltage Reference Circuit (Ch3) — Isolated
 
-24VAC from the furnace transformer, divided down to ±1V range for ADC input.
+24VAC from the furnace transformer, galvanically isolated from the digital
+side via AMC1311 precision isolation amplifier. The board's MB10S bridge
+rectifier creates a voltage potential between 24VAC COM and digital GND,
+making direct connection unsafe for the ADC.
 
 ```
-24VAC ── 33kΩ ──┬── TVS_A ── GND
+         ── HIGH SIDE (referenced to COM) ──────────────────────────
+
+24VAC ── 33kΩ ──┬── AINP (AMC1311)
                 │
-              10μF (DC blocking)
+              240Ω
                 │
-              AIN3P
-                │
-              100nF (HF filter)
-                │
-              AIN3N
-                │
-               1kΩ
-                │
-              TVS_B ── GND
-                │
-              220Ω (surge limiting)
-                │
-COM ────────────┘
+COM ────────────┴── AINN (AMC1311)
+
+         VDD1: 24VAC → 1N4007 → 10μF → 78L33 (3.3V LDO) → VDD1
+         GND1: COM
+
+         ── ISOLATION BARRIER (AMC1311, 7kV reinforced) ────────────
+
+         ── LOW SIDE (referenced to digital GND) ──────────────────
+
+              VOUTP (AMC1311) ── AIN3P
+              VOUTN (AMC1311) ── AIN3N
+
+         VDD2: 3.3V (digital supply)
+         GND2: GND (digital)
 ```
 
-TVS = PESD3V3L2BT (dual bidirectional, shared with CT channels)
+**AMC1311DWVR** (TI, LCSC C456277):
+- Reinforced galvanic isolation (7kV peak, 1.5kV RMS working)
+- ±250mV differential input range, fixed gain of 1×
+- 0.03% nonlinearity — preserves full waveform for V×I power calculation
+- 200kHz bandwidth (transparent to 60Hz)
+- ~4mA high-side supply current
 
-- Divider ratio: 1k / (33k + 1k) ≈ 1:34
-  (220Ω COM resistor is negligible vs 33kΩ — no impact on divider ratio)
-- 24V RMS → 0.71V RMS at ADC input (1.0V peak) — within ±1.2V PGA=1x range
-- Both inputs referenced to COM (24VAC common/neutral)
-- 10μF coupling cap blocks DC offset from transformer asymmetric loading
-  (high-pass cutoff ~16Hz with 1kΩ — transparent to 60Hz)
-- 100nF ceramic cap across 1kΩ for HF noise filtering
-- 220Ω series resistor on COM limits surge current into TVS_B
-  (33kΩ already limits TVS_A high-side current to < 1mA at peak 24VAC)
-- TVS clamps transients from transformer inrush and line surges before
-  they reach the ADC inputs
+**Divider**: 33kΩ / 240Ω ≈ 138:1
+- 24V RMS × √2 = 33.9V peak → 33.9V / 138 = 246mV peak
+- Within ±250mV AMC1311 input range
+- **Phase accuracy**: Resistive divider introduces no phase shift
+
+**High-side supply (VDD1)**: Derived from 24VAC via half-wave rectifier
+(1N4007) + 10μF filter + 78L33 LDO → 3.3V referenced to COM.
+AMC1311 draws ~4mA, well within 78L33 capacity.
+
+**Why isolation is required**: The MB10S bridge rectifier on the power
+supply page takes both 24VAC and COM as inputs. COM floats relative to
+digital GND (diode drop offset + rectified waveform). Connecting COM
+directly to ADC inputs creates a ground loop between the 24VAC secondary
+and the digital ground plane.
 
 ## Software Design
 
@@ -304,14 +318,18 @@ TempHistory: Additional chart sensors for PF and power tracking over time.
 | U_ADC | ADS131M04IRSMR | TQFP-32 | C2904283 | 1 | 4-ch simultaneous ADC |
 | R_bias1–6 | 10kΩ | 0402 | — | 6 | CT clamp bias resistors (2 per channel × 3 CT channels) |
 | R_divH | 1kΩ (2×) | 0402 | — | 2 | Vbias 1.65V divider (from 3.3V) |
-| R_vdivH | 33kΩ | 0402 | — | 1 | Voltage divider high side |
-| R_vdivL | 1kΩ | 0402 | — | 1 | Voltage divider low side |
+| U_ISO | AMC1311DWVR | SOIC-8 | C456277 | 1 | Precision isolation amplifier for Ch3 voltage reference |
+| R_vdivH | 33kΩ | 0402 | — | 1 | Voltage divider high side (isolated, ref to COM) |
+| R_vdivL | 240Ω | 0402 | — | 1 | Voltage divider low side (isolated, ref to COM) |
+| U_LDO1 | 78L33 | SOT-89 | — | 1 | 3.3V LDO for AMC1311 high-side supply (VDD1) |
+| D_rect | 1N4007 | SMA | — | 1 | Half-wave rectifier for VDD1 from 24VAC |
+| C_vdd1 | 10μF | 0805 | — | 1 | VDD1 rectifier filter cap |
 | C_bias | 100nF + 10μF | 0402/0805 | — | 2 | Vbias filter |
-| C_couple | 10μF | 0805 | — | 7 | AC coupling / DC blocking (2 per CT channel × 3 + 1 voltage Ch3) |
-| D_tvs1–4 | PESD3V3L2BT,215 | SOT-23 | C55440 | 4 | ADC input TVS protection (1 per channel: 3 CT + 1 voltage) |
+| C_couple | 10μF | 0805 | — | 6 | CT AC coupling (2 per channel × 3 CT channels) |
+| D_tvs1–3 | PESD3V3L2BT,215 | SOT-23 | C55440 | 3 | CT input TVS protection (1 per CT channel) |
 | H_burd1–3 | 2-pin 2.54mm female | THT | — | 3 | CT burden resistor socket (empty for voltage-output CTs) |
-| C_vfilt | 100nF | 0402 | — | 1 | Voltage input HF filter |
 | C_bypass | 100nF + 10μF | 0402/0805 | — | 2 | ADC power supply bypass |
+| C_iso | 100nF | 0402 | — | 2 | AMC1311 bypass caps (VDD1 + VDD2) |
 | J_CT1 | 3.5mm TRS jack | — | — | 1 | Compressor CT (universal) |
 | J_CT2 | 3.5mm TRS jack | — | — | 1 | Fan CT (universal) |
 | J_CT3 | 3.5mm TRS jack | — | — | 1 | Crankcase heater CT (universal) |
@@ -327,6 +345,7 @@ CTs). See CT compatibility table above and burden table in
 
 ## References
 
+- [AMC1311 datasheet](https://www.ti.com/lit/ds/symlink/amc1311.pdf)
 - [ADS131M04 datasheet](https://www.ti.com/lit/ds/symlink/ads131m04.pdf)
 - [TI Power Measurement app note (SBAA336)](https://www.ti.com/lit/an/sbaa336/sbaa336.pdf)
 - [SCT-013-030 CT clamp datasheet](https://en.yhdc.com/product/SCT013-401.html)
