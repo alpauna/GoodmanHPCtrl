@@ -62,53 +62,54 @@ GND     ────┴───  AGND, DGND
 - DRDY pulses low when new data is available. Configure as falling-edge
   interrupt on the ESP32.
 
-## Voltage Reference Input (Ch3) — Isolated via AMC1311
+## Voltage Reference Input (Ch3)
 
-The board's MB10S bridge rectifier takes both 24VAC and COM as inputs,
-creating a voltage potential between COM and digital GND. Direct connection
-of COM to ADC inputs would create a ground loop. The AMC1311 precision
-isolation amplifier provides reinforced galvanic isolation (7kV peak).
+Tap the 24VAC transformer secondary directly — already available on the HP
+board as the 24VAC/COM bus. COM is tied directly to digital GND (half-wave
+power supply design), so no isolation is needed.
 
 ```
-         ── HIGH SIDE (referenced to COM) ──────────────
-
-                    VDD1 (3.3V isolated)
-                      │
-24VAC ── 33kΩ ──┬── AINP         AMC1311DWVR
-                │               ┌──────────────┐
-              240Ω              │ AINP   VOUTP ─┼── AIN3P
-                │               │ AINN   VOUTN ─┼── AIN3N
-COM ────────────┴── AINN        │ VDD1   VDD2  │
-                                │ GND1   GND2  │
-                                └──────────────┘
-
-         VDD1 supply (isolated, ref to COM):
-         24VAC ── 4.7kΩ ── 1N4007 ──┬── 78L33 ── VDD1
-                                   10μF        100nF
-                                    │            │
-         COM ──────────────────────┴── GND1 ────┘
-
-         ── ISOLATION BARRIER (7kV reinforced) ─────────
-
-         ── LOW SIDE (referenced to digital GND) ──────
-
-         VOUTP ── AIN3P (ADS131M04)
-         VOUTN ── AIN3N (ADS131M04)
-         VDD2  ── 3.3V (digital supply)
-         GND2  ── GND (digital)
+24VAC ── 33kΩ ──┬── TVS_A ── GND
+                │
+              10μF (DC blocking)
+                │
+              AIN3P
+                │
+              100nF (HF filter)
+                │
+              AIN3N
+                │
+               1kΩ
+                │
+              TVS_B ── GND
+                │
+COM/GND ────────┘
 ```
 
-- **Divider**: 33kΩ / 240Ω ≈ 138:1 → 24V RMS × √2 / 138 = 246mV peak
-  (within AMC1311 ±250mV input range)
-- **Linearity**: 0.03% typ — preserves full waveform for V×I power factor
-- **Bandwidth**: 200kHz — transparent to 60Hz
-- **Phase accuracy**: Resistive divider introduces no phase shift; AMC1311
-  adds < 1° at 60Hz — negligible for PF measurement
-- **VDD1**: Half-wave rectified 24VAC through 4.7kΩ current limiter →
-  1N4007 → 10μF → 78L33 LDO → 3.3V. AMC1311 high-side draws ~4mA
-- **Why not direct connection**: See power supply schematic — MB10S bridge
-  rectifier on 24VAC/COM creates diode-drop offset between COM and digital
-  GND. Direct connection would create ground loop and DC offset errors
+TVS = PESD3V3L2BT (dual bidirectional, same as CT channels)
+
+- Ratio: 1:34 → 24V RMS becomes 0.71V RMS (1.0V peak)
+- Within ADS131M04 ±1.2V input range at PGA=1x
+- COM = digital GND — single ground domain, no isolation required
+- 10μF coupling cap blocks DC offset from transformer asymmetric loading
+  (high-pass cutoff ~16Hz with 1kΩ — transparent to 60Hz)
+- 100nF across 1kΩ for HF noise rejection
+- TVS clamps transients from transformer inrush and line surges
+- **Phase accuracy**: Resistive divider introduces no phase shift (unlike a
+  transformer-based reference). The voltage sample is phase-true to the
+  actual line voltage
+
+### Power Supply: Half-Wave Rectifier Design
+
+The main board uses a half-wave rectifier (single diode from 24VAC) instead
+of a full-wave bridge, tying COM directly to digital GND. This creates a
+single ground domain across the entire system, eliminating the need for
+galvanic isolation on the voltage reference and inter-board digital buses
+(CAN, I2C).
+
+Tradeoff: ~2× ripple vs full-wave bridge (16.7ms hold-up at 60Hz vs 8.3ms).
+Mitigated by using 1000μF input filter cap (vs 470μF). The LGS5145 buck
+converter's wide input range handles the additional ripple without issue.
 
 ## CT Clamp Interface (Ch1, Ch2, Ch4)
 
