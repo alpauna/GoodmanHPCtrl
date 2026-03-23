@@ -289,11 +289,13 @@ LGS5145 buck converter as heat instead of ringing.
                       GND
 ```
 
-Recommended: BLM18PG601SN1D (Murata, 0603) or equivalent — 600Ω @ 100MHz,
-~0.1Ω DCR, rated well above the ADS131M04 current draw (~15mA). High
-impedance at LGS5145 switching frequency (~1MHz), resistive absorption
-above 10MHz. Combined with the existing output caps, forms a proper lossy
-low-pass filter with no resonance risk.
+**Important**: L2 is on the main 5V supply path — must be rated for at
+least 1A. Use a power-rated ferrite bead such as BLM31PG601SN1L (Murata,
+1206, 600Ω @ 100MHz, 1.5A rated, ~0.08Ω DCR) or equivalent. Small-signal
+beads (0402/0603) are not suitable — they saturate at high current and lose
+their filtering properties. High impedance at LGS5145 switching frequency
+(~1MHz), resistive absorption above 10MHz. Combined with the existing
+output caps, forms a proper lossy low-pass filter with no resonance risk.
 
 ## PCB Layout Considerations
 
