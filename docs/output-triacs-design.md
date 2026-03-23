@@ -1,7 +1,7 @@
 # 24VAC/240V Triac Output Design
 
-**Document Version:** 1.0
-**Date:** 2026-03-23
+**Document Version:** 1.1
+**Date:** 2026-03-23 (Updated)
 **Application:** GoodmanHP HVAC Controller (ESP32-S3)
 **Outputs Controlled:** LT (24VAC, open-drain), CNT (24VAC), W (24VAC), O-RV/FAN (240V)
 
@@ -63,13 +63,13 @@ IO3 (3.3V) → R22 (180Ω) → Q1 (MOSFET gate)
 | Component | Value | Function |
 |-----------|-------|----------|
 | R22 | 180Ω | GPIO current limiting (3.3V input) |
-| R23 | 180Ω | MOSFET source resistor (not clearly visible in schematic) |
+| R23 | 180Ω | MOSFET source resistor |
 | R26 | 10kΩ | MOSFET pull-up to 3.3V |
 | Q1 | L2N7002SLLT1G | Logic inverter (HIGH on IO3 = Q1 ON = LED pulled LOW) |
 | U29 | MOC3041SM | Zero-cross optocoupler for 24VAC |
 | R30 | 4.7kΩ | Phantom load resistor (reduced value due to low output current) |
 | C30 | 470nF | Phantom load capacitor (lower value, Xc = 5.65kΩ @ 60Hz) |
-| C32 | 100nF | Snubber across 24VAC output |
+| C32 | — | **Removed** (no snubber needed; LT is open-drain output, not driving inductive load) |
 
 ---
 
@@ -168,17 +168,32 @@ Phantom loads are sized based on **output stage current capacity**, not a one-si
 
 ---
 
-## Gate Resistor Selection
+## Gate Resistors
 
-| Circuit | Gate Resistor | Current @ 5V | Voltage Drop | Purpose |
-|---------|---|---|---|---|
-| **CNT/W (24VAC)** | 180Ω | ~26mA | 4.7V | Standard triac gate limiting |
-| **FAN (240V)** | 390Ω | ~10mA | 3.9V | Enhanced isolation, reduced current for safety |
+### Gate Drive Resistors (Opto Output → Gate)
 
-**Design Trade-off:**
-- Lower resistance (180Ω) = faster triac triggering, higher gate current
-- Higher resistance (390Ω) = slower triggering, lower gate current, safer for 240V isolation
-- 240V circuit uses higher resistance for belt-and-suspenders safety
+| Circuit | Gate Drive Resistor | Current @ 5V | Purpose |
+|--------|---|---|---|
+| **LT** | N/A (open-drain output) | — | N/A |
+| **CNT/W (24VAC)** | 180Ω | ~26mA | Standard triac gate limiting |
+| **FAN (240V)** | 390Ω | ~10mA | Enhanced isolation, reduced current for safety |
+
+### Gate Pull-Down Resistors (Gate → COM) — Optimized
+
+| Circuit | Pull-Down Resistor | Current @ 5V | Purpose |
+|--------|---|---|---|
+| **CNT/W (24VAC)** | 10kΩ | ~0.5mA | Anti-false-trigger pull-down |
+| **FAN (240V)** | 10kΩ | ~0.5mA | Anti-false-trigger pull-down |
+
+**Design Evolution:**
+- **Original (180Ω pull-down):** Too aggressive for ~50mA optocoupler budget
+  - 27.8mA pull-down current maxed out opto output when gate was held low
+  - Starved gate charging current from opto LED
+- **Optimized (10kΩ pull-down):** Industry standard for triac gate circuits
+  - 0.5mA pull-down (minimal opto loading)
+  - Reliably holds gate to ground when opto is off
+  - Prevents false triggering from capacitive coupling
+  - Let's opto provide full ~50mA for gate charging during turn-on
 
 ---
 
@@ -186,13 +201,14 @@ Phantom loads are sized based on **output stage current capacity**, not a one-si
 
 | Circuit | Snubber Value | Xc @ 60Hz | Purpose |
 |---------|---|---|---|
-| **LT, CNT, W (24VAC)** | 100nF | 26.5kΩ | Standard EMI suppression for 24VAC |
+| **LT** | — | — | **Removed** (no inductive load; open-drain output only) |
+| **CNT, W (24VAC)** | 100nF | 26.5kΩ | Standard EMI suppression for external triac |
 | **FAN (240V)** | 220nF | 12kΩ | **Heavier snubber** for 240V higher dV/dt |
 
 **Rationale:**
-- 240V has higher switching transients than 24VAC
-- Larger snubber needed to suppress dV/dt-induced noise
-- 220nF provides ~2x the capacitance for better high-frequency attenuation
+- **LT:** Removed optimization — output is just open-drain opto driver, not driving inductive triac load
+- **CNT/W:** 100nF standard for 24VAC triac switching suppression
+- **FAN:** 240V has higher dV/dt than 24VAC; 220nF (~2x capacity) needed for better high-frequency attenuation
 
 ---
 
@@ -257,5 +273,6 @@ Phantom loads are sized based on **output stage current capacity**, not a one-si
 
 | Date | Version | Author | Change |
 |------|---------|--------|--------|
+| 2026-03-23 | 1.1 | Design | Optimized snubber and gate pull-downs: removed LT snubber (no inductive load), changed gate pull-down resistors from 180Ω to 10kΩ to reduce optocoupler loading |
 | 2026-03-23 | 1.0 | Design | Initial triac output design documentation; analyzed phantom load differentiation, gate resistor selection, and 240V double-isolation architecture |
 
