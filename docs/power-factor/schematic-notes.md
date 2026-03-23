@@ -195,22 +195,77 @@ CT jacks under load, and ESD from handling TRS connectors.
 - CT signal swings symmetrically around 1.65V
 - Within ADS131M04 ±1.2V input range at PGA=1x (1.65V ± 1.0V peak)
 
-## SN74HC14DR Spare Channels
+## Simplified 24VAC Inputs (LPS, DFT, Y, O)
 
-The existing SN74HC14DR (U27) has 6 Schmitt trigger inverter channels.
-4 are used (Y, DFT, LPS, O inputs). 2 are spare (channels 5 and 6).
+With the half-wave power supply design (COM = GND), the 24VAC input signals
+are already ground-referenced. The AT3H7C optocouplers and SN74HC14DR Schmitt
+triggers from the v2.0 board are no longer needed — replaced by a passive
+resistor divider, series diode, unidirectional TVS clamp, and filter cap.
 
-With the ADS131M04 sampling voltage on Ch3, the spare Schmitt trigger
-channels are not needed for zero-crossing detection. They remain available
-for future use (e.g., additional digital inputs, status indicators).
+**Parts eliminated per input**: AT3H7C optocoupler, 3× 1.8kΩ resistors,
+180Ω resistor, SMF5.0A TVS, 10μF filter cap, SN74HC14DR channel.
 
-If a hardware voltage ZC is desired as a backup or for independent timing:
-- Duplicate the existing input circuit (3× 1.8kΩ + SMF5.0A + 180Ω +
-  AT3H7C optocoupler) but **omit the 10μF filter cap** (use 100nF or none)
-- Output through SN74HC14DR channel 5 → GPIO 47
-- Produces 120Hz square wave (ZC on both half-cycles due to anti-parallel
-  LEDs in AT3H7C)
-- ESP32 ISR timestamps falling edges with `micros()`
+**Parts eliminated board-wide**: SN74HC14DR (U27) IC entirely (6 channels,
+4 used for inputs, 2 spare).
+
+### Per-Input Circuit
+
+```
+24VAC input ── 33kΩ ── 10μF ── 1N4148 ──┬── GPIO (ESP32)
+                    (DC block)  (anode→) │
+                                   PESD3V3L1BA (unidirectional, cathode to junction)
+                                         │
+                                       100nF
+                                         │
+                                    COM/GND
+```
+
+- **33kΩ**: Current limiting. At 34V peak: (34V - 0.7V - 3.3V) / 33kΩ =
+  0.9mA — safe for both TVS and GPIO
+- **10μF**: DC blocking cap. All input signals should be AC — blocks any DC
+  offset from triac leakage, wiring faults, or asymmetric transformer loading.
+  High-pass cutoff with 33kΩ: ~0.5Hz (transparent to 60Hz)
+- **1N4148**: Blocks negative half-cycle. Only positive half reaches GPIO
+- **PESD3V3L1BA**: Unidirectional TVS, clamps positive to 3.3V. Protects
+  ESP32 GPIO from overvoltage transients
+- **100nF**: Low-pass filter for noise rejection. With 33kΩ source impedance,
+  cutoff ~48Hz — filters HF switching noise while passing the 60Hz envelope.
+  Signal appears as ~3.3V DC (with 8.3ms ripple) when 24VAC is present
+
+### Signal Levels
+
+| Condition | GPIO Voltage | ESP32 Reads |
+|-----------|-------------|-------------|
+| 24VAC present | ~3.3V (clamped) | HIGH |
+| 24VAC absent | 0V (pulled low by 100nF + internal pulldown) | LOW |
+| Negative half-cycle | 0V (1N4148 blocks) | LOW |
+| Transient spike | 3.3V (TVS clamps) | HIGH (protected) |
+
+### Input Pin Configuration
+
+No change to software — `InputPin` class still reads GPIO with `INPUT_PULLDOWN`
+and debounce/validation delay. The 100nF + 33kΩ time constant (3.3ms) is fast
+enough for the 500ms polling interval.
+
+| Input | GPIO | Function |
+|-------|------|----------|
+| LPS | 15 | Low pressure switch (active LOW = fault) |
+| DFT | 16 | Defrost thermostat |
+| Y | 17 | Compressor call |
+| O | 18 | Reversing valve / cool mode |
+
+### BOM (input section, ×4 channels)
+
+| Ref | Part | Package | Qty | Notes |
+|-----|------|---------|-----|-------|
+| R_in1–4 | 33kΩ | 0402 | 4 | Current limiting (1 per input) |
+| C_indc1–4 | 10μF | 0805 | 4 | DC blocking (1 per input) |
+| D_in1–4 | 1N4148 | SOD-323 | 4 | Negative half-cycle blocking |
+| D_tvsin1–4 | PESD3V3L1BA | SOD-323 | 4 | Unidirectional 3.3V TVS clamp |
+| C_in1–4 | 100nF | 0402 | 4 | Input filter cap |
+
+**Total: 20 components** replacing 28+ components (4× optocouplers, 16×
+resistors, 4× caps, 4× TVS, 1× SN74HC14DR).
 
 ## PCB Layout Considerations
 

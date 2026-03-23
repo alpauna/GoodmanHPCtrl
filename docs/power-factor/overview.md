@@ -221,6 +221,9 @@ ground domain across the entire system:
 - **No isolation needed** for voltage reference (Ch3) — COM = GND
 - **No isolated ground** required for inter-board digital buses (CAN, I2C)
 - **Simplified analog front end** — all ADC channels share the same ground
+- **Simplified 24VAC inputs** — optocouplers (AT3H7C) and Schmitt triggers
+  (SN74HC14DR) replaced by passive divider + diode + TVS + filter cap
+  directly into ESP32 GPIO. See `schematic-notes.md` for circuit detail
 
 Tradeoff vs full-wave bridge (MB10S): half-wave produces ~2× ripple on the
 input filter cap (16.7ms hold-up vs 8.3ms at 60Hz). Mitigated by using a
