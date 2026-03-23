@@ -259,6 +259,11 @@ ProjectInfo proj = {
   false,              // lockedRotorFault: not latched
   30.0f,              // compressorCtRatio: SCT-013-030
   30.0f,              // fanCtRatio: SCT-013-030
+  5.0f,               // crankcaseCtRatio: SCT-013-005
+  0.0f,               // crankcaseExpectedAmps: not monitored
+  0.0f,               // compressorBurdenOhms: voltage-output CT (no burden)
+  0.0f,               // fanBurdenOhms: voltage-output CT (no burden)
+  0.0f,               // crankcaseBurdenOhms: voltage-output CT (no burden)
   // Weather ambient temperature fallback
   "none",              // weatherSource
   "",                  // weatherMqttTopic
@@ -268,6 +273,9 @@ ProjectInfo proj = {
   30,                  // weatherStaleMinutes
   10,                  // weatherRefreshMinutes
   0.0f,                // internalTempOffsetF
+  // HP unit info
+  3.0f,                // hpTonnage: 3 ton default
+  true,                // scrollCompressor: scroll type default
   // CAN bus
   false                // canEnabled: off by default
 };
@@ -1264,7 +1272,8 @@ static const TempCsvEntry tempCsvEntries[] = {
     {"LIQUID_TEMP",        "liquid"},
     {"VAPOR_TEMP",         "vapor"},
     {"COMPRESSOR_CURRENT", "current_compressor"},
-    {"FAN_CURRENT",        "current_fan"}
+    {"FAN_CURRENT",        "current_fan"},
+    {"CRANKCASE_CURRENT",  "current_crankcase"}
 };
 static const int NUM_CSV_ENTRIES = sizeof(tempCsvEntries) / sizeof(tempCsvEntries[0]);
 

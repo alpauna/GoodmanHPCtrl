@@ -85,6 +85,11 @@ struct ProjectInfo {
     bool lockedRotorFault;           // Latched locked rotor fault (persisted, like rvFail)
     float compressorCtRatio;         // CT clamp ratio for compressor (default 30.0 = SCT-013-030)
     float fanCtRatio;                // CT clamp ratio for fan (default 30.0 = SCT-013-030)
+    float crankcaseCtRatio;          // CT clamp ratio for crankcase heater (default 5.0 = SCT-013-005)
+    float crankcaseExpectedAmps;     // Expected crankcase heater current in amps (0 = not monitored)
+    float compressorBurdenOhms;      // Burden resistor for SCT-013-000 (0 = voltage-output CT, no burden)
+    float fanBurdenOhms;             // Burden resistor for SCT-013-000 (0 = voltage-output CT, no burden)
+    float crankcaseBurdenOhms;       // Burden resistor for SCT-013-000 (0 = voltage-output CT, no burden)
     // Weather ambient temperature fallback
     String weatherSource;            // "none", "mqtt", or "http" (default "none")
     String weatherMqttTopic;         // MQTT topic for weather temp (e.g., "homeassistant/sensor/outdoor_temp/state")
@@ -94,6 +99,9 @@ struct ProjectInfo {
     uint32_t weatherStaleMinutes;    // Max age before cached weather value expires (default 30)
     uint32_t weatherRefreshMinutes;  // HTTP fetch interval in minutes (default 10, range 1-60)
     float internalTempOffsetF;       // ESP32 internal temp offset in °F (default 0, range -50 to 50)
+    // HP unit info
+    float hpTonnage;                 // Heat pump tonnage (1.5, 2, 2.5, 3, 3.5, 4, 5; default 3)
+    bool scrollCompressor;           // Scroll compressor type (default true)
     // CAN bus
     bool canEnabled;                 // Enable CAN bus for thermostat communication (default false)
 };

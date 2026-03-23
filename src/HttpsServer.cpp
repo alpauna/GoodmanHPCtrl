@@ -279,6 +279,13 @@ static esp_err_t configGetHandler(httpd_req_t* req) {
         doc["lockedRotorFault"] = proj->lockedRotorFault;
         doc["compressorCtRatio"] = proj->compressorCtRatio;
         doc["fanCtRatio"] = proj->fanCtRatio;
+        doc["crankcaseCtRatio"] = proj->crankcaseCtRatio;
+        doc["crankcaseExpectedAmps"] = proj->crankcaseExpectedAmps;
+        doc["compressorBurdenOhms"] = proj->compressorBurdenOhms;
+        doc["fanBurdenOhms"] = proj->fanBurdenOhms;
+        doc["crankcaseBurdenOhms"] = proj->crankcaseBurdenOhms;
+        doc["hpTonnage"] = proj->hpTonnage;
+        doc["scrollCompressor"] = proj->scrollCompressor;
         // Weather ambient fallback
         doc["weatherSource"] = proj->weatherSource.length() > 0 ? proj->weatherSource : "none";
         doc["weatherMqttTopic"] = proj->weatherMqttTopic;
@@ -598,6 +605,17 @@ static esp_err_t configPostHandler(httpd_req_t* req) {
         proj->fanCtRatio = fanCtRatio;
         CurrentSensor* fs = ctx->hpController->getCurrentSensor("FAN_CURRENT");
         if (fs) fs->setCtRatio(fanCtRatio);
+    }
+    proj->crankcaseCtRatio = data["crankcaseCtRatio"] | proj->crankcaseCtRatio;
+    proj->crankcaseExpectedAmps = data["crankcaseExpectedAmps"] | proj->crankcaseExpectedAmps;
+    proj->compressorBurdenOhms = data["compressorBurdenOhms"] | proj->compressorBurdenOhms;
+    proj->fanBurdenOhms = data["fanBurdenOhms"] | proj->fanBurdenOhms;
+    proj->crankcaseBurdenOhms = data["crankcaseBurdenOhms"] | proj->crankcaseBurdenOhms;
+
+    // HP unit info
+    proj->hpTonnage = data["hpTonnage"] | proj->hpTonnage;
+    if (data["scrollCompressor"].is<bool>()) {
+        proj->scrollCompressor = data["scrollCompressor"];
     }
 
     // AP fallback timeout (live)

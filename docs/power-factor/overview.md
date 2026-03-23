@@ -120,31 +120,60 @@ optocoupler ZC on 47).
 
 ## CT Clamp Interface
 
-Same SCT-013-030 circuit as the existing I2C daughter board, integrated
-directly on the HP controller PCB.
+Universal 3.5mm TRS jacks supporting both voltage-output CTs (SCT-013-005/
+010/030 with internal burden) and current-output CTs (SCT-013-000 with
+external burden resistor). Each jack has a 2-pin 2.54mm female header across
+tip-to-ring for socketed burden resistor placement — leave empty for
+voltage-output CTs, insert appropriate through-hole resistor (1% or better)
+for current-output CTs. No soldering required for burden changes.
 
 ### Per-Channel Circuit
 
 ```
-CT clamp tip ──┬── 10kΩ ── Vbias (2.5V)
-               ├── 10μF ── AINxP
-               │
-CT clamp ring ─┬── 10kΩ ── Vbias (2.5V)
-               ├── 10μF ── AINxN
+              R_burden (2.54mm header socket, empty for voltage-output CTs)
+CT tip ──┬──────[■ ■]────────────┬── CT ring
+         │                        │
+        10μF                     10μF
+         │                        │
+     10kΩ ── Vbias            10kΩ ── Vbias
+         │                        │
+       TVS ── GND              TVS ── GND
+         │                        │
+       AINxP                   AINxN
 ```
 
-- **Vbias**: 2.5V from resistor divider (2× 1kΩ from 5V) + 100nF + 10μF
+  TVS = PESD3V3L2BT (dual bidirectional, one per channel)
+
+- **Vbias**: 1.65V from resistor divider (2× 1kΩ from 3.3V) + 100nF + 10μF
   filter caps. Provides DC operating point for the AC-coupled CT signal.
 - **10kΩ bias resistors**: On both differential inputs, sets DC operating
-  point at Vbias (2.5V)
+  point at Vbias (1.65V)
 - **10μF coupling caps**: AC-couple on **both** differential inputs for
   symmetric DC blocking. At 60Hz with 10kΩ bias, high-pass cutoff is 1.6Hz
   — transparent to the 60Hz signal
-- **SCT-013-030**: 30A primary → 1V secondary. At 30A the differential
-  signal is ±1.414V peak (1V RMS). ADS131M04 at PGA=1x with 1.2V reference
-  handles ±1.2V — sufficient for typical HVAC loads (< 25A)
-- **PGA setting**: Use 1x for full range, 2x for higher sensitivity on
-  low-current loads (fan motor)
+- **R_burden**: Optional external burden resistor for current-output CTs
+  (SCT-013-000, 2000:1 turns ratio). R = V_target × 2000 / I_max. Use 1%
+  tolerance or better (standard 1/4W through-hole axial, bent to 2.54mm pin
+  spacing). See burden table in `schematic-notes.md` for common values.
+- **PGA setting**: Use 1x for full range, 2x or 4x for higher sensitivity on
+  low-current loads (fan motor, crankcase heater)
+- **TVS protection**: PESD3V3L2BT (Nexperia, C55440) on each ADC input to
+  GND. Clamps transients from motor inrush, hot-plugging, and ESD
+
+### CT Clamp Compatibility
+
+| CT Model | Type | Output | R_burden | Use Case |
+|----------|------|--------|----------|----------|
+| SCT-013-030 | Voltage | 1V @ 30A | none | Compressor (default) |
+| SCT-013-010 | Voltage | 1V @ 10A | none | Small compressor |
+| SCT-013-005 | Voltage | 1V @ 5A | none | Fan, crankcase heater |
+| SCT-013-000 | Current | 50mA @ 100A | 66Ω → 30A range | Compressor (high precision) |
+| SCT-013-000 | Current | 50mA @ 100A | 400Ω → 5A range | Fan (high precision) |
+| SCT-013-000 | Current | 50mA @ 100A | 2kΩ → 1A range | Crankcase heater (high precision) |
+
+Software CT ratio is configured per-channel via the config page dropdown.
+When using SCT-013-000 with burden, set the dropdown to match the effective
+range (e.g., 66Ω burden = 30A effective → select SCT-013-030).
 
 ### Voltage Reference Circuit (Ch3)
 
@@ -253,21 +282,27 @@ TempHistory: Additional chart sensors for PF and power tracking over time.
 |-----|------|---------|------|-----|-------|
 | U_ADC | ADS131M04IRSMR | TQFP-32 | C2904283 | 1 | 4-ch simultaneous ADC |
 | R_bias1–6 | 10kΩ | 0402 | — | 6 | CT clamp bias resistors (2 per channel × 3 CT channels) |
-| R_divH | 1kΩ (2×) | 0402 | — | 2 | Vbias divider |
+| R_divH | 1kΩ (2×) | 0402 | — | 2 | Vbias 1.65V divider (from 3.3V) |
 | R_vdivH | 33kΩ | 0402 | — | 1 | Voltage divider high side |
 | R_vdivL | 1kΩ | 0402 | — | 1 | Voltage divider low side |
 | C_bias | 100nF + 10μF | 0402/0805 | — | 2 | Vbias filter |
 | C_couple | 10μF | 0805 | — | 6 | CT AC coupling (2 per channel × 3 CT channels) |
+| D_tvs1–3 | PESD3V3L2BT,215 | SOT-23 | C55440 | 3 | CT input TVS protection (1 per CT channel) |
+| H_burd1–3 | 2-pin 2.54mm female | THT | — | 3 | CT burden resistor socket (empty for voltage-output CTs) |
 | C_vfilt | 100nF | 0402 | — | 1 | Voltage input HF filter |
 | C_bypass | 100nF + 10μF | 0402/0805 | — | 2 | ADC power supply bypass |
-| J_CT1 | 3.5mm TRS jack | — | — | 1 | Compressor CT (SCT-013-030) |
-| J_CT2 | 3.5mm TRS jack | — | — | 1 | Fan CT (SCT-013-030) |
-| J_CT3 | 3.5mm TRS jack | — | — | 1 | Crankcase heater CT (SCT-013-005) |
+| J_CT1 | 3.5mm TRS jack | — | — | 1 | Compressor CT (universal) |
+| J_CT2 | 3.5mm TRS jack | — | — | 1 | Fan CT (universal) |
+| J_CT3 | 3.5mm TRS jack | — | — | 1 | Crankcase heater CT (universal) |
 
-CT clamp connectors and Vbias circuit are identical to the existing daughter
-board design — direct integration onto the main PCB. The crankcase heater
-channel uses a lower-range CT clamp (SCT-013-005, 5A) for better resolution
-at the sub-amp current levels typical of crankcase heaters.
+All three CT jacks are universal — supporting both voltage-output CTs
+(SCT-013-005/010/030, burden header empty) and current-output CTs
+(SCT-013-000, burden resistor inserted into header). Each jack has a
+2-pin 2.54mm female header across tip-to-ring. For SCT-013-000, insert
+a standard 1/4W through-hole axial resistor (1% or better tolerance)
+bent to 2.54mm pin spacing into the socket. Default: empty (voltage-output
+CTs). See CT compatibility table above and burden table in
+`schematic-notes.md` for values when using SCT-013-000.
 
 ## References
 

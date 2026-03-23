@@ -461,6 +461,13 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.lockedRotorFault = false;
         proj.compressorCtRatio = 30.0f;
         proj.fanCtRatio = 30.0f;
+        proj.crankcaseCtRatio = 5.0f;
+        proj.crankcaseExpectedAmps = 0.0f;
+        proj.compressorBurdenOhms = 0.0f;
+        proj.fanBurdenOhms = 0.0f;
+        proj.crankcaseBurdenOhms = 0.0f;
+        proj.hpTonnage = 3.0f;
+        proj.scrollCompressor = true;
         Serial.println("Config migration: old lowTemp format detected, will migrate on next save");
     } else {
         proj.lowTempThreshold = heatpump["lowTemp"]["threshold"] | 20.0f;
@@ -517,6 +524,15 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.lockedRotorFault = hpCurrent["lockedRotorFault"] | false;
         proj.compressorCtRatio = hpCurrent["compressorCtRatio"] | 30.0f;
         proj.fanCtRatio = hpCurrent["fanCtRatio"] | 30.0f;
+        proj.crankcaseCtRatio = hpCurrent["crankcaseCtRatio"] | 5.0f;
+        proj.crankcaseExpectedAmps = hpCurrent["crankcaseExpectedAmps"] | 0.0f;
+        proj.compressorBurdenOhms = hpCurrent["compressorBurdenOhms"] | 0.0f;
+        proj.fanBurdenOhms = hpCurrent["fanBurdenOhms"] | 0.0f;
+        proj.crankcaseBurdenOhms = hpCurrent["crankcaseBurdenOhms"] | 0.0f;
+        // HP unit info
+        JsonObject hpUnit = heatpump["unit"];
+        proj.hpTonnage = hpUnit["tonnage"] | 3.0f;
+        proj.scrollCompressor = hpUnit["scroll"] | true;
     }
 
     // Defensive clamping for defrost band values (catches corrupt SD data)
@@ -974,6 +990,15 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     hpCurrentUpd["lockedRotorFault"] = proj.lockedRotorFault;
     hpCurrentUpd["compressorCtRatio"] = proj.compressorCtRatio;
     hpCurrentUpd["fanCtRatio"] = proj.fanCtRatio;
+    hpCurrentUpd["crankcaseCtRatio"] = proj.crankcaseCtRatio;
+    hpCurrentUpd["crankcaseExpectedAmps"] = proj.crankcaseExpectedAmps;
+    hpCurrentUpd["compressorBurdenOhms"] = proj.compressorBurdenOhms;
+    hpCurrentUpd["fanBurdenOhms"] = proj.fanBurdenOhms;
+    hpCurrentUpd["crankcaseBurdenOhms"] = proj.crankcaseBurdenOhms;
+    // HP unit info
+    JsonObject hpUnitUpd = heatpump["unit"].to<JsonObject>();
+    hpUnitUpd["tonnage"] = proj.hpTonnage;
+    hpUnitUpd["scroll"] = proj.scrollCompressor;
 
     JsonObject tempHistObj = doc["tempHistory"].to<JsonObject>();
     tempHistObj["intervalSec"] = proj.tempHistoryIntervalSec;

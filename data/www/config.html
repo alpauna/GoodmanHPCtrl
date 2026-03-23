@@ -132,9 +132,25 @@ button:hover{background:#45a049;}
 <div id='rvFailStatus' style='margin:8px 0;font-size:13px;padding:6px 10px;border-radius:4px;display:none'></div>
 <button type='button' class='btn-sm btn-red' id='clearRvFailBtn' style='display:none' onclick='clearRvFail()'>Clear RV Fail</button>
 </fieldset>
+<fieldset id='s-unit'><legend>HP Unit Info</legend>
+<label>HP Tonnage</label>
+<select id='hpTonnage' onchange='updateHPDefaults()'>
+<option value='1.5'>1.5 Ton</option>
+<option value='2'>2 Ton</option>
+<option value='2.5'>2.5 Ton</option>
+<option value='3'>3 Ton</option>
+<option value='3.5'>3.5 Ton</option>
+<option value='4'>4 Ton</option>
+<option value='5'>5 Ton</option>
+</select>
+<label style='display:inline-flex;align-items:center;gap:6px;margin-top:10px'><input type='checkbox' id='scrollCompressor' onchange='updateHPDefaults()' style='width:auto'> Scroll Compressor</label>
+<div id='hpDefaults' style='margin:8px 0;font-size:12px;padding:8px 10px;border-radius:4px;background:var(--code-bg);color:var(--text-secondary);display:none'></div>
+<button type='button' class='btn-sm' id='applyDefaultsBtn' style='display:none' onclick='applyHPDefaults()'>Apply Defaults</button>
+</fieldset>
 <fieldset id='s-cur'><legend>Current Monitoring <span class='tag tag-live'>live</span></legend>
-<label>Compressor CT Clamp</label>
-<select id='compressorCtRatio'>
+<label>Compressor CT Clamp <span id='compCtRec' style='font-size:11px;color:#27ae60'></span></label>
+<select id='compressorCtRatio' onchange='toggleBurden("compressor")'>
+<option value='0'>SCT-013-000 (current output, needs burden)</option>
 <option value='5'>SCT-013-005 (5A)</option>
 <option value='10'>SCT-013-010 (10A)</option>
 <option value='15'>SCT-013-015 (15A)</option>
@@ -144,8 +160,13 @@ button:hover{background:#45a049;}
 <option value='50'>SCT-013-050 (50A)</option>
 <option value='100'>SCT-013-100 (100A)</option>
 </select>
-<label>Fan CT Clamp</label>
-<select id='fanCtRatio'>
+<div id='compressorBurdenRow' style='display:none'>
+<label>Burden Resistor (&Omega;, 1% or better) <span id='compBurdenRange' style='font-size:11px;color:#27ae60'></span></label>
+<input type='number' step='1' min='1' id='compressorBurdenOhms' oninput='calcBurdenRange("compressor")'>
+</div>
+<label>Fan CT Clamp <span id='fanCtRec' style='font-size:11px;color:#27ae60'></span></label>
+<select id='fanCtRatio' onchange='toggleBurden("fan")'>
+<option value='0'>SCT-013-000 (current output, needs burden)</option>
 <option value='5'>SCT-013-005 (5A)</option>
 <option value='10'>SCT-013-010 (10A)</option>
 <option value='15'>SCT-013-015 (15A)</option>
@@ -155,6 +176,29 @@ button:hover{background:#45a049;}
 <option value='50'>SCT-013-050 (50A)</option>
 <option value='100'>SCT-013-100 (100A)</option>
 </select>
+<div id='fanBurdenRow' style='display:none'>
+<label>Burden Resistor (&Omega;, 1% or better) <span id='fanBurdenRange' style='font-size:11px;color:#27ae60'></span></label>
+<input type='number' step='1' min='1' id='fanBurdenOhms' oninput='calcBurdenRange("fan")'>
+</div>
+<label>Crankcase Heater CT Clamp <span id='ccCtRec' style='font-size:11px;color:#27ae60'></span></label>
+<select id='crankcaseCtRatio' onchange='toggleBurden("crankcase")'>
+<option value='0'>SCT-013-000 (current output, needs burden)</option>
+<option value='5'>SCT-013-005 (5A)</option>
+<option value='10'>SCT-013-010 (10A)</option>
+<option value='15'>SCT-013-015 (15A)</option>
+<option value='20'>SCT-013-020 (20A)</option>
+<option value='25'>SCT-013-025 (25A)</option>
+<option value='30'>SCT-013-030 (30A)</option>
+<option value='50'>SCT-013-050 (50A)</option>
+<option value='100'>SCT-013-100 (100A)</option>
+</select>
+<div id='crankcaseBurdenRow' style='display:none'>
+<label>Burden Resistor (&Omega;, 1% or better) <span id='crankcaseBurdenRange' style='font-size:11px;color:#27ae60'></span></label>
+<input type='number' step='1' min='1' id='crankcaseBurdenOhms' oninput='calcBurdenRange("crankcase")'>
+</div>
+<label>Crankcase Heater Expected Current (amps, 0=not monitored) <span id='ccAmpsRec' style='font-size:11px;color:#27ae60'></span></label>
+<input type='number' step='0.01' min='0' id='crankcaseExpectedAmps'>
+<p style='color:var(--text-secondary);font-size:11px;margin:2px 0 8px'>Heater OFF when compressor OFF = possible failure. Used with COMPRESSOR_TEMP for diagnostics.</p>
 <label>Compressor Overcurrent (amps, 0=disabled)</label><input type='number' step='0.1' min='0' id='compressorOvercurrentAmps'>
 <label>Fan Overcurrent (amps, 0=disabled)</label><input type='number' step='0.1' min='0' id='fanOvercurrentAmps'>
 <label>Overcurrent Delay (seconds)</label><input type='number' step='1' min='1' id='overcurrentDelaySec'>
@@ -313,7 +357,7 @@ button:hover{background:#45a049;}
 var _dirty=false;
 var _origValues={};
 window.addEventListener('beforeunload',function(e){if(_dirty){e.preventDefault();e.returnValue='';}});
-var fields=['systemName','mqttPrefix','wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','timezone','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostColdMaxTemp','defrostWarmMinTemp','defrostColdRuntimeMin','defrostColdMinRuntimeSec','defrostColdExitTempF','defrostMidRuntimeMin','defrostMidMinRuntimeSec','defrostMidExitTempF','defrostWarmRuntimeMin','defrostWarmMinRuntimeSec','defrostWarmExitTempF','apFallbackMinutes','apPassword','ftpPassword','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','compressorCtRatio','fanCtRatio','compressorOvercurrentAmps','fanOvercurrentAmps','overcurrentDelaySec','lockedRotorThreshold','lockedRotorTimeoutSec','weatherSource','weatherMqttTopic','weatherApiKey','weatherZipCode','weatherCountry','weatherStaleMinutes','weatherRefreshMinutes','internalTempOffsetF'];
+var fields=['systemName','mqttPrefix','wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','timezone','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostColdMaxTemp','defrostWarmMinTemp','defrostColdRuntimeMin','defrostColdMinRuntimeSec','defrostColdExitTempF','defrostMidRuntimeMin','defrostMidMinRuntimeSec','defrostMidExitTempF','defrostWarmRuntimeMin','defrostWarmMinRuntimeSec','defrostWarmExitTempF','apFallbackMinutes','apPassword','ftpPassword','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','hpTonnage','compressorCtRatio','fanCtRatio','crankcaseCtRatio','compressorBurdenOhms','fanBurdenOhms','crankcaseBurdenOhms','crankcaseExpectedAmps','compressorOvercurrentAmps','fanOvercurrentAmps','overcurrentDelaySec','lockedRotorThreshold','lockedRotorTimeoutSec','weatherSource','weatherMqttTopic','weatherApiKey','weatherZipCode','weatherCountry','weatherStaleMinutes','weatherRefreshMinutes','internalTempOffsetF'];
 var tzData={
 'America':{'New York':'EST5EDT,M3.2.0,M11.1.0','Chicago':'CST6CDT,M3.2.0,M11.1.0','Denver':'MST7MDT,M3.2.0,M11.1.0','Los Angeles':'PST8PDT,M3.2.0,M11.1.0','Phoenix':'MST7','Anchorage':'AKST9AKDT,M3.2.0,M11.1.0','Honolulu':'HST10','Halifax':'AST4ADT,M3.2.0,M11.1.0','St Johns':'NST3:30NDT,M3.2.0,M11.1.0','Mexico City':'CST6CDT,M4.1.0,M10.5.0','Sao Paulo':'<-03>3','Buenos Aires':'<-03>3','Santiago':'<-04>4<-03>,M9.1.6/24,M4.1.6/24'},
 'Europe':{'London':'GMT0BST,M3.5.0/1,M10.5.0','Paris':'CET-1CEST,M3.5.0,M10.5.0','Berlin':'CET-1CEST,M3.5.0,M10.5.0','Moscow':'MSK-3','Istanbul':'<+03>-3','Athens':'EET-2EEST,M3.5.0/3,M10.5.0'},
@@ -339,6 +383,9 @@ if(d.max6675Do!=null)document.getElementById('max6675Do').value=d.max6675Do;
 syncMaxPins();
 document.getElementById('lowTempEnableW').checked=d.lowTempEnableW!==false;
 document.getElementById('lowTempEnableAux').checked=d.lowTempEnableAux!==false;
+document.getElementById('scrollCompressor').checked=d.scrollCompressor!==false;
+updateHPDefaults();
+initBurdenFields();
 adminPwSet=!!d.adminPasswordSet;
 var st=document.getElementById('adminPwStatus');
 if(adminPwSet){
@@ -426,6 +473,88 @@ document.getElementById('staleLbl').textContent='Stale Timeout (minutes, '+minSt
 }
 document.getElementById('weatherRefreshMinutes').addEventListener('input',function(){enforceStaleMin('refresh');});
 document.getElementById('weatherStaleMinutes').addEventListener('input',function(){enforceStaleMin('stale');});
+// SCT-013-000 burden resistor show/hide and range calculation
+function toggleBurden(ch){
+var sel=document.getElementById(ch==='crankcase'?'crankcaseCtRatio':ch+'CtRatio');
+var row=document.getElementById(ch+'BurdenRow');
+if(sel.value==='0'){row.style.display='block';calcBurdenRange(ch);}
+else{row.style.display='none';}
+}
+function calcBurdenRange(ch){
+var el=document.getElementById(ch+'BurdenOhms');
+var r=parseFloat(el.value)||0;
+var span=document.getElementById(ch+'BurdenRange');
+if(r>0){var range=(2000/r);span.textContent='(effective range: '+range.toFixed(1)+'A @ 1V out)';}
+else{span.textContent='';}
+}
+function initBurdenFields(){
+// If burden > 0, this channel uses SCT-013-000 — set dropdown to '0' and show burden row
+['compressor','fan','crankcase'].forEach(function(ch){
+var bEl=document.getElementById(ch+'BurdenOhms');
+var b=parseFloat(bEl.value)||0;
+if(b>0){
+var sel=document.getElementById(ch==='crankcase'?'crankcaseCtRatio':ch+'CtRatio');
+sel.value='0';
+}
+toggleBurden(ch);calcBurdenRange(ch);
+});
+}
+// HP tonnage defaults: typical per-leg amps for 240V systems
+// Scroll compressors draw lower per-leg current than reciprocating
+// Crankcase heater: resistive element keeps oil warm when compressor off (40-100W @ 240V)
+var hpSpecs={
+'1.5':{scroll:{comp:3.5,fan:0.4,cc:0.15},recip:{comp:5,fan:0.5,cc:0.15}},
+'2':{scroll:{comp:4.5,fan:0.5,cc:0.17},recip:{comp:7,fan:0.6,cc:0.17}},
+'2.5':{scroll:{comp:5.5,fan:0.5,cc:0.20},recip:{comp:8.5,fan:0.7,cc:0.20}},
+'3':{scroll:{comp:6,fan:0.6,cc:0.22},recip:{comp:10,fan:0.8,cc:0.22}},
+'3.5':{scroll:{comp:7.5,fan:0.8,cc:0.25},recip:{comp:12,fan:1.0,cc:0.25}},
+'4':{scroll:{comp:9,fan:1.0,cc:0.29},recip:{comp:14,fan:1.2,cc:0.29}},
+'5':{scroll:{comp:12,fan:1.2,cc:0.35},recip:{comp:18,fan:1.5,cc:0.35}}
+};
+function ctForAmps(a){
+var opts=[5,10,15,20,25,30,50,100];
+for(var i=0;i<opts.length;i++){if(opts[i]>=a*1.5)return opts[i];}
+return 100;
+}
+function overcurrentForAmps(a){return Math.round(a*1.5*10)/10;}
+function lockedRotorForAmps(a){return Math.round(a*5*10)/10;}
+var _hpDef=null;
+function ctLabel(v){return 'SCT-013-0'+String(v).padStart(2,'0');}
+function updateHPDefaults(){
+var ton=document.getElementById('hpTonnage').value;
+var scroll=document.getElementById('scrollCompressor').checked;
+var spec=hpSpecs[ton];
+if(!spec)return;
+var s=scroll?spec.scroll:spec.recip;
+var compCt=ctForAmps(s.comp);
+var fanCt=ctForAmps(s.fan);
+var ccCt=ctForAmps(s.cc);
+_hpDef={compCt:compCt,fanCt:fanCt,ccCt:ccCt,compOC:overcurrentForAmps(s.comp),fanOC:overcurrentForAmps(s.fan),lr:lockedRotorForAmps(s.comp),compA:s.comp,fanA:s.fan,ccA:s.cc};
+var el=document.getElementById('hpDefaults');
+el.innerHTML='<b>'+ton+' ton '+(scroll?'scroll':'reciprocating')+'</b> (per leg, 240V):<br>'+
+'Compressor: ~'+s.comp+'A &rarr; '+ctLabel(compCt)+'<br>'+
+'Fan: ~'+s.fan+'A &rarr; '+ctLabel(fanCt)+'<br>'+
+'Crankcase heater: ~'+s.cc+'A &rarr; '+ctLabel(ccCt);
+el.style.display='block';
+document.getElementById('applyDefaultsBtn').style.display='inline-block';
+document.getElementById('compCtRec').textContent='(recommended: '+ctLabel(compCt)+')';
+document.getElementById('fanCtRec').textContent='(recommended: '+ctLabel(fanCt)+')';
+document.getElementById('ccCtRec').textContent='(recommended: '+ctLabel(ccCt)+')';
+document.getElementById('ccAmpsRec').textContent='(typical: '+s.cc+'A)';
+}
+function applyHPDefaults(){
+if(!_hpDef)return;
+document.getElementById('compressorCtRatio').value=_hpDef.compCt;
+document.getElementById('fanCtRatio').value=_hpDef.fanCt;
+document.getElementById('crankcaseCtRatio').value=_hpDef.ccCt;
+document.getElementById('crankcaseExpectedAmps').value=_hpDef.ccA;
+document.getElementById('compressorOvercurrentAmps').value=_hpDef.compOC;
+document.getElementById('fanOvercurrentAmps').value=_hpDef.fanOC;
+document.getElementById('lockedRotorThreshold').value=_hpDef.lr;
+checkDirty();
+var el=document.getElementById('hpDefaults');
+el.innerHTML+='<br><span style="color:#27ae60">Defaults applied — review and Save Changes</span>';
+}
 function snapshotValues(){
 _origValues={};
 var form=document.getElementById('cf');
@@ -506,7 +635,7 @@ alert('Locked Rotor fault cleared');
 }
 function save(e){
 e.preventDefault();
-var d={};var numFields=['mqttPort','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostColdMaxTemp','defrostWarmMinTemp','defrostColdRuntimeMin','defrostColdMinRuntimeSec','defrostColdExitTempF','defrostMidRuntimeMin','defrostMidMinRuntimeSec','defrostMidExitTempF','defrostWarmRuntimeMin','defrostWarmMinRuntimeSec','defrostWarmExitTempF','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','compressorCtRatio','fanCtRatio','compressorOvercurrentAmps','fanOvercurrentAmps','overcurrentDelaySec','lockedRotorThreshold','lockedRotorTimeoutSec','weatherStaleMinutes','weatherRefreshMinutes','internalTempOffsetF'];
+var d={};var numFields=['mqttPort','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','stateValidationSec','inputDelaySec','defrostColdMaxTemp','defrostWarmMinTemp','defrostColdRuntimeMin','defrostColdMinRuntimeSec','defrostColdExitTempF','defrostMidRuntimeMin','defrostMidMinRuntimeSec','defrostMidExitTempF','defrostWarmRuntimeMin','defrostWarmMinRuntimeSec','defrostWarmExitTempF','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','hpTonnage','compressorCtRatio','fanCtRatio','crankcaseCtRatio','compressorBurdenOhms','fanBurdenOhms','crankcaseBurdenOhms','crankcaseExpectedAmps','compressorOvercurrentAmps','fanOvercurrentAmps','overcurrentDelaySec','lockedRotorThreshold','lockedRotorTimeoutSec','weatherStaleMinutes','weatherRefreshMinutes','internalTempOffsetF'];
 fields.forEach(f=>{var e=document.getElementById(f);var v=e?e.value:'';d[f]=numFields.indexOf(f)>=0&&v!==''?Number(v):v;});
 var mbVal=document.getElementById('maxLogSizeMB').value;
 d.maxLogSize=mbVal?parseInt(mbVal)*1024*1024:'';
@@ -514,6 +643,7 @@ d.displayEnabled=document.getElementById('displayEnabled').checked;
 d.max6675Enabled=document.getElementById('max6675Enabled').checked;
 d.lowTempEnableW=document.getElementById('lowTempEnableW').checked;
 d.lowTempEnableAux=document.getElementById('lowTempEnableAux').checked;
+d.scrollCompressor=document.getElementById('scrollCompressor').checked;
 d.curWifiPw=document.getElementById('curWifiPw').value;
 d.curMqttPw=document.getElementById('curMqttPw').value;
 var ap=document.getElementById('adminPassword').value;
@@ -523,6 +653,16 @@ if(ap!==apc){var s=document.getElementById('status');s.className='err';s.textCon
 d.adminPassword=ap;
 d.curAdminPw=document.getElementById('curAdminPw').value;
 }
+// SCT-013-000: compute effective CT ratio from burden resistor (ratio = 2000 / burden_ohms)
+['compressor','fan','crankcase'].forEach(function(ch){
+var ratioKey=ch==='crankcase'?'crankcaseCtRatio':ch+'CtRatio';
+var burdenKey=ch+'BurdenOhms';
+if(d[ratioKey]===0){
+var b=d[burdenKey]||0;
+if(b>0){d[ratioKey]=2000/b;}
+else{d[ratioKey]=30;d[burdenKey]=0;} // fallback to SCT-013-030 if no burden specified
+}else{d[burdenKey]=0;} // voltage-output CT: clear burden
+});
 if(d.weatherSource==='http'||d.weatherSource==='both'){var ak=d.weatherApiKey||'';if(!ak){var s=document.getElementById('status');s.className='err';s.textContent='HTTP weather source requires an API key.';s.style.display='block';return false;}}
 var s=document.getElementById('status');
 fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r=>r.json()).then(r=>{

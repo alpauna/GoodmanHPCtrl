@@ -86,40 +86,87 @@ COM ───────────┘
 
 ## CT Clamp Interface (Ch1, Ch2, Ch4)
 
-Identical circuit to the existing ADS1115 daughter board. Three 3.5mm TRS
-jacks: two SCT-013-030 (30A, compressor + fan) and one SCT-013-005 (5A,
-crankcase heater).
+Three universal 3.5mm TRS jacks supporting both voltage-output CTs
+(SCT-013-005/010/030) and current-output CTs (SCT-013-000). Each jack has
+a 2-pin 2.54mm female header across tip-to-ring for socketed burden resistor
+placement.
+
+- **Voltage-output CT** (e.g., SCT-013-005/030): Leave burden header **empty**.
+  CT has internal burden; outputs voltage directly.
+- **Current-output CT** (SCT-013-000, 2000:1 ratio, 50mA @ 100A): Insert a
+  through-hole resistor (1% tolerance or better) bent into a 2-pin male header
+  into the burden socket. Output voltage = I_secondary × R_burden.
+
+The socketed design allows field-swapping burden values without soldering —
+just pull the old resistor and insert a new one to change the effective
+measurement range.
+
+### Universal Jack Circuit
 
 ```
-                    2.5V Vbias
-                       │
-                   ┌─ 10kΩ ─┐
-                   │         │
-CT tip ── 10μF ──┬─┤         ├─┬── 10μF ── CT ring
-                 │ │         │ │
-               AINxP      AINxN
-                   │         │
-                   └─ 10kΩ ─┘
-                       │
-                    2.5V Vbias
+              R_burden (2.54mm header socket, empty for voltage-output CTs)
+CT tip ──┬──────[■ ■]────────────┬── CT ring
+         │                        │
+        10μF                     10μF
+         │                        │
+     10kΩ ── Vbias            10kΩ ── Vbias
+         │                        │
+       TVS_A                    TVS_B     ← PESD3V3L2BT (dual bidir, SOT-23)
+         │                        │
+       AINxP                   AINxN
 ```
 
-**DC blocking caps on both sides:** 10μF on both tip (AINxP) and ring (AINxN)
-for symmetric DC blocking. At 60Hz with 10kΩ bias resistors, the high-pass
-cutoff is 1.6Hz — transparent to the 60Hz signal. Going smaller than 4.7μF
-risks attenuation (0.1μF + 10kΩ = 159Hz cutoff, would attenuate 60Hz).
+### Burden Resistor Selection (SCT-013-000, 2000:1)
 
-**Vbias generation:**
+For 1.0V output at full-scale current:
+
+| Target Range | R_burden | V @ max | Use Case |
+|-------------|----------|---------|----------|
+| 100A | 20Ω | 1.0V | Large commercial |
+| 50A | 40Ω | 1.0V | Large compressor |
+| 30A | 66Ω | 1.0V | Compressor (3-5 ton) |
+| 15A | 133Ω | 1.0V | Small compressor |
+| 5A | 400Ω | 1.0V | Fan motor |
+| 1A | 2kΩ | 1.0V | Crankcase heater |
+
+Formula: R_burden = V_target / (I_primary / turns_ratio) = V_target × 2000 / I_max
+
+**Note:** R_burden must be 1% tolerance or better for accurate readings. Power
+dissipation is negligible (< 1mW for all values above). Use standard 1/4W
+through-hole axial resistor bent to 2.54mm pin spacing and inserted into the
+burden header socket. No soldering required for burden changes.
+
+### Default Configuration
+
+| Channel | Default CT | R_burden | Notes |
+|---------|-----------|----------|-------|
+| Ch1 (Compressor) | SCT-013-030 (voltage) | unpopulated | Or SCT-013-000 + 66Ω |
+| Ch2 (Fan) | SCT-013-005 (voltage) | unpopulated | Or SCT-013-000 + 400Ω |
+| Ch4 (Crankcase) | SCT-013-005 (voltage) | unpopulated | Or SCT-013-000 + 2kΩ |
+
+**DC blocking caps:** 10μF on both sides (tip and ring) for symmetric DC
+blocking. At 60Hz with 10kΩ bias resistors, the high-pass cutoff is 1.6Hz —
+transparent to the 60Hz signal. Going smaller than 4.7μF risks attenuation
+(0.1μF + 10kΩ = 159Hz cutoff, would attenuate 60Hz).
+
+**TVS input protection:** PESD3V3L2BT,215 (Nexperia, LCSC C55440) — dual
+bidirectional TVS in SOT-23 package. One device per CT channel, clamps both
+AINxP and AINxN to ±3.3V. The 10kΩ series resistance limits fault current
+to < 1mA at clamp. Protects against motor inrush transients, hot-plugging
+CT jacks under load, and ESD from handling TRS connectors.
+
+**Vbias generation (1.65V from 3.3V rail):**
 ```
-5V ── 1kΩ ──┬── 1kΩ ── GND
-            │
-           100nF + 10μF
-            │
-          2.5V out
+3.3V ── 1kΩ ──┬── 1kΩ ── GND
+              │
+             100nF + 10μF
+              │
+            1.65V out
 ```
 
-If the board runs at 3.3V only (no 5V rail), use 2× 1kΩ from 3.3V for
-1.65V bias instead. Adjust PGA gain accordingly.
+- 1.65V mid-rail bias from 3.3V supply via equal resistor divider
+- CT signal swings symmetrically around 1.65V
+- Within ADS131M04 ±1.2V input range at PGA=1x (1.65V ± 1.0V peak)
 
 ## SN74HC14DR Spare Channels
 
