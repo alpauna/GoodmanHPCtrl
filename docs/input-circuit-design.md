@@ -35,7 +35,7 @@ All four digital inputs (LPS, DFT, Y, O) use identical 24V AC signal conditionin
                        │
                     R (4.7kΩ, RC2010FK-074K7L)
                        │
-                    C (470nF)
+                    C (4.7µF, Xc = 560Ω @ 60Hz)
                        │
                       GND
 ```
@@ -104,22 +104,23 @@ All four digital inputs (LPS, DFT, Y, O) use identical 24V AC signal conditionin
 
 | Component | Value | Function | Notes |
 |-----------|-------|----------|-------|
-| **R (Load)** | 4.7kΩ, 0.5W (RC2010FK-074K7L) | Triac output load resistor | Prevents floating high when triac is off |
-| **C (Load)** | 470nF, 16V | AC coupling / ripple filter | Works with load resistor to define impedance |
+| **R (Load)** | 4.7kΩ, 0.5W (RC2010FK-074K7L) | Triac output load resistor | Provides DC load; prevents floating high when triac is off |
+| **C (Load)** | 4.7µF, 16V | AC impedance matching | Xc = 560Ω at 60Hz; AC signal coupling |
 
 **Background:**
 Thermostat triac outputs can float capacitively high when unloaded, causing false GPIO activation (known issue: Y input activating unexpectedly due to floating voltage). The phantom load network prevents this by:
 
 1. **Providing a DC load path** when the triac is not actively sinking current
 2. **Pulling the signal toward ground** through the resistor
-3. **Filtering AC ripple** with the capacitor
-4. **Establishing predictable impedance** for the AC signal
+3. **AC impedance matching** with the capacitor (Xc = 560Ω at 60Hz)
+4. **Establishing predictable impedance** for signal coupling
 
 **Performance for 24V AC:**
 - Load current (triac off): 24V / 4.7kΩ = **5.1mA continuous**
 - Power dissipation: 24V × 5.1mA = **122mW**
 - Power rating: RC2010FK = **0.5W (500mW)** ✓ **24% utilization** (safe margin)
-- Impedance: 4.7kΩ at DC; capacitive reactance at 60Hz: Xc = 1/(2π × 60 × 470nF) ≈ **5.65kΩ**
+- **Impedance at 60Hz:** Xc = 1/(2π × 60 × 4.7µF) ≈ **560Ω** (capacitive reactance)
+- **Total impedance:** Z = √(4700² + 560²) ≈ **4,730Ω** (resistor-dominated)
 
 ---
 
@@ -202,7 +203,7 @@ A high-voltage TVS (SMF24/SMF30) would clamp at ~20–30V, still above ESP32 saf
 | 1 | R79 | 1MΩ 1/4W | 0603 | C25791 | Bleed resistor (GPIO discharge) |
 | 1 | C47 | 100nF 16V | 0603 | C57112 | GPIO high-frequency filter |
 | 1 | R (Load) | 4.7kΩ 0.5W | 2010 | C513572 | Phantom triac load resistor (RC2010FK) |
-| 1 | C (Load) | 470nF 16V | 0805 | C49308 | Phantom triac load capacitor |
+| 1 | C (Load) | 4.7µF 16V | 0805 | C45783 | Phantom triac load capacitor (Xc = 560Ω @ 60Hz) |
 
 **Total per input:** ~$0.25 in component cost (BOM estimates from LCSC)
 
