@@ -108,8 +108,10 @@ galvanic isolation on the voltage reference and inter-board digital buses
 (CAN, I2C).
 
 Tradeoff: ~2× ripple vs full-wave bridge (16.7ms hold-up at 60Hz vs 8.3ms).
-Mitigated by using 1000μF input filter cap (vs 470μF). The LGS5145 buck
-converter's wide input range handles the additional ripple without issue.
+Mitigated by using 1000μF 50V input filter cap (vs 470μF 63V). 50V rating
+is sufficient — SMAJ36CA TVS upstream clamps transients to ~58V max and the
+fuse limits sustained fault current. The LGS5145 buck converter's wide input
+range handles the additional ripple without issue.
 
 ## CT Clamp Interface (Ch1, Ch2, Ch4)
 

@@ -227,8 +227,10 @@ ground domain across the entire system:
 
 Tradeoff vs full-wave bridge (MB10S): half-wave produces ~2× ripple on the
 input filter cap (16.7ms hold-up vs 8.3ms at 60Hz). Mitigated by using a
-larger input filter cap (1000μF vs 470μF). The LGS5145 buck converter's wide
-input range handles the additional ripple without issue.
+larger input filter cap (1000μF 50V vs 470μF). 50V rating is sufficient —
+SMAJ36CA TVS clamps transients to ~58V max, and the upstream fuse limits
+sustained fault current. The LGS5145 buck converter's wide input range
+handles the additional ripple without issue.
 
 ## Software Design
 
