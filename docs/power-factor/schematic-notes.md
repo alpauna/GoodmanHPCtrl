@@ -269,37 +269,45 @@ enough for the 500ms polling interval.
 **Total: 20 components** replacing 28+ components (4× optocouplers, 16×
 resistors, 4× caps, 4× TVS, 1× SN74HC14DR).
 
-## Analog Power Supply (5VPF)
+## Analog Power Supply (AVDD)
 
-The 5VPF rail feeds the ADS131M04 analog supply. L2 on the main power
-schematic filters 5V → 5VPF, with C7/C8 (1μF) and C9 (22μF) output caps
-and D4 (SMF5.0A) TVS protection.
+The ADS131M04 analog supply can operate at either 3.3V or 5V (rated 2.4–5.5V).
+**Recommended: 3.3V** from the existing digital LDO (U22 TLV76133DCYR).
 
-**Replace L2 (10μH inductor) with a ferrite bead** (~600Ω @ 100MHz, low
-DCR). A 10μH inductor can resonate with the output capacitance (C7/C8/C9),
-creating a tank circuit that amplifies noise at the resonant frequency. A
-ferrite bead is lossy by design — it absorbs HF switching noise from the
-LGS5145 buck converter as heat instead of ringing.
+**Why 3.3V:**
+- Input signal range ±1.2V is supply-independent (internal reference spec)
+- Voltage reference (24VAC → 0.71V RMS, 1.0V peak) fits ±1.2V ✓
+- CT clamp signals (1.65V ± 1.0V) fit ±1.2V ✓
+- Single clean supply (LDO is cleaner than ferrite bead filtering)
+- Lower power draw (~20mA vs 30mA @ 5V)
+- Simpler schematic (no separate 5V rail needed)
 
 ```
-5V ── [ferrite bead] ──┬── 5VPF
-                       │
-                 C7 1μF + C8 1μF + C9 22μF
-                       │
-                      GND
+3.3V LDO ──┬── AVDD (ADS131M04)
+(U22)      │
+           ├── 10μF (bulk bypass)
+           ├── 100nF (high-frequency bypass)
+           │
+          GND
 ```
 
-**Important**: L2 is on the main 5V supply path — must be rated for at
-least 1A. Use a power-rated ferrite bead such as BLM31PG601SN1L (Murata,
-1206, 600Ω @ 100MHz, 1.5A rated, ~0.08Ω DCR) or equivalent. Small-signal
-beads (0402/0603) are not suitable — they saturate at high current and lose
-their filtering properties. High impedance at LGS5145 switching frequency
-(~1MHz), resistive absorption above 10MHz. Combined with the existing
-output caps, forms a proper lossy low-pass filter with no resonance risk.
+**Component placement:**
+- 100nF bypass cap within 5mm of AVDD pin (high-frequency decoupling)
+- 10μF bulk cap nearby (transient response)
+- Single ground tie point under the ADC (star ground)
 
-## 3.3V Digital Supply (U22 TLV76133DCYR)
+**Signal voltage specifications (unchanged):**
+- Voltage reference Ch3: 0.71V RMS (1.0V peak) — within ±1.2V ✓
+- CT clamp Ch1/2/4: biased 1.65V ± 1.0V swing — within ±1.2V ✓
+- Input PGA = 1x, differential mode (±1.2V full-scale input range)
 
-Two recommended changes to the 3.3V LDO section:
+## 3.3V Supply (U22 TLV76133DCYR) — Serves Both Digital and Analog
+
+The single 3.3V LDO output feeds both the ESP32 digital supply (DVDD) and the
+ADS131M04 analog supply (AVDD). This creates a single, clean 3.3V domain
+across the entire system.
+
+**Two recommended changes to the 3.3V LDO section:**
 
 **1. Increase C12 from 100nF to at least 1μF (recommend 10μF)**
 
@@ -319,8 +327,18 @@ these transients.
 ```
 Current:   5V → U22 → C12 (100nF) → 3.3V
 
-Suggested: 5V → U22 → C12 (10μF) → 3.3V ──── C_bulk (22-47μF near ESP32)
+Suggested: 5V → U22 → C12 (10μF) → 3.3V ──┬── DVDD (ESP32)
+                                           │
+                                           ├── C_bulk (22-47μF near ESP32)
+                                           │
+                                           └── AVDD (ADS131M04)
 ```
+
+**Benefit of unified 3.3V:**
+- Single clean supply simplifies noise management
+- No need for separate analog/digital supply rails
+- Reduces component count and PCB routing complexity
+- LDO PSRR provides excellent ripple rejection for both digital and analog
 
 Schematic: `docs/schematics/SCH_Schematic1_2-Power_2026-03-22.pdf`
 
