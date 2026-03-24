@@ -344,10 +344,176 @@ Schematic: `docs/schematics/SCH_Schematic1_2-Power_2026-03-22.pdf`
 
 ## PCB Layout Considerations
 
-- Place ADS131M04 close to the CT clamp jacks to minimize analog trace length
-- Keep SPI traces away from 24VAC power traces and relay switching traces
-- Separate analog ground (AGND) from digital ground (DGND), tie at a single
-  point under the ADC
-- Vbias decoupling caps as close to the ADC input pins as possible
-- 100nF bypass caps on AVDD and DVDD within 5mm of supply pins
-- CT clamp differential pairs should be routed as matched-length traces
+### Ground Plane Separation (Critical for 24-bit ADC SNR)
+
+**Why separate grounds:**
+- ESP32-S3 WiFi/SPI switching injects noise into shared ground plane
+- ADS131M04 (24-bit) is extremely sensitive to ground noise
+- Unshielded digital return currents couple into analog signal paths
+- Result: degraded SNR, noisy CT clamp readings, poor power factor accuracy
+
+**Recommended stackup (4-layer minimum):**
+```
+Layer 1: Signal + Power (top)
+Layer 2: AGND (analog ground plane, isolated region)
+Layer 3: DGND (digital ground plane, full coverage)
+Layer 4: Signal (bottom)
+```
+
+**Ground plane layout:**
+
+```
+┌─────────────────────────────────────────┐
+│  CT Clamps │ Voltage Ref │ AGND Island  │
+│             (left/analog region)         │
+├──────────────────────────────────────────┤
+│                                          │
+│         ADS131M04 (★ star point)        │
+│                                          │
+│              ★ AGND ↔ DGND              │  ← Single via
+│                                          │     (0Ω jumper
+├──────────────────────────────────────────┤     or direct)
+│  ESP32-S3 │ SPI Bus │ DGND (full)       │
+│        (right/digital region)            │
+└──────────────────────────────────────────┘
+```
+
+**Ground plane implementation:**
+
+1. **AGND Island (Layer 2):**
+   - Isolated copper region under ADS131M04 and CT circuits
+   - Includes: ADC, CT jacks, voltage reference circuit, Vbias divider
+   - Surrounds ADS131M04 with at least 10mm border (no digital traces/vias)
+   - **Single via connection** to DGND directly under ADC
+
+2. **DGND Plane (Layer 3):**
+   - Full continuous copper plane
+   - Provides return path for all digital circuits (ESP32, SPI, buck converter)
+   - High copper density = low impedance for return currents
+
+3. **Star Ground Connection:**
+   - **Location:** Directly under ADS131M04 center
+   - **Method:** Single via (not a trace bridge) or 0Ω jumper resistor
+   - **Size:** At least one 12mil via (or two 10mil vias in parallel)
+   - **Purpose:** Merges AGND island and DGND at the point of highest analog sensitivity
+
+### Signal Trace Routing
+
+**Analog signal traces (AGND reference):**
+- AINxP/AINxN differential pairs: routed on Layer 1, return on AGND plane
+- Matched length ±5mm tolerance (balance capacitive coupling)
+- Trace width: 10mil minimum
+- Keep away from switching signals (ESP32 GPIO, SPI clock)
+- Spacing from digital traces: ≥15mil minimum
+
+**Voltage reference trace (24VAC divider):**
+- Route directly from transformer tap to AGND plane
+- Minimize stub length before 33kΩ resistor
+- Return current path on AGND only (never cross to DGND)
+
+**SPI bus traces (DGND reference):**
+- SCLK, DIN, DOUT, /CS routed on Layer 1, return on DGND plane
+- Keep away from analog signal region (minimum 25mm separation)
+- Ground vias near SPI connector (fast return path)
+- Trace width: 8mil acceptable for SPI speeds (<25MHz)
+
+**Power traces:**
+- AVDD: routed on Layer 1, return on AGND via short vias to AGND island
+- DVDD: routed on Layer 1, return on DGND via short vias to DGND plane
+- Keep AVDD and DVDD traces separated (no parallel running)
+
+### Decoupling Capacitor Placement
+
+**ADS131M04 bypass (most critical):**
+```
+        3.3V
+          │
+       ┌──┴──┐
+       │10μF │  ← 5mm from AVDD pin
+       └──┬──┘
+          │
+          ├──┬──┐
+          │100nF│  ← 3mm from AVDD pin (HF filter)
+          └──┴──┘
+          │
+        AGND
+```
+- 10μF bulk cap: 5mm away from AVDD pin
+- 100nF HF cap: 3mm away from AVDD pin (closer for higher frequency response)
+- Both return directly to AGND via short vias (<5mm)
+- No shared return traces with digital circuits
+
+**ESP32-S3 bulk capacitance:**
+- 22–47μF ceramic as close as possible to VDD pins (<10mm)
+- Returns to DGND via short vias
+- Placed on opposite corner of board from ADS131M04 (isolates noise)
+
+**Vbias divider capacitors (CT clamp biasing):**
+- 10μF + 100nF placed adjacent to ADC input pins
+- Both return to AGND (not DGND)
+- Minimize trace length to AINxP/AINxN inputs
+
+### Via Strategy
+
+**AGND vias (to analog island):**
+- Use multiple smaller vias (10mil) rather than one large via
+- Spacing: ≤15mm between vias
+- Cluster vias near component grounds (capacitor pads, ADC pins)
+- **Never use AGND vias for digital signal returns**
+
+**DGND vias (to digital plane):**
+- Use 12–15mil vias for return currents (lower impedance)
+- Place close to component pins (SPI, ESP32)
+- Spacing: ≤10mm between vias under high-current areas
+- Allow high-current return paths (WiFi TX spikes)
+
+**Star point via:**
+- Central location under ADS131M04
+- Size: 12mil minimum (or two 10mil in parallel)
+- Connects AGND island to DGND plane
+- No other vias allowed in this region (exclusive connection point)
+
+### Component Placement
+
+**Critical region (analog island):**
+- ADS131M04 at center
+- CT jack connectors within 50mm
+- Voltage reference circuit (33kΩ, divider, capacitors) within 30mm of ADC
+- Vbias divider within 20mm of ADC
+- TVS protection devices (PESD3V3L2BT) directly at input pins
+
+**Isolation zones:**
+- Keep all digital logic >50mm from ADS131M04
+- ESP32-S3 on opposite corner of board
+- SPI bus routed away from analog region
+- 24VAC power traces: ≥30mm from analog circuits
+
+### Layer Stackup Reference (4-layer example)
+
+```
+Layer 1 (top):      Analog signals | Digital signals | Power
+Layer 2 (inner 1):  AGND island + star point ↔ DGND
+Layer 3 (inner 2):  DGND continuous plane + DVDD pour
+Layer 4 (bottom):   Return signals | ground vias
+```
+
+**Via requirements by layer:**
+- L1→L2: AGND vias (analog signals) — use 10mil, ≤15mm spacing
+- L1→L3: DGND vias (digital signals) — use 12mil, ≤10mm spacing
+- L2↔L3: Star point via (one location under ADC) — use 12mil min
+- L4: Back-side ground vias where needed for return paths
+
+### Grounding Checklist
+
+- [ ] AGND and DGND planes created and separated on Layer 2/3
+- [ ] Star point via placed directly under ADS131M04
+- [ ] AGND island isolated with ≥10mm border, no digital traces
+- [ ] CT differential pairs routed with matched length ±5mm
+- [ ] 10μF + 100nF bypass on AVDD within 3–5mm of pin
+- [ ] ADS131M04 surrounded by AGND vias (≤15mm spacing)
+- [ ] ESP32-S3 on opposite side of board from ADS131M04
+- [ ] SPI traces >25mm away from analog signal traces
+- [ ] Vbias capacitors return to AGND only
+- [ ] All CT clamp signal returns on AGND (never cross to DGND)
+- [ ] Power traces (AVDD/DVDD) kept separate, both short to respective ground
+- [ ] No digital return currents flowing through AGND traces
