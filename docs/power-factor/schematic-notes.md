@@ -183,11 +183,74 @@ GND     ────────────→ DGND (isolated digital return)
 - SCLK speed: 10–25 MHz (ADS131M04 supports up to 25 MHz)
 - /DRDY interrupt: Configure GPIO 46 as falling-edge (data ready)
 
+## VBIAS Reference Generation
+
+The VBIAS reference is generated from the **ADS131M04's internal 1.2V voltage reference**
+using an OP07 precision op-amp configured as a non-inverting amplifier with gain = 1.375.
+
+**Circuit topology:**
+
+```
+ADS131M04 CAP pin (1.2V internal ref)
+    │
+    ├─── 220nF ── AGND  (required per ADS131M04 datasheet)
+    │
+    └─── [OP07 pin 3 (+input)]
+         │
+         │     ┌────── Rf: 15kΩ ──────┐
+         │     │                      │
+    ┌────┤+3V  OP07      [Out] ────┬──┴──► VBIAS = 1.65V
+    │    │     (pins 8,4)  │       │
+    │    │                 │       ├─ C (10µF) ── AGND
+    │    ├─ Rg: 40kΩ ─ AGND
+    │    │
+    │    └─ Ref: AGND
+    │
+3.3V ────┴──► OP07 pin 8 (V+ supply)
+        100nF bypass cap ── AGND
+
+Gain = 1 + Rf/Rg = 1 + 15k/40k = 1.375
+VBIAS_out = 1.2V × 1.375 = 1.65V
+```
+
+**Component specifications:**
+
+| Component | Value | Function |
+|-----------|-------|----------|
+| U_ref | OP07 | Ultra-low offset op-amp (Vos ±0.3mV) |
+| Rf | 15kΩ 1% metal film | Feedback resistor for gain setting |
+| Rg | 40kΩ 1% metal film | Ground reference resistor |
+| C_bypass (OP07 pin 8) | 100nF ceramic 0603 | Power supply bypass |
+| C_out | 10µF ceramic 0805 | Output load capacitor |
+| CAP decoupling | 220nF ceramic 0603 | Required by ADS131M04 datasheet |
+
+**Advantages over external voltage divider:**
+
+1. **Temperature matching:** VBIAS inherits the ADC's internal reference temperature drift
+   (20 ppm/°C). Both drift together → no relative error.
+
+2. **Superior accuracy:** ±0.1% internal reference vs ±1-2% supply-dependent divider
+
+3. **Ultra-low offset:** OP07 Vos ±0.3mV ensures accurate 1.65V ± 3mV output
+
+4. **Low noise:** OP07 noise floor (25 nV/√Hz) provides clean VBIAS to all bias networks
+
+5. **No supply noise:** Reference is internal to ADC, not coupled through 3.3V rail
+
+6. **Full ADC range utilization:** ±1.2V input range fully exploited (vs ±0.6V if using 1.2V directly)
+
+**Power supply requirements:**
+
+- OP07 single-supply mode: +3.3V (pin 8) and AGND (pin 4)
+- Must add 100nF bypass capacitor on +3.3V near pin 8
+- OP07 can swing output close to rails (within ~0.2V of supplies)
+- Output swing: 0V to 3.3V, sufficient for 1.65V VBIAS
+
 ## Voltage Reference Input (Ch3)
 
-Tap the 24VAC transformer secondary directly — already available on the HP
-board as the 24VAC/COM bus. COM is tied directly to digital GND (half-wave
-power supply design), so no isolation is needed.
+The 24VAC from the furnace transformer secondary is used as the phase-true voltage reference
+for power factor angle measurement. This signal is attenuated to match the ADC input range via
+a 1:34 voltage divider and TVS protection.
 
 ```
 24VAC ── 33kΩ ──┬── TVS_A ── GND
@@ -216,9 +279,8 @@ TVS = PESD3V3L2BT (dual bidirectional, same as CT channels)
   (high-pass cutoff ~16Hz with 1kΩ — transparent to 60Hz)
 - 100nF across 1kΩ for HF noise rejection
 - TVS clamps transients from transformer inrush and line surges
-- **Phase accuracy**: Resistive divider introduces no phase shift (unlike a
-  transformer-based reference). The voltage sample is phase-true to the
-  actual line voltage
+- **Phase accuracy**: Resistive divider introduces no phase shift. The voltage sample is
+  phase-true to the actual line voltage at the AC unit input.
 
 ### Power Supply: Half-Wave Rectifier Design
 
