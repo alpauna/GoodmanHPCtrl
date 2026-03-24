@@ -33,34 +33,155 @@ Triac output ──┬── 4.7kΩ ── COM     (resistive bleeder, 123mW @ 2
 - Combined impedance at 60Hz: ~560Ω — provides strong loading to prevent
   triac leakage from energizing relay coils.
 
-## SPI Bus Wiring (ADS131M04)
+## Daughter Board Architecture (Power Factor Module)
 
-Dedicated SPI bus, physically separate from the SD card SPI (GPIO 10–13).
+The power factor monitoring circuit is implemented as a **separate daughter board**
+connected to the main board via two isolated headers. This provides optimal
+analog/digital separation and noise isolation.
+
+### Board Separation Strategy
+
+**Main Board** (noisy digital domain)
+- ESP32-S3 (WiFi, SPI switching)
+- Relay triac drivers (24VAC switching)
+- Buck converter (1MHz switching)
+
+**Daughter Board** (clean analog domain)
+- ADS131M04 ADC
+- CT clamp conditioning (3× PJ-3200A-3A jacks)
+- Voltage reference divider (24VAC)
+- Vbias generation (1.65V divider)
+- SCT-013-000 burden resistor sockets (3× socketed, field-swappable)
+
+**Connection:** Two isolated headers carrying only power and SPI signals
+
+### Header 1: Analog Power & Signals
+
+**Purpose:** Power and analog signal conditioning — isolated power domain
 
 ```
-ESP32-S3          ADS131M04
-─────────         ─────────
-GPIO 1  ────────  SCLK
-GPIO 2  ────────  DIN  (MOSI)
-GPIO 42 ────────  DOUT (MISO)
-GPIO 45 ────────  /CS
-GPIO 46 ────────  /DRDY
+Connector: [2×3 pinheader or equivalent]
 
-3.3V    ────┬───  AVDD
-            ├───  DVDD
-            │
-           100nF + 10μF bypass (each supply pin)
-            │
-GND     ────┴───  AGND, DGND
+Pin 1: 24VAC (from main board transformer secondary)
+Pin 2: 24VAC (return, same as Pin 1 — two conductors for current distribution)
+Pin 3: GND (AGND — analog ground, isolated return)
+Pin 4: CT_CH1_TIP (from PJ-3200A-3A Jack 1, tip contact)
+Pin 5: CT_CH1_RNG (from PJ-3200A-3A Jack 1, ring contact)
+Pin 6: CT_CH2_TIP (from PJ-3200A-3A Jack 2, tip contact)
+Pin 7: CT_CH2_RNG (from PJ-3200A-3A Jack 2, ring contact)
+Pin 8: CT_CH4_TIP (from PJ-3200A-3A Jack 3, tip contact)
+Pin 9: CT_CH4_RNG (from PJ-3200A-3A Jack 3, ring contact)
+```
+
+**Alternative (lower pin count with internal jacks on daughter board):**
+```
+If jacks are mounted directly on daughter board (recommended):
+
+Pin 1: 24VAC
+Pin 2: 24VAC (return)
+Pin 3: AGND (isolated return)
+Pin 4: Burden Socket Pin A (Ch1) — optional, if burden headers not on daughter
+Pin 5: Burden Socket Pin B (Ch1) — optional
+...
+```
+
+**Burden Resistor Sockets:**
+- Three 2-pin 2.54mm female headers (one per CT channel)
+- Mounted directly on daughter board
+- Allow field-swappable 1% precision resistors
+- No connector needed — socketed resistors stay on daughter board
+
+**Notes:**
+- 24VAC has two paths for current distribution (lower impedance)
+- AGND is isolated — does NOT connect to main board GND at this header
+- CT signal conditioning (filtering, TVS protection) happens on daughter board
+- This header carries only low-frequency signals (60Hz AC, <1kHz)
+
+### Header 2: SPI Digital Communication
+
+**Purpose:** Digital SPI bus only — isolated digital return path
+
+```
+Connector: [2×3 pinheader or equivalent]
+
+Pin 1: 3.3V VDD (power for ADC DVDD and pull-up resistors)
+Pin 2: SCLK (from ESP32 GPIO 1)
+Pin 3: DIN / MOSI (from ESP32 GPIO 2)
+Pin 4: /CS (from ESP32 GPIO 45)
+Pin 5: /DRDY (to ESP32 GPIO 46, falling-edge interrupt)
+Pin 6: DGND (isolated digital ground — separate return path)
 ```
 
 **Notes:**
-- GPIO 45 is a strapping pin (VDD_SPI voltage select) — reads at boot only,
-  safe for CS use in normal operation. Default pulls set 3.3V VDD_SPI.
-- GPIO 46 is a strapping pin (ROM boot log) — same, safe for DRDY interrupt.
-- SPI clock: 10–25 MHz. ADS131M04 supports up to 25 MHz.
-- DRDY pulses low when new data is available. Configure as falling-edge
-  interrupt on the ESP32.
+- DGND at this header is **NOT connected to main board DGND**
+- Provides isolated return path for SPI currents
+- Star grounding on daughter board merges AGND and DGND under ADS131M04
+- All SPI pull-up/pull-down resistors on daughter board
+- Traces from this header to ADC are short and isolated
+
+### Isolation Benefit
+
+By using two separate headers:
+
+1. **Header 1 (Power):**
+   - Carries 24VAC and isolated AGND
+   - No digital switching noise injected
+   - Clean analog power domain
+
+2. **Header 2 (SPI):**
+   - Carries only digital SPI signals (low current)
+   - Separate DGND return path isolated from main board digital noise
+   - SCLK switching confined to daughter board local loops
+
+3. **Isolation between headers:**
+   - Single star point connection under ADS131M04
+   - Minimizes coupling between noisy digital and sensitive analog
+
+### PCB Layout on Daughter Board
+
+- **Header 1 location:** Near CT jack connectors and voltage reference circuit
+- **Header 2 location:** Opposite corner from header 1 (maximizes separation)
+- **AGND island:** Extends from header 1 to ADC and all analog circuits
+- **DGND return:** Isolated star connection under ADC from header 2
+- **SPI traces:** Route away from analog signal region (minimum 30mm)
+
+### Mechanical Mounting
+
+Suggested mounting scheme:
+- Two mounting posts (one near each header) to keep daughter board parallel
+- 2-5mm standoffs to prevent shorts
+- Keying notches on headers to prevent misconnection
+
+### Testing & Debug
+
+With isolated headers:
+1. Daughter board can be tested standalone (apply 24VAC + 3.3V to headers)
+2. Main board can be tested independently (no analog circuits affected)
+3. If ADC noise issues arise: daughter board can be replaced or reworked without disturbing main board
+4. Easier to isolate EMI sources (24VAC switching vs ESP32 noise)
+
+---
+
+## SPI Bus Wiring Summary (Main Board)
+
+```
+ESP32-S3              Header 2 (Daughter Board)
+────────              ──────────────────────────
+GPIO 1  ────────────→ SCLK
+GPIO 2  ────────────→ DIN  (MOSI)
+(GPIO 42 not used — daughter board provides DOUT internally)
+GPIO 45 ────────────→ /CS
+GPIO 46 ←──────────── /DRDY
+
+3.3V    ────────────→ VDD
+GND     ────────────→ DGND (isolated digital return)
+```
+
+**Notes:**
+- DGND return at Header 2 is isolated from main board GND
+- No analog signals cross the bridge (only SPI + isolated DGND)
+- SCLK speed: 10–25 MHz (ADS131M04 supports up to 25 MHz)
+- /DRDY interrupt: Configure GPIO 46 as falling-edge (data ready)
 
 ## Voltage Reference Input (Ch3)
 
