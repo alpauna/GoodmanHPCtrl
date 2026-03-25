@@ -165,23 +165,25 @@ With isolated headers:
 ## SPI Bus Wiring Summary (Main Board)
 
 ```
-ESP32-S3              Header 2 (Daughter Board)
+ESP32-S3              H1 Header (Daughter Board)
 ────────              ──────────────────────────
-GPIO 1  ────────────→ SCLK
-GPIO 2  ────────────→ DIN  (MOSI)
-(GPIO 42 not used — daughter board provides DOUT internally)
-GPIO 45 ────────────→ /CS
-GPIO 46 ←──────────── /DRDY
+GPIO 1  ────────────→ Pin 5: SCLK
+GPIO 2  ────────────→ Pin 4: DIN  (MOSI)
+GPIO 42 ←──────────── Pin 6: DOUT (MISO)
+GPIO 45 ────────────→ Pin 3: /CS
+GPIO 46 ←──────────── Pin 2: /DRDY (data ready interrupt)
 
-3.3V    ────────────→ VDD
-GND     ────────────→ DGND (isolated digital return)
+3.3V    ────────────→ Pin 1: VDD
+GND     ────────────→ Pin 7: DGND (isolated digital return)
 ```
 
 **Notes:**
-- DGND return at Header 2 is isolated from main board GND
+- H1 is a 7-pin isolated SPI header on daughter board
+- DGND return at pin 7 is isolated from main board GND
 - No analog signals cross the bridge (only SPI + isolated DGND)
 - SCLK speed: 10–25 MHz (ADS131M04 supports up to 25 MHz)
 - /DRDY interrupt: Configure GPIO 46 as falling-edge (data ready)
+- DOUT (MISO): Configure GPIO 42 as SPI input for serial data readout
 
 ## VBIAS Reference Generation
 
