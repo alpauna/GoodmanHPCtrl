@@ -73,6 +73,10 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _internalTempOffsetF(0.0f)
     , _ambientFailoverTest(false)
     , _failoverTestStartTick(0)
+    , _fanFault(false)
+    , _fanFaultStartTick(0)
+    , _fanNoCurrentStartTick(0)
+    , _fanLowConsecutive(0)
     , _manualOverride(false)
     , _manualOverrideStart(0)
     , _startupLockout(true)
@@ -284,6 +288,191 @@ void GoodmanHP::checkCurrentProtections() {
     }
 }
 
+// FAN fault watchdog: enforce that whenever CNT (compressor contactor) is
+// energized, the FAN must actually be moving air. If the FAN current sensor
+// reads below FAN_MIN_RUNNING_AMPS continuously for FAN_NO_CURRENT_TIMEOUT_MS
+// while CNT is on, shut CNT down and latch an ERROR state for
+// FAN_FAULT_ERROR_MS. After that grace period, the fault clears and normal
+// activation resumes; if the FAN still fails to draw current within another
+// FAN_NO_CURRENT_TIMEOUT_MS window on the next CNT activation, the fault is
+// re-latched. This protects the compressor from overheating due to a
+// stuck/failed blower even when the FAN output pin is commanded ON.
+void GoodmanHP::checkFanFault() {
+    OutPin* cnt = getOutput("CNT");
+    OutPin* fan = getOutput("FAN");
+    CurrentSensor* fanCur = getCurrentSensor("FAN_CURRENT");
+    uint32_t now = millis();
+
+    // === ERROR lockout window (3 min): keep CNT off, wait, then recover ===
+    if (_fanFault) {
+        // Force CNT off during the lockout (validateOutputStates enforces this too,
+        // but do it here for immediate effect)
+        if (cnt != nullptr && cnt->isOn()) {
+            cnt->turnOff();
+            _cntActivated = false;
+            float ampsDbg = (fanCur && fanCur->isValid()) ? fanCur->getRMSAmps() : -1.0f;
+            Log.error("HP", "FAN_FAULT: CNT forced OFF during ERROR lockout (Y=%d O=%d state=%s fanAmps=%.2f)",
+                      isYActive() ? 1 : 0, isOActive() ? 1 : 0, getStateString(), ampsDbg);
+        }
+        uint32_t elapsed = now - _fanFaultStartTick;
+        // Periodic heartbeat inside lockout so long ERROR windows are visible in logs
+        {
+            static uint32_t lastHeartbeat = 0;
+            if (now - lastHeartbeat >= 30UL * 1000) {
+                lastHeartbeat = now;
+                uint32_t remainMs = (elapsed < FAN_FAULT_ERROR_MS) ? (FAN_FAULT_ERROR_MS - elapsed) : 0;
+                float ampsDbg = (fanCur && fanCur->isValid()) ? fanCur->getRMSAmps() : -1.0f;
+                Log.warn("HP", "FAN_FAULT: ERROR lockout active — %lus remaining (Y=%d fanAmps=%.2f fanPin=%d)",
+                         remainMs / 1000UL, isYActive() ? 1 : 0, ampsDbg,
+                         (fan != nullptr && fan->isOn()) ? 1 : 0);
+            }
+        }
+        if (elapsed >= FAN_FAULT_ERROR_MS) {
+            // Lockout expired — clear the latch. checkYAndActivateCNT will
+            // re-energize CNT (and FAN) on the next cycle; the watchdog below
+            // will then re-arm and re-check the FAN.
+            State oldState = _state;
+            _fanFault = false;
+            _fanNoCurrentStartTick = 0;
+            Log.warn("HP", "FAN_FAULT: ERROR lockout complete after %lums — clearing latch and attempting recovery (Y=%d O=%d state=%s)",
+                     elapsed, isYActive() ? 1 : 0, isOActive() ? 1 : 0, getStateString());
+            if (isYActive() && fan != nullptr && _state != State::DEFROST) {
+                if (!fan->isOn()) {
+                    fan->turnOn();
+                    Log.info("HP", "FAN_FAULT: FAN turned ON (fault recovery, Y still active) — watchdog will re-arm on next CNT activation");
+                }
+            } else {
+                Log.info("HP", "FAN_FAULT: recovery — no FAN action (Y=%d state=%s)",
+                        isYActive() ? 1 : 0, getStateString());
+            }
+            if (_stateChangeCb) _stateChangeCb(_state, oldState);
+        }
+        return;
+    }
+
+    // === Normal operation: watch for CNT-ON + FAN-current-low ===
+    if (cnt == nullptr || !cnt->isOn()) {
+        // CNT off → nothing to guard, reset window
+        _fanNoCurrentStartTick = 0;
+        return;
+    }
+    if (fanCur == nullptr || !fanCur->isValid()) {
+        // Without a valid FAN current reading we cannot judge; do not false-trip
+        _fanNoCurrentStartTick = 0;
+        return;
+    }
+
+    float amps = fanCur->getRMSAmps();
+    if (amps >= FAN_MIN_RUNNING_AMPS) {
+        // FAN is drawing current — clear the pending timer and consecutive counter
+        _fanNoCurrentStartTick = 0;
+        _fanLowConsecutive = 0;
+        return;
+    }
+
+    // Low read — require N consecutive low reads before arming the watchdog window.
+    // A single glitch (I2C contention / sample bunching near zero-crossing) is
+    // filtered out here without producing any log line at all.
+    if (_fanLowConsecutive < 0xFF) _fanLowConsecutive++;
+    if (_fanLowConsecutive < FAN_LOW_CONSECUTIVE_REQUIRED) {
+        return;
+    }
+
+    // FAN current is low while CNT is on — start / continue the 20s window
+    if (_fanNoCurrentStartTick == 0) {
+        _fanNoCurrentStartTick = now;
+        // Nudge the FAN pin ON in case it was commanded OFF by a bug elsewhere
+        if (fan != nullptr && !fan->isOn() && _state != State::DEFROST) {
+            fan->turnOn();
+            Log.warn("HP", "FAN_FAULT: FAN current low (%.2fA < %.2fA) while CNT on, FAN pin was OFF — commanded ON, watching %lus (Y=%d state=%s)",
+                     amps, FAN_MIN_RUNNING_AMPS, FAN_NO_CURRENT_TIMEOUT_MS / 1000UL,
+                     isYActive() ? 1 : 0, getStateString());
+        } else {
+            Log.warn("HP", "FAN_FAULT: FAN current low (%.2fA < %.2fA) while CNT on, FAN pin already ON — watching %lus (Y=%d state=%s)",
+                     amps, FAN_MIN_RUNNING_AMPS, FAN_NO_CURRENT_TIMEOUT_MS / 1000UL,
+                     isYActive() ? 1 : 0, getStateString());
+        }
+        return;
+    }
+
+    if (now - _fanNoCurrentStartTick < FAN_NO_CURRENT_TIMEOUT_MS) {
+        // Log a mid-window progress line every 5s so the ramp toward the trip is visible
+        static uint32_t lastProgress = 0;
+        if (now - lastProgress >= 5000) {
+            lastProgress = now;
+            uint32_t inWindow = now - _fanNoCurrentStartTick;
+            Log.warn("HP", "FAN_FAULT: still low current %.2fA at %lums/%lums of grace window (fanPin=%d)",
+                     amps, inWindow, FAN_NO_CURRENT_TIMEOUT_MS,
+                     (fan != nullptr && fan->isOn()) ? 1 : 0);
+        }
+        return;  // Still within grace window
+    }
+
+    // === Trip: FAN not running for > 20s while CNT is on ===
+    uint32_t windowElapsed = now - _fanNoCurrentStartTick;
+    Log.error("HP", "FAN_FAULT: TRIP — FAN current %.2fA < %.2fA for %lums (limit %lums) while CNT on (Y=%d O=%d state=%s fanPin=%d) — shutting down compressor",
+              amps, FAN_MIN_RUNNING_AMPS, windowElapsed, FAN_NO_CURRENT_TIMEOUT_MS,
+              isYActive() ? 1 : 0, isOActive() ? 1 : 0, getStateString(),
+              (fan != nullptr && fan->isOn()) ? 1 : 0);
+
+    if (cnt != nullptr && cnt->isOn()) {
+        uint32_t cntOnMs = (cnt->getOnTick() > 0) ? (now - cnt->getOnTick()) : 0;
+        cnt->turnOff();
+        _cntActivated = false;
+        Log.error("HP", "FAN_FAULT: CNT shut down after %lums of runtime (no airflow, fanAmps=%.2f)",
+                  cntOnMs, amps);
+    }
+    // Keep the FAN output commanded ON so a recovering blower can re-establish
+    // airflow and be detected on the next attempt.
+    if (fan != nullptr && !fan->isOn() && _state != State::DEFROST) {
+        fan->turnOn();
+    }
+
+    State oldState = _state;
+    _fanFault = true;
+    _fanFaultStartTick = now;
+    _fanNoCurrentStartTick = 0;
+    _fanLowConsecutive = 0;
+    _state = State::ERROR;
+    startStateValidation();
+    const char* prevStateStr = "?";
+    switch (oldState) {
+        case State::OFF:      prevStateStr = "OFF"; break;
+        case State::COOL:     prevStateStr = "COOL"; break;
+        case State::HEAT:     prevStateStr = "HEAT"; break;
+        case State::DEFROST:  prevStateStr = "DEFROST"; break;
+        case State::ERROR:    prevStateStr = "ERROR"; break;
+        case State::LOW_TEMP: prevStateStr = "LOW_TEMP"; break;
+    }
+    Log.error("HP", "FAN_FAULT: ENTER ERROR state for %lu min lockout (prev state=%s, will auto-recover at millis=%lu)",
+              FAN_FAULT_ERROR_MS / 60000UL, prevStateStr,
+              now + FAN_FAULT_ERROR_MS);
+    if (_stateChangeCb) _stateChangeCb(State::ERROR, oldState);
+}
+
+bool GoodmanHP::isFanFaultActive() const {
+    return _fanFault;
+}
+
+uint32_t GoodmanHP::getFanFaultRemainingMs() const {
+    if (!_fanFault) return 0;
+    uint32_t elapsed = millis() - _fanFaultStartTick;
+    if (elapsed >= FAN_FAULT_ERROR_MS) return 0;
+    return FAN_FAULT_ERROR_MS - elapsed;
+}
+
+void GoodmanHP::clearFanFault() {
+    if (!_fanFault) return;
+    uint32_t heldMs = millis() - _fanFaultStartTick;
+    _fanFault = false;
+    _fanFaultStartTick = 0;
+    _fanNoCurrentStartTick = 0;
+    _fanLowConsecutive = 0;
+    Log.warn("HP", "FAN_FAULT: cleared manually after %lums (state=%s Y=%d)",
+             heldMs, getStateString(), isYActive() ? 1 : 0);
+    if (_stateChangeCb) _stateChangeCb(_state, _state);
+}
+
 void GoodmanHP::update() {
     // RV hold must run even during startup lockout — boot RV hold needs to
     // complete its 30s equalization within the 180s lockout period
@@ -324,6 +513,7 @@ void GoodmanHP::update() {
     checkCurrentProtections();
     checkAmbientTemp();
     checkYAndActivateCNT();
+    checkFanFault();
     accumulateHeatRuntime();
     updateState();
     checkDefrostNeeded();
@@ -710,15 +900,17 @@ void GoodmanHP::checkYAndActivateCNT() {
             Log.info("HP", "Y dropped during defrost exit, exit cancelled");
         }
     } else if (yActive && _yWasActive && !_cntActivated) {
-        if (_lpsFault || _lowTemp || _compressorOverTemp || _suctionLowTemp || _rvFail || isOvercurrentActive() || isLockedRotorActive() || _softwareDefrost || _defrostExiting || _coolTransition || _coolCntPending || _heatTransition || _heatCntPending || _rvHoldActive) return;
+        if (_lpsFault || _lowTemp || _compressorOverTemp || _suctionLowTemp || _rvFail || _fanFault || isOvercurrentActive() || isLockedRotorActive() || _softwareDefrost || _defrostExiting || _coolTransition || _coolCntPending || _heatTransition || _heatCntPending || _rvHoldActive) return;
         // Check if CNT was off for less than 5 minutes - if so, enforce short cycle delay
         uint32_t offElapsed = millis() - cnt->getOffTick();
+        bool activated = false;
         if (cnt->getOffTick() > 0 && offElapsed < 5UL * 60 * 1000) {
             // Y still active, CNT off < 5 min - check if short cycle delay has passed
             uint32_t elapsed = millis() - _yActiveStartTick;
             if (elapsed >= _cntShortCycleMs) {
                 cnt->turnOn();
                 _cntActivated = true;
+                activated = true;
                 CurrentSensor* compCurrent = getCurrentSensor("COMPRESSOR_CURRENT");
                 if (compCurrent) compCurrent->notifyCntActivated();
                 Log.info("HP", "Y active for 30s, CNT activated (short cycle protection)");
@@ -727,9 +919,23 @@ void GoodmanHP::checkYAndActivateCNT() {
             // CNT off >= 5 min or never turned off - activate immediately
             cnt->turnOn();
             _cntActivated = true;
+            activated = true;
             CurrentSensor* compCurrent = getCurrentSensor("COMPRESSOR_CURRENT");
             if (compCurrent) compCurrent->notifyCntActivated();
             Log.info("HP", "Y active, CNT activated immediately (off > 5 min)");
+        }
+        // Safety invariant: whenever we energize CNT, the FAN must also be running.
+        // Historically only the Y-edge branch turned the FAN on, so recovery paths
+        // (e.g. HEAT→COOL flip-flop) could leave CNT ON with FAN OFF.
+        if (activated && fan != nullptr && _state != State::DEFROST && !fan->isOn()) {
+            fan->turnOn();
+            Log.warn("HP", "FAN_SAFETY: FAN turned ON alongside CNT activation (invariant: CNT_on ⇒ FAN_on) state=%s Y=%d O=%d",
+                     getStateString(), isYActive() ? 1 : 0, isOActive() ? 1 : 0);
+        }
+        // Restart the FAN no-current watchdog window on CNT activation
+        if (activated) {
+            _fanNoCurrentStartTick = 0;
+            _fanLowConsecutive = 0;
         }
     }
 }
@@ -1184,6 +1390,19 @@ void GoodmanHP::checkHeatTransition() {
         _heatTransition = false;
         _heatCntPending = false;
         Log.info("HP", "HEAT transition cancelled (state: %s)", getStateString());
+        // Safety: FAN was forced OFF when the HEAT transition started, but if Y
+        // is still active (e.g. spurious O flip flipped us back to COOL) we
+        // must restore FAN so the compressor doesn't run without airflow when
+        // short-cycle protection re-activates CNT.
+        if (isYActive() && _state != State::DEFROST && _state != State::OFF &&
+            _state != State::LOW_TEMP) {
+            OutPin* fan = getOutput("FAN");
+            if (fan != nullptr && !fan->isOn()) {
+                fan->turnOn();
+                Log.warn("HP", "FAN_SAFETY: FAN restored ON after HEAT transition cancelled while Y still active (prevents CNT-on/FAN-off overheat) state=%s O=%d",
+                         getStateString(), isOActive() ? 1 : 0);
+            }
+        }
         return;
     }
 
@@ -1444,6 +1663,7 @@ void GoodmanHP::validateOutputStates() {
         if (_compressorOverTemp)          faultName = "compressor overtemp";
         else if (_suctionLowTemp)         faultName = "suction low temp";
         else if (_lpsFault)               faultName = "LPS fault";
+        else if (_fanFault)               faultName = "FAN fault";
         else if (_lowTemp)                faultName = "LOW_TEMP";
         else if (_rvFail && !_softwareDefrost) faultName = "RV fail";
 
@@ -1451,6 +1671,18 @@ void GoodmanHP::validateOutputStates() {
             Log.error("HP", "STATE CHECK: CNT on during %s — forcing OFF", faultName);
             cnt->turnOff(); _cntActivated = false; corrected = true;
         }
+    }
+
+    // Airflow safety invariant: whenever CNT is energized the FAN must be on
+    // (except during DEFROST, where the outdoor fan is intentionally off).
+    if (cnt != nullptr && cnt->isPinOn() && fan != nullptr && !fan->isPinOn() &&
+        _state != State::DEFROST) {
+        CurrentSensor* fanCurChk = getCurrentSensor("FAN_CURRENT");
+        float ampsChk = (fanCurChk && fanCurChk->isValid()) ? fanCurChk->getRMSAmps() : -1.0f;
+        Log.error("HP", "FAN_SAFETY: STATE CHECK detected CNT_pin=ON with FAN_pin=OFF — forcing FAN ON (state=%s Y=%d O=%d fanAmps=%.2f)",
+                  getStateString(), isYActive() ? 1 : 0, isOActive() ? 1 : 0, ampsChk);
+        fan->turnOn();
+        corrected = true;
     }
 
     // === TABLE-DRIVEN PER-STATE VALIDATION ===

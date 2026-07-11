@@ -66,6 +66,16 @@ class GoodmanHP {
     // State table validation interval
     static const uint32_t STATE_VALIDATE_MS = 10UL * 1000;  // 10s periodic check
 
+    // FAN fault protection (CNT running but FAN not moving air)
+    // If FAN current stays below FAN_MIN_RUNNING_AMPS for FAN_NO_CURRENT_TIMEOUT_MS
+    // while the compressor (CNT) is energized, shut CNT down and latch an ERROR
+    // state for FAN_FAULT_ERROR_MS. After that grace period, if Y is still active
+    // and CNT is being re-energized, FAN must draw current within the same
+    // FAN_NO_CURRENT_TIMEOUT_MS window or the fault is re-latched.
+    static constexpr float FAN_MIN_RUNNING_AMPS = 0.3f;              // Below this = FAN not running
+    static const uint32_t FAN_NO_CURRENT_TIMEOUT_MS = 20UL * 1000;   // 20s to see FAN current
+    static const uint32_t FAN_FAULT_ERROR_MS       = 3UL * 60 * 1000; // 3 min ERROR lockout
+
     GoodmanHP(Scheduler *ts);
 
     void setDallasTemperature(DallasTemperature *sensors);
@@ -128,6 +138,11 @@ class GoodmanHP {
     bool isStartupLockoutActive() const;
     uint32_t getStartupLockoutRemainingMs() const;
     bool isShortCycleProtectionActive() const;
+
+    // FAN fault detection (no fan current while compressor running)
+    bool isFanFaultActive() const;
+    uint32_t getFanFaultRemainingMs() const;
+    void clearFanFault();
 
     // RV fail / high suction temp detection
     bool isRvFailActive() const;
@@ -310,6 +325,13 @@ class GoodmanHP {
     uint32_t _canLastRxTick = 0;
     static const uint32_t CAN_TIMEOUT_MS = 10000;  // 10s safe shutdown if CAN lost
 
+    // FAN fault (compressor running with no fan current)
+    bool _fanFault;                   // True while FAN fault is latched
+    uint32_t _fanFaultStartTick;      // millis() when ERROR lockout began
+    uint32_t _fanNoCurrentStartTick;  // millis() when FAN current first read low with CNT on (0 = clear)
+    uint8_t _fanLowConsecutive;       // Consecutive low-current reads (gates spurious single-sample glitches)
+    static const uint8_t FAN_LOW_CONSECUTIVE_REQUIRED = 3;  // Require 3 consecutive low reads (~3s) before arming watchdog
+
     bool _manualOverride;
     uint32_t _manualOverrideStart;
     bool _startupLockout;
@@ -325,6 +347,7 @@ class GoodmanHP {
     void checkSuctionTemp();
     void checkHighSuctionTemp();
     void checkYAndActivateCNT();
+    void checkFanFault();
     void updateState();
     void accumulateHeatRuntime();
     void checkDefrostNeeded();

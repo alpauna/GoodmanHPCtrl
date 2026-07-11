@@ -31,11 +31,16 @@ void CurrentSensor::readRMS(Adafruit_ADS1115* ads) {
     // SCT-013-030 outputs 0-1V AC for 0-30A
     ads->setGain(GAIN_TWO);
 
-    // Sample ~20 readings over one 60Hz cycle (~16.7ms)
-    // ADS1115 at 860 SPS in continuous mode gives ~1.16ms per sample
-    const int numSamples = 20;
+    // Sample ~60 readings over ~3 full 60Hz cycles (~70ms).
+    // ADS1115 at 860 SPS in continuous mode gives ~1.16ms per sample.
+    // Increased from 20 to 60 to avoid "sample bunching" near a zero crossing
+    // (caused by I2C jitter from WiFi/AsyncTCP/log flush interrupts) that
+    // previously produced spurious 0.00A readings on the FAN channel.
+    const int numSamples = 60;
+    float sumV = 0.0f;
     float sumSquares = 0.0f;
     float peak = 0.0f;
+    int nonZeroCount = 0;
 
     int16_t muxChannel;
     if (_channel == 0) {
@@ -54,12 +59,30 @@ void CurrentSensor::readRMS(Adafruit_ADS1115* ads) {
 
         // Convert to voltage: at GAIN_TWO, 1 bit = 0.0625mV = 0.0000625V
         float voltage = raw * 0.0000625f;
+        sumV += voltage;
         sumSquares += voltage * voltage;
         float absV = fabsf(voltage);
         if (absV > peak) peak = absV;
+        if (raw != 0) nonZeroCount++;
     }
 
-    float vRMS = sqrtf(sumSquares / numSamples);
+    // Reject "all zeros" reads (I2C NACK / bus contention signature) — mark
+    // sample invalid instead of publishing a fake 0.00A that would trigger
+    // spurious FAN_FAULT warnings.
+    if (nonZeroCount == 0) {
+        _valid = false;
+        Log.warn("CURRENT", "%s read invalid: all-zero samples (I2C contention?)", _name.c_str());
+        return;
+    }
+
+    // Proper AC-RMS: subtract DC mean before squaring. The prior implementation
+    // (sqrt(mean(v^2))) is only correct if the differential is perfectly
+    // centered on 0V; ADS1115 offset drift + non-symmetric sample windows
+    // caused occasional near-zero RMS on the FAN channel.
+    float mean = sumV / numSamples;
+    float variance = sumSquares / numSamples - mean * mean;
+    if (variance < 0.0f) variance = 0.0f;  // guard against FP round-off
+    float vRMS = sqrtf(variance);
 
     // Convert voltage RMS to current: I = V * ctRatio
     // For SCT-013-030: 1V output = 30A, so ctRatio = 30.0
