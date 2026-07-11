@@ -79,6 +79,15 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
   - Logs fault condition and resolution time
   - Highest priority fault — checked before LPS and ambient temp
 
+- **FAN Airflow Safety (Current Watchdog)** — Guarantees the outdoor fan is actually moving air whenever the compressor (CNT) is energized. See [BUG-013](docs/bugs/013-fan-no-current-while-compressor-running.md) for the field failure that motivated this protection:
+  - **CNT ⇒ FAN invariant** — every code path that turns CNT ON also asserts FAN ON in the same block (state transitions, HEAT↔COOL cancel path, short-cycle re-activation, `updateState()` output validation) so the outputs cannot desynchronize
+  - **Current-based liveness** — `FAN_CURRENT` (SCT-013-030 CT on ADS1115) is polled while CNT is on; if it stays below `FAN_MIN_RUNNING_AMPS` (default 0.3 A) for `FAN_NO_CURRENT_TIMEOUT_MS` (default 20 s), CNT is shut down and the controller latches `ERROR` state for `FAN_FAULT_ERROR_MS` (default 3 min)
+  - **Debounced** — requires 3 consecutive low reads before arming the 20 s timer, filtering single-sample I2C glitches from bus contention with WiFi / AsyncTCP / SD log flush
+  - **Auto-recovers** after the 3-minute lockout; the watchdog re-arms on the next CNT activation and re-latches if the fan still draws no current
+  - Blocks CNT re-activation while the lockout is active; public accessors: `isFanFaultActive()`, `getFanFaultRemainingMs()`, `clearFanFault()`
+  - Emits grep-friendly `FAN_FAULT:` and `FAN_SAFETY:` log tags with `Y=`, `O=`, `state=`, `amps=`, `pin=`, `elapsed=` for post-mortem log forensics
+  - Depends on `CurrentSensor` producing trustworthy RMS: 60-sample window over ~4 line cycles, DC-mean subtraction, and all-zero I2C reads rejected as invalid rather than published as `0.00 A`
+
 - **Suction Low-Temperature Protection** (COOL mode only) — Monitors SUCTION_TEMP for freezing conditions:
   - Warns when suction temp drops below 34°F
   - Shuts down CNT below 32°F (critically low), keeps FAN running
