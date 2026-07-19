@@ -142,16 +142,6 @@ class Config {
     void setAdminPassword(const String& plaintext);
     bool verifyAdminPassword(const String& plaintext) const;
 
-    // Certificate loading for HTTPS
-    bool loadCertificates(const char* certFile, const char* keyFile);
-    bool generateSelfSignedCert();
-    bool isCertExpired() const;
-    bool hasCertificates() const { return _certBuf != nullptr && _keyBuf != nullptr; }
-    const uint8_t* getCert() const { return _certBuf; }
-    size_t getCertLen() const { return _certLen; }
-    const uint8_t* getKey() const { return _keyBuf; }
-    size_t getKeyLen() const { return _keyLen; }
-
     // SD card access
     bool isSDCardInitialized() const { return _sdInitialized; }
 
@@ -215,11 +205,6 @@ class Config {
     // XOR obfuscation key (fallback when eFuse not available)
     static String _obfuscationKey;
 
-    // HTTPS certificate buffers (PSRAM)
-    uint8_t* _certBuf = nullptr;
-    size_t _certLen = 0;
-    uint8_t* _keyBuf = nullptr;
-    size_t _keyLen = 0;
 };
 
 #endif

@@ -3,6 +3,8 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+.idea/
+.junie/
 
 # Secrets — never commit
 efuse_hmac_key.bin

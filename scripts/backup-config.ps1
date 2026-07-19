@@ -18,16 +18,13 @@ $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
 $AdminPW = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
 [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
 
-$BaseURL = "https://$DeviceIP"
-$CurlBase = @("-sk")
+$BaseURL = "http://$DeviceIP"
+$CurlBase = @("-s")
 if ($AdminPW) { $CurlBase += @("-u", "admin:$AdminPW") }
 
 # Verify device is reachable
 Write-Host "Checking device at $DeviceIP..."
 $heap = & curl @CurlBase --connect-timeout 5 "$BaseURL/heap" 2>$null
-if ([string]::IsNullOrEmpty($heap)) {
-    $heap = & curl @CurlBase --connect-timeout 5 "http://${DeviceIP}/heap" 2>$null
-}
 if ([string]::IsNullOrEmpty($heap)) {
     Write-Error "Could not reach device at $DeviceIP"; exit 1
 }

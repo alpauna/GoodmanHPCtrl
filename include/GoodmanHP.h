@@ -39,6 +39,7 @@ class GoodmanHP {
     static const uint32_t DEFROST_TIMEOUT_MS = 15UL * 60 * 1000;         // 15 min safety timeout
     static const uint32_t DEFROST_COND_CHECK_MS = 60UL * 1000;            // 1 min condenser recheck
     static constexpr float DEFAULT_LOW_TEMP_F = 20.0f;
+    static constexpr float DEFAULT_HIGH_AMBIENT_HEAT_LOCKOUT_F = 70.0f;  // Block HEAT above this ambient temp
     static const uint32_t LOW_TEMP_VALIDATION_MS = 10UL * 60 * 1000;  // 10 min validation delay
 
     // High suction temp / RV fail detection during defrost
@@ -127,6 +128,9 @@ class GoodmanHP {
     bool isSuctionLowTempActive() const;
     void setLowTempThreshold(float threshold);
     float getLowTempThreshold() const;
+    void setHighAmbientHeatLockoutF(float threshold);
+    float getHighAmbientHeatLockoutF() const;
+    bool isHighAmbientHeatLockoutActive() const;
     void setLowTempEnableW(bool enable);
     bool getLowTempEnableW() const;
     void setLowTempEnableAux(bool enable);
@@ -271,6 +275,8 @@ class GoodmanHP {
     bool _lpsFault;
     bool _lowTemp;
     float _lowTempThreshold;
+    float _highAmbientHeatLockoutF;
+    bool _highAmbientHeatLockout;  // True when ambient > threshold, HEAT blocked
     bool _lowTempEnableW;
     bool _lowTempEnableAux;
     bool _lowTempPendingEntry;        // Temp below threshold, waiting validation

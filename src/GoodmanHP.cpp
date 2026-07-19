@@ -32,6 +32,8 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     , _lpsFault(false)
     , _lowTemp(false)
     , _lowTempThreshold(DEFAULT_LOW_TEMP_F)
+    , _highAmbientHeatLockoutF(DEFAULT_HIGH_AMBIENT_HEAT_LOCKOUT_F)
+    , _highAmbientHeatLockout(false)
     , _lowTempEnableW(true)
     , _lowTempEnableAux(true)
     , _lowTempPendingEntry(false)
@@ -148,6 +150,22 @@ void GoodmanHP::begin() {
         }
     }
     _cntActivated = false;
+
+    // AUX/LT is a normally-closed circuit at the hardware level: closed (ON) by
+    // default, opens (OFF) specifically when LOW_TEMP is reached. The generic
+    // "all outputs off" loop above just forced it off along with everything
+    // else — restore it to its normal ON state here so a fresh boot that never
+    // enters LOW_TEMP doesn't leave it stuck off. _lowTemp is guaranteed false
+    // at this point (10-minute validation hasn't run yet), so this is safe
+    // regardless of actual ambient conditions; checkLowTempProtection() will
+    // correctly turn it back off once/if LOW_TEMP validates.
+    if (_lowTempEnableAux) {
+        OutPin* aux = getOutput("AUX");
+        if (aux != nullptr) {
+            aux->turnOn();
+            Log.info("HP", "AUX restored to normal ON state at startup (normally-closed circuit)");
+        }
+    }
 
     _startupLockout = true;
     _startupTick = millis();
@@ -625,10 +643,13 @@ void GoodmanHP::checkAmbientTemp() {
                     }
                 }
 
-                // AUX only cares about LOW_TEMP + checkbox
+                // AUX/LT must be OFF while ambient is below the low-temp threshold
                 if (_lowTempEnableAux) {
                     OutPin* aux = getOutput("AUX");
-                    if (aux != nullptr) aux->turnOn();
+                    if (aux != nullptr) {
+                        aux->turnOff();
+                        Log.info("HP", "AUX turned OFF for LOW_TEMP protection");
+                    }
                 }
 
                 // Gate state label change by validation timer
@@ -671,9 +692,12 @@ void GoodmanHP::checkAmbientTemp() {
                 OutPin* w = getOutput("W");
                 if (w != nullptr) w->turnOff();
 
-                // Turn off AUX signal output
+                // AUX/LT resumes normal (ON) once ambient is back above threshold
                 OutPin* aux = getOutput("AUX");
-                if (aux != nullptr) aux->turnOff();
+                if (aux != nullptr) {
+                    aux->turnOn();
+                    Log.info("HP", "AUX turned ON, LOW_TEMP protection cleared");
+                }
 
                 // Don't set _state here — let updateState() determine the correct state
             }
@@ -978,6 +1002,30 @@ void GoodmanHP::updateState() {
     } else if (yActive) {
         // If _softwareDefrost is set, re-enter DEFROST is handled above
         newState = State::HEAT;
+    }
+
+    // High ambient HEAT lockout — never run HEAT above threshold (default 70°F).
+    // Uses ambient value from AMBIENT_TEMP sensor (with fallback chain applied by _tskCheckTemps).
+    {
+        TempSensor* amb = getTempSensor("AMBIENT_TEMP");
+        bool lockout = false;
+        if (amb != nullptr && amb->isValid() && amb->getValue() > _highAmbientHeatLockoutF) {
+            lockout = true;
+        }
+        if (lockout && (newState == State::HEAT || newState == State::DEFROST)) {
+            if (!_highAmbientHeatLockout) {
+                Log.warn("HP", "HEAT blocked: ambient %.1fF > %.1fF lockout",
+                         amb->getValue(), _highAmbientHeatLockoutF);
+            }
+            newState = State::OFF;
+        }
+        if (_highAmbientHeatLockout != lockout) {
+            if (!lockout) {
+                Log.info("HP", "High-ambient HEAT lockout cleared (ambient %.1fF <= %.1fF)",
+                         amb != nullptr ? amb->getValue() : 0.0f, _highAmbientHeatLockoutF);
+            }
+            _highAmbientHeatLockout = lockout;
+        }
     }
 
     if (newState != _state) {
@@ -1791,6 +1839,13 @@ void GoodmanHP::validateOutputStates() {
 }
 
 void GoodmanHP::setColdMaxTempF(float f) {
+    // Defrost's Cold band must never reach below the LOW_TEMP safety threshold —
+    // below that, the compressor is blocked entirely and defrost timing is moot.
+    if (f < _lowTempThreshold) {
+        Log.warn("HP", "Defrost cold max temp %.1fF below low temp threshold %.1fF, clamping to %.1fF",
+                 f, _lowTempThreshold, _lowTempThreshold);
+        f = _lowTempThreshold;
+    }
     _coldMaxTempF = f;
     Log.info("HP", "Defrost cold max temp set to %.1fF", f);
 }
@@ -1923,11 +1978,31 @@ bool GoodmanHP::isShortCycleProtectionActive() const {
 
 void GoodmanHP::setLowTempThreshold(float threshold) {
     _lowTempThreshold = threshold;
+    // Keep the invariant symmetric: if raising the floor pushes it above the
+    // current defrost Cold band ceiling, bring the ceiling up to match.
+    if (_coldMaxTempF < _lowTempThreshold) {
+        Log.warn("HP", "Low temp threshold %.1fF raised above defrost cold max temp %.1fF, raising cold max temp to match",
+                 threshold, _coldMaxTempF);
+        _coldMaxTempF = _lowTempThreshold;
+    }
     Log.info("HP", "Low temp threshold set to %.1fF", threshold);
 }
 
 float GoodmanHP::getLowTempThreshold() const {
     return _lowTempThreshold;
+}
+
+void GoodmanHP::setHighAmbientHeatLockoutF(float threshold) {
+    _highAmbientHeatLockoutF = threshold;
+    Log.info("HP", "High-ambient HEAT lockout set to %.1fF", threshold);
+}
+
+float GoodmanHP::getHighAmbientHeatLockoutF() const {
+    return _highAmbientHeatLockoutF;
+}
+
+bool GoodmanHP::isHighAmbientHeatLockoutActive() const {
+    return _highAmbientHeatLockout;
 }
 
 void GoodmanHP::setLowTempEnableW(bool enable) {

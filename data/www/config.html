@@ -343,7 +343,7 @@ button:hover{background:#45a049;}
 </fieldset>
 <fieldset id='s-sd'><legend>SD Card</legend>
 <div id='sdInfo' style='font-size:13px;padding:6px 10px;border-radius:4px;background:var(--code-bg);color:var(--text);margin-bottom:8px;'>Loading...</div>
-<p style='color:#e74c3c;font-size:13px;margin:8px 0;'><strong>Warning:</strong> Formatting will erase logs and temperature history from the SD card. WiFi, MQTT, and admin credentials will be preserved. Certificates will be auto-generated if missing. Web pages are stored in flash and are not affected.</p>
+<p style='color:#e74c3c;font-size:13px;margin:8px 0;'><strong>Warning:</strong> Formatting will erase logs and temperature history from the SD card. WiFi, MQTT, and admin credentials will be preserved. Web pages are stored in flash and are not affected.</p>
 <label>Type FORMAT to confirm</label>
 <input type='text' id='sdFormatConfirm' oninput="document.getElementById('sdFormatBtn').disabled=this.value!=='FORMAT'">
 <button type='button' class='btn-sm btn-red' id='sdFormatBtn' disabled onclick='formatSD()' style='margin-top:8px'>Format SD Card</button>

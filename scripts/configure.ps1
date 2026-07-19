@@ -1,6 +1,6 @@
 # Configure WiFi and MQTT credentials on the device
 # Usage:
-#   .\scripts\configure.ps1          - prompts for IP and updates via HTTPS API
+#   .\scripts\configure.ps1          - prompts for IP and updates via HTTP API
 #   .\scripts\configure.ps1 -Local   - write config.txt for SD card
 # Requires: curl (built into Windows 10+)
 
@@ -89,7 +89,7 @@ if ($Local) {
     exit 0
 }
 
-# --- Network config via HTTPS API ---
+# --- Network config via HTTP API ---
 
 $DeviceIP = Read-Host "Device IP"
 if ([string]::IsNullOrEmpty($DeviceIP)) {
@@ -99,8 +99,8 @@ if ([string]::IsNullOrEmpty($DeviceIP)) {
 
 $AdminPW = Read-Secret "Admin password (blank if none set)"
 
-$BaseURL = "https://$DeviceIP"
-$CurlBase = @("-sk")
+$BaseURL = "http://$DeviceIP"
+$CurlBase = @("-s")
 if ($AdminPW) { $CurlBase += @("-u", "admin:$AdminPW") }
 
 # Fetch current config

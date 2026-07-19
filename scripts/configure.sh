@@ -1,7 +1,7 @@
 #!/bin/bash
 # Configure WiFi and MQTT credentials on the device
 # Usage:
-#   ./scripts/configure.sh          — prompts for IP and updates via HTTPS API
+#   ./scripts/configure.sh          — prompts for IP and updates via HTTP API
 #   ./scripts/configure.sh --local  — write config.txt for SD card
 
 set -e
@@ -117,7 +117,7 @@ JSONEOF
     exit 0
 }
 
-# --- Network config via HTTPS API ---
+# --- Network config via HTTP API ---
 if [ "$1" = "--local" ]; then
     write_local_config
 fi
@@ -131,8 +131,8 @@ fi
 read -rsp "Admin password (blank if none set): " ADMIN_PW
 echo
 
-BASE_URL="https://$DEVICE_IP"
-CURL_OPTS="-sk"
+BASE_URL="http://$DEVICE_IP"
+CURL_OPTS="-s"
 AUTH_OPTS=""
 if [ -n "$ADMIN_PW" ]; then
     AUTH_OPTS="-u admin:$ADMIN_PW"

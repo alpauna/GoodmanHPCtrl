@@ -99,7 +99,7 @@ $AdminPwSecure = Read-Host "Admin password (blank if none set)" -AsSecureString
 $AdminPw = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
     [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($AdminPwSecure))
 
-$BaseUrl = "https://$DeviceIP"
+$BaseUrl = "http://$DeviceIP"
 $headers = @{ "Content-Type" = "application/json" }
 $authHeader = @{}
 if ($AdminPw -ne "") {
@@ -107,36 +107,14 @@ if ($AdminPw -ne "") {
     $authHeader = @{ "Authorization" = "Basic $pair" }
 }
 
-# Skip certificate validation
-if (-not ([System.Management.Automation.PSTypeName]'TrustAll').Type) {
-    Add-Type @"
-using System.Net;
-using System.Net.Security;
-using System.Security.Cryptography.X509Certificates;
-public class TrustAll {
-    public static void Enable() {
-        ServicePointManager.ServerCertificateValidationCallback =
-            (sender, cert, chain, errors) => true;
-    }
-}
-"@
-}
-[TrustAll]::Enable()
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
 # Verify device is reachable
 Write-Host "Checking device at $DeviceIP..."
 try {
     $heap = Invoke-RestMethod -Uri "$BaseUrl/heap" -TimeoutSec 5 -ErrorAction Stop
     Write-Host "Device online."
 } catch {
-    try {
-        $heap = Invoke-RestMethod -Uri "http://${DeviceIP}/heap" -TimeoutSec 5 -ErrorAction Stop
-        Write-Host "Device online (HTTP)."
-    } catch {
-        Write-Host "Error: Could not reach device at $DeviceIP"
-        exit 1
-    }
+    Write-Host "Error: Could not reach device at $DeviceIP"
+    exit 1
 }
 
 # Enable FTP for 10 minutes

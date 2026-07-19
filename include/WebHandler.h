@@ -14,7 +14,6 @@
 #include "GoodmanHP.h"
 #include "Logger.h"
 #include "Config.h"
-#include "HttpsServer.h"
 #include "SessionManager.h"
 
 class TempHistory;
@@ -23,7 +22,6 @@ class WebHandler {
   public:
     WebHandler(uint16_t port, Scheduler* ts, GoodmanHP* hpController);
     void begin();
-    bool beginSecure(const uint8_t* cert, size_t certLen, const uint8_t* key, size_t keyLen);
     void startNtpSync();
     void setTimezone(const String& tz);
     void setConfig(Config* config) { _config = config; }
@@ -59,8 +57,6 @@ class WebHandler {
   private:
     AsyncWebServer _server;
     AsyncWebSocket _ws;
-    HttpsServerHandle _httpsServer = nullptr;
-    HttpsContext _httpsCtx = {};
     SessionManager _sessionMgr;
 
     Scheduler* _ts;

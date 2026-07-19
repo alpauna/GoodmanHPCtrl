@@ -1,10 +1,10 @@
 #!/bin/bash
-# Upload web pages from data/www/ to ESP32 LittleFS via HTTPS /www/upload endpoint.
+# Upload web pages from data/www/ to ESP32 LittleFS via HTTP /www/upload endpoint.
 # Can also upload via USB serial as a fallback (--usb flag).
 #
 # Usage:
-#   ./scripts/update-www.sh                    — upload all files over HTTPS
-#   ./scripts/update-www.sh dashboard.html     — upload a single file over HTTPS
+#   ./scripts/update-www.sh                    — upload all files over HTTP
+#   ./scripts/update-www.sh dashboard.html     — upload a single file over HTTP
 #   ./scripts/update-www.sh --usb [port]       — flash entire LittleFS via USB serial
 
 set -e
@@ -32,7 +32,7 @@ if [ "$1" = "--usb" ]; then
     exit 0
 fi
 
-# --- HTTPS upload mode ---
+# --- HTTP upload mode ---
 
 read -rp "Device IP: " DEVICE_IP
 if [ -z "$DEVICE_IP" ]; then
@@ -43,8 +43,8 @@ fi
 read -rsp "Admin password (blank if none set): " ADMIN_PW
 echo
 
-BASE_URL="https://$DEVICE_IP"
-CURL_OPTS="-sk"
+BASE_URL="http://$DEVICE_IP"
+CURL_OPTS="-s"
 AUTH_OPTS=""
 if [ -n "$ADMIN_PW" ]; then
     AUTH_OPTS="-u admin:$ADMIN_PW"

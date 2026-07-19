@@ -1,9 +1,9 @@
-# Upload web pages from data\www\ to ESP32 LittleFS via HTTPS /www/upload endpoint.
+# Upload web pages from data\www\ to ESP32 LittleFS via HTTP /www/upload endpoint.
 # Can also upload via USB serial as a fallback (-USB flag).
 #
 # Usage:
-#   .\scripts\update-www.ps1                      - upload all files over HTTPS
-#   .\scripts\update-www.ps1 -File dashboard.html - upload a single file over HTTPS
+#   .\scripts\update-www.ps1                      - upload all files over HTTP
+#   .\scripts\update-www.ps1 -File dashboard.html - upload a single file over HTTP
 #   .\scripts\update-www.ps1 -USB [-Port COM3]    - flash entire LittleFS via USB serial
 # Requires: curl (built into Windows 10+)
 
@@ -46,7 +46,7 @@ if ($USB) {
     exit 0
 }
 
-# --- HTTPS upload mode ---
+# --- HTTP upload mode ---
 
 function Read-Secret {
     param([string]$Label)
@@ -63,8 +63,8 @@ if ([string]::IsNullOrEmpty($DeviceIP)) {
 
 $AdminPW = Read-Secret "Admin password (blank if none set)"
 
-$BaseURL = "https://$DeviceIP"
-$CurlBase = @("-sk")
+$BaseURL = "http://$DeviceIP"
+$CurlBase = @("-s")
 if ($AdminPW) { $CurlBase += @("-u", "admin:$AdminPW") }
 
 # Verify device is reachable and auth works

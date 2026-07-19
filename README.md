@@ -2,6 +2,8 @@
 
 ESP32-based controller for Goodman heatpumps with support for cooling, heating, and defrost modes.
 
+> **⚠ Security note:** The device's web interface is plain HTTP only (no built-in TLS). For any access beyond a trusted local LAN, run it behind an HTTPS-terminating reverse proxy (Pangolin, Caddy, nginx, Cloudflare Tunnel, Tailscale Funnel, etc.) — never expose port 80 directly to an untrusted network. See [Network Access](#network-access).
+
 ## Web Interface
 
 | Page | Screenshot |
@@ -21,7 +23,6 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **Subcooling calculation** — Real-time subcooling diagnostic (CONDENSER_TEMP - LIQUID_TEMP) displayed on dashboard when both sensors are valid and compressor is running. Relevant for TXV systems to verify proper refrigerant charge
 - **Ambient temp fallback** — 3-tier failover chain for ambient temperature: local OneWire sensor → weather data (MQTT subscription or OpenWeatherMap HTTP API, or both simultaneously) → ESP32 internal die temp. Actively fails up to the best available source every cycle. Configurable staleness timeout, test failover button, dashboard source indicator
 - **Remote access** — REST API, WebSocket, MQTT (QoS 1), and CAN bus for monitoring and control
-- **HTTPS/SSL** — Self-signed ECC P-256 certificate on port 443 for secure `/config`, `/update`, and `/ftp` endpoints. Graceful fallback to HTTP-only if no certs found on SD card
 - **Dark/light theme** — Configurable dark/light theme with shared `theme.css` stylesheet. Persisted to SD card config, cached in localStorage for flash-free page loads. Instant preview on config page
 - **Admin password protection** — HTTP Basic Auth on sensitive endpoints (`/config`, `/update`, `/ftp`). No password = open access
 - **Password encryption** — All passwords (WiFi, MQTT, admin, FTP) encrypted at rest on SD card
@@ -41,7 +42,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 - **PSRAM support** — All heap allocations routed through PSRAM when available
 - **WiFi AP fallback** — Configurable timeout (default 10 minutes) before switching to Access Point mode for OTA recovery and reconfiguration
 - **CAN bus integration** — Optional CAN bus (ESP32 TWAI, 250 kbps) replaces physical Y/O thermostat wires with CAN messages from AThermostat. Publishes HP state, temperatures, and heartbeat. 10-second timeout safety shuts down compressor if CAN communication is lost. DFT/LPS safety inputs always remain physical. Configurable via `can.enabled` in config JSON. See `docs/canbus-goodmanhp-implementation.md`
-- **Multi-unit support** — Configurable system name (max 20 chars, alphanumeric + spaces) and MQTT topic prefix. System name is used as the web UI brand, AP SSID, OLED display name, HTTPS auth realm, and SSL certificate CN. Multiple controllers can publish to the same MQTT broker with unique prefixes (e.g., `unit1/temps`, `unit2/temps`)
+- **Multi-unit support** — Configurable system name (max 20 chars, alphanumeric + spaces) and MQTT topic prefix. System name is used as the web UI brand, AP SSID, OLED display name, and auth realm. Multiple controllers can publish to the same MQTT broker with unique prefixes (e.g., `unit1/temps`, `unit2/temps`)
 - **FreeRTOS compatible** — Uses `vTaskDelay()` instead of `delay()` for proper RTOS task yielding
 
 ## Architecture
@@ -302,8 +303,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | `TempSensor` | Temperature sensor with callbacks; supports OneWire (DS18B20), I2C (MCP9600), and SPI (MAX6675). 6 default names: COMPRESSOR, SUCTION, AMBIENT, CONDENSER, LIQUID, VAPOR |
 | `Config` | SD card and JSON configuration management |
 | `Logger` | Multi-output logging with tar.gz rotation, ring buffer, and WebSocket streaming |
-| `WebHandler` | AsyncWebServer (port 80) with REST API, WebSocket, and HTTPS redirects |
-| `HttpsServer` | ESP-IDF HTTPS server (port 443) for secure endpoints |
+| `WebHandler` | AsyncWebServer (port 80) with REST API and WebSocket |
 | `MQTTHandler` | MQTT client with auto-reconnect and topic publishing |
 
 ## Hardware
@@ -509,7 +509,7 @@ for z in [key_z_values]:
 
 **Linux/macOS:** Shell scripts in `scripts/` (`.sh`) require `bash` and `curl`.
 
-**Windows:** PowerShell scripts in `scripts/` (`.ps1`) require PowerShell 5.1+ (included with Windows 10/11) and `curl.exe` (included with Windows 10+). Some scripts also require `openssl` (included with [Git for Windows](https://gitforwindows.org/)). Run with: `powershell -ExecutionPolicy Bypass -File .\scripts\<script>.ps1`
+**Windows:** PowerShell scripts in `scripts/` (`.ps1`) require PowerShell 5.1+ (included with Windows 10/11) and `curl.exe` (included with Windows 10+). Run with: `powershell -ExecutionPolicy Bypass -File .\scripts\<script>.ps1`
 
 ### Secrets Setup
 
@@ -557,8 +557,6 @@ The SD card should contain:
 /www/heap.html           — System/heap info
 /www/wifi.html           — WiFi scan and setup
 /www/theme.css           — Shared dark/light theme stylesheet
-/cert.pem                — HTTPS certificate (optional, see below)
-/key.pem                 — HTTPS private key (optional, see below)
 /temps/<sensor>/*.csv    — Temperature history CSVs (auto-created)
 ```
 
@@ -635,7 +633,7 @@ This prompts for system name, MQTT prefix, WiFi, and MQTT credentials, then writ
 ```
 
 **Configuration options:**
-- `system.name` — System display name, max 20 characters, alphanumeric + spaces (default: "Goodman HP"). Used as web UI brand, AP SSID, OLED display name, HTTPS auth realm, and SSL certificate CN. Requires reboot
+- `system.name` — System display name, max 20 characters, alphanumeric + spaces (default: "Goodman HP"). Used as web UI brand, AP SSID, OLED display name, and auth realm. Requires reboot
 - `system.mqttPrefix` — MQTT topic prefix (default: "goodman"). Topics become `<prefix>/temps`, `<prefix>/state`, `<prefix>/fault`, `<prefix>/log`. Requires reboot
 - `logging.maxLogSize` — Maximum log file size in bytes before rotation (default: 52428800 = 50MB)
 - `logging.maxOldLogCount` — Number of rotated log files to keep (default: 10)
@@ -685,30 +683,18 @@ This prompts for system name, MQTT prefix, WiFi, and MQTT credentials, then writ
 
 Sensor addresses are discovered automatically on startup and can be mapped to names via this config.
 
-### HTTPS / SSL
+### Network Access
 
-The device runs a secondary HTTPS server (ESP-IDF `esp_https_server`) on port 443 for sensitive endpoints (`/config`, `/update`, `/ftp`). The AsyncWebServer on port 80 redirects those paths to HTTPS.
+The device has no built-in TLS — the web server (`WebHandler`, port 80) is **plain HTTP only**. This is a deliberate simplification: the device previously ran a second, self-signed HTTPS server, but that added real maintenance cost (a whole separate ESP-IDF `esp_https_server` implementation duplicating logic already in the HTTP one) without providing meaningful protection, since a self-signed cert is invisible to anything that already terminates TLS in front of it — for example, a reverse proxy or tunnel (Pangolin, Caddy, nginx, Cloudflare Tunnel, Tailscale Funnel, etc.) almost always talks plain HTTP to the origin device internally regardless of what the device itself offers.
 
-**Generate a self-signed certificate:**
-
-```bash
-# Linux/macOS
-./scripts/generate-cert.sh                    # CN=ESP32 (default)
-./scripts/generate-cert.sh "My Heatpump"      # CN=My Heatpump
-
-# Windows (PowerShell)
-.\scripts\generate-cert.ps1                    # CN=ESP32 (default)
-.\scripts\generate-cert.ps1 -Name "My Heatpump"
-```
-
-This creates `cert.pem` and `key.pem` (ECC P-256, 10-year validity). The CN (Common Name) defaults to "ESP32" but can be set to match the system name. Copy both files to the SD card root. If no certificates are found, all endpoints fall back to HTTP. The device also auto-generates a self-signed certificate on boot if none are found on the SD card, using the configured system name as the CN.
+**Important:** because everything — including Basic Auth credentials (see [Admin Password](#admin-password) below), WiFi/MQTT passwords in transit during config, and OTA firmware uploads — travels as plaintext HTTP, **this device should always run behind an HTTPS-terminating reverse proxy for any access beyond a fully trusted local LAN.** Do not expose port 80 directly to an untrusted network or the public internet.
 
 ### Admin Password
 
 Sensitive endpoints (`/config`, `/update`, `/ftp`) are protected by HTTP Basic Auth when an admin password is set.
 
 - **No password set** — All endpoints are open, no authentication required
-- **Password set** — Browser prompts for Basic Auth (username: `admin`, password: your admin password)
+- **Password set** — Browser prompts for Basic Auth (username: `admin`, password: your admin password). Since the connection itself is plain HTTP (see [Network Access](#network-access) above), these credentials are sent in an easily-reversible form — Basic Auth is not encryption. Put a reverse proxy in front for anything beyond a trusted LAN
 - Set the admin password from the config page (`/config`) or via the API
 - Setting a password automatically disables FTP if it was running
 
@@ -772,7 +758,7 @@ FTP (SimpleFTPServer on port 21) is used for uploading HTML files to the SD card
 - The `/ftp` GET status endpoint includes the active password in its response, allowing scripts to auto-detect the configured password
 - **Max password length: 16 characters** (SimpleFTPServer `FTP_CRED_SIZE` limit)
 
-**Upload web pages via HTTPS:**
+**Upload web pages via HTTP:**
 
 ```bash
 # Linux/macOS
@@ -786,7 +772,7 @@ FTP (SimpleFTPServer on port 21) is used for uploading HTML files to the SD card
 .\scripts\update-www.ps1 -USB [-Port COM3]        # Flash via USB serial
 ```
 
-This script prompts for the device IP and admin password, then uploads files from `data/www/` to the device's LittleFS `/www/` directory via HTTPS.
+This script prompts for the device IP and admin password, then uploads files from `data/www/` to the device's LittleFS `/www/` directory via HTTP.
 
 ### WiFi AP Fallback
 
@@ -796,7 +782,6 @@ If the device cannot connect to WiFi for a configurable timeout (default 10 minu
 - **Password:** Random 8-character alphanumeric, generated fresh on each AP activation. Displayed on the OLED screen and logged to serial
 - **IP:** `192.168.4.1`
 - All web endpoints work in AP mode (dashboard, config, OTA update, log, heap)
-- HTTPS is not available in AP mode — use HTTP (`http://192.168.4.1`)
 - OLED display shows AP credentials (SSID, password, IP) and holds the screen 3x longer for readability
 - The device automatically attempts to reconnect to the configured WiFi every 60 seconds while in AP mode
 - AP mode ends automatically when WiFi reconnects, or persists until reboot
@@ -867,10 +852,9 @@ All scripts prompt interactively for required parameters (device IP, admin passw
 |-------------|---------------------|-------------|
 | `configure.sh [--local]` | `configure.ps1 [-Local]` | Configure device credentials or generate local config.txt |
 | `ota-update.sh [--revert]` | `ota-update.ps1 [-Revert]` | OTA firmware upload, verify, flash, reboot, or rollback |
-| `update-www.sh [file] [--usb]` | `update-www.ps1 [-File name] [-USB] [-Port COM3]` | Upload web pages to device via HTTPS or USB serial |
+| `update-www.sh [file] [--usb]` | `update-www.ps1 [-File name] [-USB] [-Port COM3]` | Upload web pages to device via HTTP or USB serial |
 | `backup-config.sh` | `backup-config.ps1` | Download config.txt from device for local backup |
 | `restore-config.sh [file]` | `restore-config.ps1 [-File path]` | Restore config.txt to device from a local backup |
-| `generate-cert.sh [name]` | `generate-cert.ps1 [-Name "name"]` | Generate self-signed ECC P-256 cert for HTTPS |
 | `burn-efuse-key.sh [port]` | `burn-efuse-key.ps1 [-Port COM3]` | Burn hardware encryption key to ESP32-S3 eFuse |
 
 **Interactive prompts** (where applicable): Device IP, Admin password, System name, MQTT prefix, WiFi/MQTT credentials, confirmation prompts. PowerShell scripts use masked input (`Read-Host -AsSecureString`) for all password prompts.
@@ -881,11 +865,11 @@ Configure WiFi and MQTT credentials on the device or generate a local config fil
 
 ```bash
 # Linux/macOS
-./scripts/configure.sh           # Push config to device via HTTPS API
+./scripts/configure.sh           # Push config to device via HTTP API
 ./scripts/configure.sh --local   # Generate data/config.txt for SD card
 
 # Windows (PowerShell)
-.\scripts\configure.ps1           # Push config to device via HTTPS API
+.\scripts\configure.ps1           # Push config to device via HTTP API
 .\scripts\configure.ps1 -Local    # Generate data\config.txt for SD card
 ```
 
@@ -895,7 +879,7 @@ Configure WiFi and MQTT credentials on the device or generate a local config fil
 
 ### `scripts/ota-update.sh` / `ota-update.ps1`
 
-OTA firmware update via HTTPS. Uploads the PlatformIO build output to the device SD card, verifies the upload size, applies (backs up current firmware + flashes new), and waits for reboot.
+OTA firmware update via HTTP. Uploads the PlatformIO build output to the device SD card, verifies the upload size, applies (backs up current firmware + flashes new), and waits for reboot.
 
 ```bash
 # Linux/macOS
@@ -913,21 +897,21 @@ OTA firmware update via HTTPS. Uploads the PlatformIO build output to the device
 
 ### `scripts/update-www.sh` / `update-www.ps1`
 
-Upload HTML files from `data/www/` to the device LittleFS `/www/` directory via HTTPS, or flash the entire LittleFS image via USB serial.
+Upload HTML files from `data/www/` to the device LittleFS `/www/` directory via HTTP, or flash the entire LittleFS image via USB serial.
 
 ```bash
 # Linux/macOS
-./scripts/update-www.sh                    # Upload all files over HTTPS
+./scripts/update-www.sh                    # Upload all files over HTTP
 ./scripts/update-www.sh dashboard.html     # Upload a single file
 ./scripts/update-www.sh --usb [port]       # Flash via USB serial
 
 # Windows (PowerShell)
-.\scripts\update-www.ps1                    # Upload all files over HTTPS
+.\scripts\update-www.ps1                    # Upload all files over HTTP
 .\scripts\update-www.ps1 -File dashboard.html
 .\scripts\update-www.ps1 -USB [-Port COM3]  # Flash via USB serial
 ```
 
-**Prompts (HTTPS mode):** Device IP, Admin password
+**Prompts:** Device IP, Admin password
 
 ### `scripts/backup-config.sh` / `backup-config.ps1`
 
@@ -960,22 +944,6 @@ Restore a previously backed-up `config.txt` to the device SD card via FTP. Lists
 ```
 
 **Prompts:** Backup selection (if no file specified), Device IP, Admin password, Reboot confirmation
-
-### `scripts/generate-cert.sh` / `generate-cert.ps1`
-
-Generate a self-signed ECC P-256 certificate (10-year validity) for the ESP32 HTTPS server. Outputs `cert.pem` and `key.pem` to the project root. An optional system name parameter sets the certificate CN (Common Name).
-
-```bash
-# Linux/macOS
-./scripts/generate-cert.sh                    # CN=ESP32 (default)
-./scripts/generate-cert.sh "Goodman HP"       # CN=Goodman HP
-
-# Windows (PowerShell)
-.\scripts\generate-cert.ps1                    # CN=ESP32 (default)
-.\scripts\generate-cert.ps1 -Name "Goodman HP"
-```
-
-**No interactive prompts.** Requires `openssl` (included with Git for Windows). Copy output files to SD card root.
 
 ### `scripts/burn-efuse-key.sh` / `burn-efuse-key.ps1`
 
@@ -1031,7 +999,7 @@ Burn a hardware encryption key to ESP32-S3 eFuse for password encryption at rest
 | POST | `/ftp` | Yes | Enable/disable FTP (`{"duration":N}` minutes, 0=off) |
 | WS | `/ws` | | WebSocket for real-time data and log streaming |
 
-**Auth** = Requires HTTP Basic Auth when admin password is set. Endpoints marked with "Yes" redirect to HTTPS (port 443) when SSL certificates are available.
+**Auth** = Requires HTTP Basic Auth when admin password is set.
 
 ### `GET /state`
 
@@ -1266,8 +1234,6 @@ When the fault clears:
 - **PSRAM allocation** — Global `operator new` and `operator delete` are overridden in `src/PSRAMAllocator.cpp` to route all heap allocations through PSRAM via `ps_malloc()` when available, falling back to standard `malloc()` otherwise. PSRAM is initialized early using `__attribute__((constructor(101)))`, which runs before C++ global constructors, ensuring PSRAM is available for any static object that allocates memory. The `BOARD_HAS_PSRAM` build flag must be defined in `platformio.ini` for the ESP-IDF framework to enable PSRAM support. This approach keeps allocation logic out of `main.cpp` and avoids per-allocation init checks.
 
 - **AsyncTCP watchdog** — The `CONFIG_ASYNC_TCP_USE_WDT=0` build flag is required in `platformio.ini`. Without it, AsyncTCP subscribes its task to the ESP-IDF task watchdog (5s timeout). When the MQTT broker is slow or unreachable, the async_tcp task cannot reset the watchdog in time, causing a panic and reboot. This flag prevents the async_tcp task from registering with the watchdog.
-
-- **HTTPS server separation** — `HttpsServer.cpp` is in a separate translation unit because `esp_https_server.h` (ESP-IDF) and `ESPAsyncWebServer.h` both define `HTTP_PUT`, `HTTP_OPTIONS`, and `HTTP_PATCH` enums and cannot coexist in the same TU. Logger.h forward-declares `AsyncWebSocket` to avoid pulling in the ESPAsyncWebServer header chain.
 
 ## Known Issues
 

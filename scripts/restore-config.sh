@@ -91,8 +91,8 @@ fi
 read -rsp "Admin password (blank if none set): " ADMIN_PW
 echo
 
-BASE_URL="https://$DEVICE_IP"
-CURL_OPTS="-sk"
+BASE_URL="http://$DEVICE_IP"
+CURL_OPTS="-s"
 AUTH_OPTS=""
 if [ -n "$ADMIN_PW" ]; then
     AUTH_OPTS="-u admin:$ADMIN_PW"
@@ -101,9 +101,6 @@ fi
 # Verify device is reachable
 echo "Checking device at $DEVICE_IP..."
 HEAP=$(curl $CURL_OPTS --connect-timeout 5 "$BASE_URL/heap" 2>/dev/null) || true
-if [ -z "$HEAP" ]; then
-    HEAP=$(curl $CURL_OPTS --connect-timeout 5 "http://$DEVICE_IP/heap" 2>/dev/null) || true
-fi
 if [ -z "$HEAP" ]; then
     echo "Error: Could not reach device at $DEVICE_IP"
     exit 1

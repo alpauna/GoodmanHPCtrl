@@ -214,7 +214,7 @@ ProjectInfo proj = {
   "CST6CDT,M3.2.0,M11.1.0",  // timezone: US Central with auto DST
   20.0f,              // lowTempThreshold: 20°F default
   true,               // lowTempEnableW: W relay on in LOW_TEMP
-  true,               // lowTempEnableAux: AUX signal on in LOW_TEMP
+  true,               // lowTempEnableAux: AUX signal participates in LOW_TEMP handling (turned OFF while below threshold)
   140.0f,             // highSuctionTempThreshold: 140°F default
   false,              // rvFail: not latched
   30000,              // rvShortCycleMs: 30s default
@@ -814,16 +814,6 @@ void setup() {
         }
       }
     }
-    // Load TLS certificates for HTTPS server
-    config.loadCertificates("/cert.pem", "/key.pem");
-    if (!config.hasCertificates()) {
-      Log.warn("HTTPS", "No certificates found, generating self-signed cert...");
-      if (config.generateSelfSignedCert()) {
-        Log.info("HTTPS", "Self-signed certificate generated and saved to SD");
-      } else {
-        Log.error("HTTPS", "Certificate generation failed");
-      }
-    }
   }
   Serial.println("SD Card is read.");
 
@@ -959,12 +949,6 @@ void setup() {
     []() { stopAPMode(); }
   );
 
-  // Start HTTPS before HTTP so setupRoutes() knows whether to redirect or serve directly
-  if (config.hasCertificates()) {
-    webHandler.beginSecure(config.getCert(), config.getCertLen(), config.getKey(), config.getKeyLen());
-  } else {
-    Log.warn("HTTPS", "No certificates on SD card, HTTPS disabled. /config and /update served over HTTP.");
-  }
   webHandler.begin();
 
   // FTP is never auto-started at boot — enable on demand from config page.
@@ -1036,7 +1020,11 @@ void setup() {
     hpController.addOutput("CNT", new OutPin(&ts, 3000, _CNTPin, "CNT", "CNT", onOutpin));
     hpController.addOutput("W", new OutPin(&ts, 0, _WPin, "W", "W", onOutpin));
     hpController.addOutput("RV", new OutPin(&ts, 0, _RVPin, "RV", "RV", onOutpin));
-    hpController.addOutput("AUX", new OutPin(&ts, 0, _auxPin, "AUX", "AUX", onOutpin));
+    // AUX/LT is normally-closed at the hardware level (Q1 shunts the opto LED to
+    // starve it when driven high, so the relay fails safe ON before/without CPU
+    // drive). inverse=true makes turnOn()/turnOff() match physical reality —
+    // confirmed live via /pins + Y loopback on 2026-07-19.
+    hpController.addOutput("AUX", new OutPin(&ts, 0, _auxPin, "AUX", "AUX", true, false, false, 0.0f, 1000, onOutpin));
 
     // Start GoodmanHP controller
     hpController.setDallasTemperature(&sensors);
