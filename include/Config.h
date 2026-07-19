@@ -41,6 +41,7 @@ struct ProjectInfo {
     bool rvFail;                         // Latched RV fail flag (persisted)
     uint32_t rvShortCycleMs;             // RV pressure equalization delay in defrost transition (default 30000)
     uint32_t cntShortCycleMs;            // CNT short cycle delay on Y activation (default 30000)
+    float highAmbientHeatLockoutF;       // Ambient temp above which HEAT is blocked (default 70°F)
     // Adaptive defrost bands (Cold / Mid / Warm)
     float defrostColdMaxTempF;              // Band breakpoint: ≤ this = Cold (default 23°F)
     float defrostWarmMinTempF;              // Band breakpoint: ≥ this = Warm (default 31°F)

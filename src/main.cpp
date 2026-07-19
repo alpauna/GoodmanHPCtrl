@@ -219,6 +219,7 @@ ProjectInfo proj = {
   false,              // rvFail: not latched
   30000,              // rvShortCycleMs: 30s default
   30000,              // cntShortCycleMs: 30s default
+  70.0f,              // highAmbientHeatLockoutF: 70°F default
   // Adaptive defrost bands
   23.0f,              // defrostColdMaxTempF: Cold ≤ 23°F
   31.0f,              // defrostWarmMinTempF: Warm ≥ 31°F
@@ -778,6 +779,7 @@ void setup() {
       hpController.setHighSuctionTempThreshold(proj.highSuctionTempThreshold);
       hpController.setRvShortCycleMs(proj.rvShortCycleMs);
       hpController.setCntShortCycleMs(proj.cntShortCycleMs);
+      hpController.setHighAmbientHeatLockoutF(proj.highAmbientHeatLockoutF);
       hpController.setColdMaxTempF(proj.defrostColdMaxTempF);
       hpController.setWarmMinTempF(proj.defrostWarmMinTempF);
       hpController.setDefrostBand(GoodmanHP::DefrostBandName::COLD,

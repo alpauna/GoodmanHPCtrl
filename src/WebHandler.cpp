@@ -1086,6 +1086,7 @@ void WebHandler::setupRoutes() {
                 doc["rvFail"] = proj->rvFail;
                 doc["rvShortCycleSec"] = proj->rvShortCycleMs / 1000;
                 doc["cntShortCycleSec"] = proj->cntShortCycleMs / 1000;
+                doc["highAmbientHeatLockoutF"] = proj->highAmbientHeatLockoutF;
                 doc["defrostColdMaxTemp"] = proj->defrostColdMaxTempF;
                 doc["defrostWarmMinTemp"] = proj->defrostWarmMinTempF;
                 doc["defrostColdRuntimeMin"] = proj->defrostColdRuntimeMs / 60000;
@@ -1703,6 +1704,12 @@ void WebHandler::setupRoutes() {
         if (cntSC != proj->cntShortCycleMs) {
             proj->cntShortCycleMs = cntSC;
             _hpController->setCntShortCycleMs(cntSC);
+        }
+
+        float haLockout = data["highAmbientHeatLockoutF"] | proj->highAmbientHeatLockoutF;
+        if (haLockout != proj->highAmbientHeatLockoutF) {
+            proj->highAmbientHeatLockoutF = haLockout;
+            _hpController->setHighAmbientHeatLockoutF(haLockout);
         }
 
         // Adaptive defrost band breakpoints

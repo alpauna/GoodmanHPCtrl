@@ -269,6 +269,7 @@ JSON config stored on SD card at `/config.txt` (Arduino SD library, SPI interfac
     "lowTemp": { "threshold": 20.0 },
     "highSuctionTemp": { "threshold": 140.0, "rvFail": false },
     "shortCycle": { "rv": 30000, "cnt": 30000 },
+    "highAmbientLockout": { "threshold": 70.0 },
     "defrost": {
       "active": false,
       "coldMaxTemp": 23.0,

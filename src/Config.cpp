@@ -430,6 +430,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.rvFail = false;
         proj.rvShortCycleMs = 30000;
         proj.cntShortCycleMs = 30000;
+        proj.highAmbientHeatLockoutF = 70.0f;
         // Legacy defaults — Warm band values
         proj.defrostColdMaxTempF = 23.0f;
         proj.defrostWarmMinTempF = 31.0f;
@@ -463,6 +464,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.rvFail = heatpump["highSuctionTemp"]["rvFail"] | false;
         proj.rvShortCycleMs = heatpump["shortCycle"]["rv"] | 30000;
         proj.cntShortCycleMs = heatpump["shortCycle"]["cnt"] | 30000;
+        proj.highAmbientHeatLockoutF = heatpump["highAmbientLockout"]["threshold"] | 70.0f;
         // Adaptive defrost bands — migrate from old single-value fields if needed
         JsonObject defrost = heatpump["defrost"];
         if (defrost["cold"].is<JsonObject>()) {
@@ -767,6 +769,8 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
     JsonObject hpShortCycle = heatpump["shortCycle"].to<JsonObject>();
     hpShortCycle["rv"] = proj.rvShortCycleMs;
     hpShortCycle["cnt"] = proj.cntShortCycleMs;
+    JsonObject hpHighAmbientLockout = heatpump["highAmbientLockout"].to<JsonObject>();
+    hpHighAmbientLockout["threshold"] = proj.highAmbientHeatLockoutF;
     JsonObject hpDefrost = heatpump["defrost"].to<JsonObject>();
     hpDefrost["active"] = proj.softwareDefrost;
     hpDefrost["coldMaxTemp"] = proj.defrostColdMaxTempF;
@@ -942,6 +946,8 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     JsonObject hpShortCycle = heatpump["shortCycle"].to<JsonObject>();
     hpShortCycle["rv"] = proj.rvShortCycleMs;
     hpShortCycle["cnt"] = proj.cntShortCycleMs;
+    JsonObject hpHighAmbientLockout = heatpump["highAmbientLockout"].to<JsonObject>();
+    hpHighAmbientLockout["threshold"] = proj.highAmbientHeatLockoutF;
     JsonObject hpDefrost = heatpump["defrost"].to<JsonObject>();
     hpDefrost["active"] = proj.softwareDefrost;
     hpDefrost["coldMaxTemp"] = proj.defrostColdMaxTempF;

@@ -608,6 +608,7 @@ This prompts for system name, MQTT prefix, WiFi, and MQTT credentials, then writ
     "lowTemp": { "threshold": 20.0 },
     "highSuctionTemp": { "threshold": 140.0, "rvFail": false },
     "shortCycle": { "rv": 30000, "cnt": 30000 },
+    "highAmbientLockout": { "threshold": 70.0 },
     "defrost": { "minRuntimeMs": 180000, "exitTempF": 60.0, "heatRuntimeThresholdMs": 5400000 }
   },
   "tempHistory": {
