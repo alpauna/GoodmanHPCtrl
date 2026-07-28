@@ -916,8 +916,9 @@ void GoodmanHP::checkYAndActivateCNT() {
         // Y just became active - record start time
         _yActiveStartTick = millis();
         _yWasActive = true;
-        // Turn on FAN when Y activates (unless in defrost)
-        if (fan != nullptr && _state != State::DEFROST) {
+        // Turn on FAN when Y activates (unless in defrost, or the state machine
+        // has already decided OFF — e.g. high-ambient-HEAT lockout — see BUG-016)
+        if (fan != nullptr && _state != State::DEFROST && _state != State::OFF) {
             fan->turnOn();
             Log.info("HP", "FAN turned ON (Y activated)");
         }
@@ -958,7 +959,13 @@ void GoodmanHP::checkYAndActivateCNT() {
             Log.info("HP", "Y dropped during defrost exit, exit cancelled");
         }
     } else if (yActive && _yWasActive && !_cntActivated) {
-        if (_lpsFault || _lowTemp || _compressorOverTemp || _suctionLowTemp || _rvFail || _fanFault || isOvercurrentActive() || isLockedRotorActive() || _softwareDefrost || _defrostExiting || _coolTransition || _coolCntPending || _heatTransition || _heatCntPending || _rvHoldActive) return;
+        // _state == OFF covers any reason updateState() decided not to run (e.g.
+        // the high-ambient-HEAT lockout forcing OFF while Y is still active) that
+        // isn't already tracked by one of its own dedicated flag below. update()
+        // calls updateState() right after this, so _state reflects the previous
+        // tick's authoritative decision — this function never activates CNT
+        // ahead of the state machine actually deciding to run. See BUG-016.
+        if (_state == State::OFF || _lpsFault || _lowTemp || _compressorOverTemp || _suctionLowTemp || _rvFail || _fanFault || isOvercurrentActive() || isLockedRotorActive() || _softwareDefrost || _defrostExiting || _coolTransition || _coolCntPending || _heatTransition || _heatCntPending || _rvHoldActive) return;
         // Check if CNT was off for less than 5 minutes - if so, enforce short cycle delay
         uint32_t offElapsed = millis() - cnt->getOffTick();
         bool activated = false;
@@ -1126,6 +1133,20 @@ void GoodmanHP::updateState() {
             }
         }
 
+        // Direct-to-OFF: COOL/HEAT/DEFROST entry each zero CNT as the first step
+        // of their own sequenced transition above, but OFF has no such transition
+        // phase, so nothing else here ever turns CNT off when landing in OFF
+        // (e.g. via the high-ambient-HEAT lockout forcing newState to OFF, or O
+        // dropping with no HEAT/COOL call left). See BUG-016.
+        if (newState == State::OFF) {
+            OutPin* cntOff = getOutput("CNT");
+            if (cntOff != nullptr && cntOff->isOn()) {
+                cntOff->turnOff();
+                _cntActivated = false;
+                Log.info("HP", "CNT turned OFF for OFF mode");
+            }
+        }
+
         // Resume defrost from Phase 1 when Y returns in HEAT mode
         // MUST run before W control so _defrostTransition is set before W is evaluated
         if (newState == State::DEFROST && _softwareDefrost && oldState != State::DEFROST) {
@@ -1161,12 +1182,18 @@ void GoodmanHP::updateState() {
             }
         }
 
-        // Control FAN: OFF during DEFROST and COOL transition, restore when leaving DEFROST if Y active
+        // Control FAN: OFF during DEFROST, COOL transition, and OFF; restore when
+        // leaving DEFROST if Y active
         OutPin* fan = getOutput("FAN");
         if (fan != nullptr) {
             if (newState == State::DEFROST) {
                 fan->turnOff();
                 Log.info("HP", "FAN turned OFF for DEFROST mode");
+            } else if (newState == State::OFF) {
+                if (fan->isOn()) {
+                    fan->turnOff();
+                    Log.info("HP", "FAN turned OFF for OFF mode");
+                }
             } else if (oldState == State::DEFROST && yActive && !_defrostExiting && !_coolTransition) {
                 // Leaving defrost with Y still active and no transition pending
                 fan->turnOn();
@@ -1693,6 +1720,17 @@ void GoodmanHP::validateOutputStates() {
     uint32_t now = millis();
     if (now - _lastValidateTick < STATE_VALIDATE_MS) return;
     _lastValidateTick = now;
+
+    // Self-expire the validation hold on elapsed time alone. Normally
+    // canTransitionToNormalState() clears _stateValidationActive when the next
+    // HEAT/COOL/DEFROST transition attempt lands — but transitions into OFF/ERROR
+    // never call it (they bypass the hold entirely, being high-priority), so a
+    // system parked in OFF/ERROR with no further transition attempt would
+    // otherwise leave this corrective sweep disabled indefinitely. See BUG-016.
+    if (_stateValidationActive && (now - _stateValidationStart >= _stateValidationMs)) {
+        _stateValidationActive = false;
+        Log.info("HP", "State validation complete: %s confirmed (self-expired)", getStateString());
+    }
 
     // Skip during startup lockout, manual override, and state validation hold
     // (state label doesn't reflect actual operating mode during validation window)
