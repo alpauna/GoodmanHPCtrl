@@ -6,6 +6,7 @@
 [`Goodman-Heatpump-Main-Board.pdf`](schematics/Goodman-Heatpump-Main-Board.pdf)
 (main board, `Board1`, v1.0, updated 2026-07-27 — `H3`/`U43` are the
 daughter-board interconnect)
+**Datasheet**: [`ads131m04_datasheet.pdf`](ads131m04_datasheet.pdf) (TI SBAS890D, March 2019 — revised May 2021)
 **Motivated by**: [BUG-014](bugs/014-main-loop-stall-from-ads1115-sample-rate.md) — the ADS1115-based
 current sensing needed a software calibration fudge factor (`ctRatio`), a
 hand-built non-blocking polling state machine, and still samples the two
@@ -193,6 +194,64 @@ not be designed for a full-rail digital swing — worth confirming `AIN2`
 reads sensibly (not clipped/saturated) rather than assuming it "just
 works" because the signal is clean at the source.
 
+### SPI protocol (confirmed against the TI datasheet, SBAS890D)
+
+- **Mode**: SPI mode 1 (CPOL=0, CPHA=1) — data launched/changed on `SCLK`
+  rising edges, latched on falling edges. Full-duplex: `DIN` and `DOUT`
+  are both active every clock, not request/response.
+- **Word size**: configurable 16/24/32-bit via `WLENGTH[1:0]` in the
+  `MODE` register (address `02h`). Commands/responses/CRC words always
+  carry 16 bits of real data (zero-padded to fit a wider word); ADC data
+  is nominally 24-bit, truncated for 16-bit words or LSB-padded/MSB-sign-
+  extended for 32-bit words. 24-bit is the reset default.
+- **Frame structure**: a minimum 6-word frame in the default (4-channel,
+  no output CRC disabled) configuration — word 1 is the command (`DIN`)
+  and simultaneously the *previous* command's response (`DOUT`); the
+  device then shifts out channel 0-3 data on `DOUT` while `DIN` is
+  don't-care/zero, followed by a CRC word. `RREG`/`WREG` touching more
+  than one register extend the frame accordingly. Ending a frame early
+  (dropping `CS`) is safe — a new frame always starts fresh — except a
+  `RESET` command specifically requires the full 6-word frame to latch.
+- **Commands** (`Table 8-11`): `NULL` (`0000h`, response = `STATUS`
+  register — this is also what a plain read-data cycle looks like),
+  `RESET` (`0011h`, acks `FF24h` when a full frame completes), `STANDBY`
+  (`0022h`), `WAKEUP` (`0033h`), `LOCK`/`UNLOCK` (`0555h`/`0655h`),
+  `RREG`/`WREG` (`101a aaaa annn nnnn` / `011a aaaa annn nnnn`, where
+  `aaaaa` is the starting register address and `nnnnnn` is register
+  count minus one).
+- **`DRDY#`**: active low, configurable via `MODE` register bits —
+  `DRDY_SEL[1:0]` picks which channel's timing drives the pin (default
+  `00b` = most-lagging enabled channel; `01b` = logic-OR of all enabled
+  channels, likely the right choice here since all 4 channels need to be
+  captured together anyway), `DRDY_HiZ` (push-pull vs. open-drain idle,
+  default push-pull/driven-high — matches the plan to attach a GPIO
+  interrupt directly, no external pull-up needed), `DRDY_FMT` (level vs.
+  fixed-duration pulse, default level/low-until-read).
+- **Registers relevant to bring-up** (`Table 8-12`, full map is 0x00-0x17+):
+  - `03h CLOCK` — `CH0_EN`..`CH3_EN` (bits 8-11, **all four default
+    enabled** — no explicit enable step needed for `AIN2`/`ZX`), `OSR[2:0]`
+    (bits 4:2, default `011b` = 1024; lower OSR = faster data rate at
+    the cost of noise — worth tuning once real noise/timing numbers are
+    available on hardware), `PWR[1:0]` (default `10b` = high-resolution).
+  - `04h GAIN1` — one register holds `PGAGAIN0[2:0]`..`PGAGAIN3[2:0]`,
+    default `1` (`000b`) for all channels. `AIN2`/`ZX` almost certainly
+    wants gain=1 (it's already a full-swing digital signal, no
+    amplification needed); the CT channels' gain is a separate tuning
+    question from `ctRatio` — real per-channel gain here, not just the
+    software scale factor.
+  - `01h STATUS` (read-only) — per-channel `DRDY0`..`DRDY3` flags,
+    `CRC_ERR`, `LOCK` state. Also what a `NULL` command returns.
+  - Per-channel `CHn_CFG`/`CHn_OCAL`/`CHn_GCAL` registers (`09h`+) —
+    hardware phase-delay calibration (244ns resolution, per the Features
+    list) and offset/gain calibration per channel. Not required for a
+    first bring-up, but notable: this could eventually replace or
+    complement the `AIN2` zero-cross approach for fine inter-channel
+    timing, if that level of precision ever matters.
+- **Not yet needed for this design**: CRC configuration (`REGCRC_EN`,
+  `RX_CRC_EN`, `CRC_TYPE`), global-chop mode, current-detect mode (`CFG`
+  register) — all real features but outside what compressor/fan/heater/
+  zero-cross RMS monitoring requires.
+
 ### Calibration
 
 The 3-point clamp-meter calibration tool added in `config.html` tonight
@@ -222,15 +281,14 @@ to add — the ADC has no free channel beyond that.
    the live schematic (not inferred from PDF text): GPIO2 (DIN), GPIO42
    /`MTMS` (DOUT), GPIO1 (SCLK), GPIO46 (DRDY#), GPIO45 (CS#). No pin
    sharing — `SW2` is on `GPIO0` (boot-select), not this bus.
-4. **Exact SPI frame/register protocol** — general architecture above is
-   accurate to how the ADS131M0x family works, but exact command opcodes,
-   register addresses, and frame word-length configuration need to be
-   verified against the TI datasheet directly before writing real driver
-   code, not assumed from memory.
+4. ~~**Exact SPI frame/register protocol**~~ — **resolved**, confirmed
+   against the actual TI datasheet (SBAS890D, not assumed from memory).
+   See "SPI protocol" above for commands, frame structure, and the
+   specific registers needed for bring-up.
 5. **Whether the ADS1115 stays populated as a fallback**, or this fully
    replaces it — affects whether `CurrentSensor`/`GoodmanHP` need to
    support both ADC types simultaneously (config-selectable) or if this
-   is a clean cutover.
+   is a clean cutover. Still a product decision, not a technical one.
 
 ## Next steps
 
