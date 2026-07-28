@@ -129,17 +129,19 @@ operation.
    TVS with more standoff margin (e.g. 39V or 43V) if the real transformer
    output runs meaningfully above the nominal 24V the original design
    assumed.
-2. **Reservoir cap value**: `docs/power-factor/overview.md` (pre-existing
-   design doc, predates this session) already specifies **1000µF/50V** for
-   this exact half-wave-rectifier design, with the reasoning fully worked
-   out (half-wave needs a larger cap to offset ~2× ripple; 50V is sufficient
-   because D3 clamps to ~58V max and the fuse limits sustained fault
-   current). The board had drifted to 63V/1000µF, and bench discussion
-   during this investigation leaned toward reverting to the *original*
-   470µF/63V instead. Worth reconciling which of the three (470µF/63V,
-   1000µF/50V, 1000µF/63V) actually gets built, since the 1000µF/50V option
-   is what the project's own prior design work already settled on and
-   justified.
+2. ~~**Reservoir cap value**~~ — **decided**: staying with **1000µF/63V**,
+   using a part sourced in the same footprint as the 50V option (adequate
+   ripple current, not the original 1380mA/16×26mm part that started this
+   investigation). `docs/power-factor/overview.md` (pre-existing design
+   doc, predates this session) specifies 1000µF/**50V** with a fully worked
+   out rationale (half-wave needs a larger cap to offset ~2× ripple; 50V is
+   sufficient because D3 clamps to ~58V max and the fuse limits sustained
+   fault current) — worth updating that doc to reflect 63V, since running
+   an electrolytic well below its rated voltage is a legitimate reliability
+   plus (better lifetime, more stable ESR), not just unnecessary margin,
+   and the 63V option now has ripple-current headroom to match. Root cause
+   either way was never the cap — it was the shorted D1 (see Root Cause,
+   above).
 3. **Architecture divergence**: `docs/power-factor/overview.md` describes a
    4-channel design using a resistor-divider voltage reference on `AIN3`
    (no zero-cross detector), while the actual populated daughter board
