@@ -336,8 +336,26 @@ scaled-voltage channel:
 
 ## Next steps
 
-Nothing to implement yet — this doc is the scoping artifact. Once
-`Board1` is populated and the open questions above are answered, the
-concrete first step is a minimal SPI bring-up sketch (read the ADS131M04
-ID/status register over SPI, confirm `DRDY#` toggles) before writing any
-of the `SPICurrentADC` class described above.
+Main board is now healthy (D1 replaced, power supply confirmed stable,
+firmware flashed, WiFi/MQTT/config verified) — this is what unblocks
+actually connecting the daughter board. Test plan for the next session:
+
+1. **Physically connect the daughter board** to `H3` (7-pin: GND, 3.3V,
+   GPIO2/DIN, GPIO42/DOUT, GPIO1/SCLK, GPIO46/DRDY#, GPIO45/CS#) and `U43`
+   (2-pin: `ZX`/`AGND`).
+2. **Minimal SPI bring-up sketch first** — nothing else. Read the
+   ADS131M04's `ID`/`STATUS` register (`RREG` command, see "SPI protocol"
+   above) over SPI and confirm a sane response, and confirm `DRDY#`
+   actually toggles once conversions start. Don't skip straight to full
+   current sensing — confirm the bus talks at all first.
+3. **Then verify each channel is sampling something sane**: `AIN0`
+   (compressor), `AIN1` (fan), `AIN3` (heater) against a clamp meter, same
+   verification method used tonight for the ADS1115 calibration work —
+   and `AIN2` (zero-cross reference) should show a clean signal that
+   correlates with the actual line phase (sign changes roughly every
+   8.3ms at 60Hz).
+4. **No `SPICurrentADC`/`CurrentSensor` integration yet** — this pass is
+   pure hardware bring-up (does the SPI bus work, do the channels read
+   plausible values), not writing the production driver class described
+   above. Confirm the hardware first, then build the real driver on top
+   of a known-working bring-up sketch.
