@@ -1132,6 +1132,22 @@ void WebHandler::setupRoutes() {
                 doc["internalTempOffsetF"] = serialized(String(proj->internalTempOffsetF, 1));
                 doc["weatherApiKeySet"] = proj->weatherApiKey.length() > 0;
                 doc["rvFail"] = proj->rvFail;
+                // Current monitoring — was never exposed here, so config.html's
+                // "Current Monitoring" fieldset always loaded blank/default even
+                // after POST /config started actually saving these (see BUG-014
+                // follow-up).
+                doc["compressorCtRatio"] = proj->compressorCtRatio;
+                doc["fanCtRatio"] = proj->fanCtRatio;
+                doc["crankcaseCtRatio"] = proj->crankcaseCtRatio;
+                doc["compressorBurdenOhms"] = proj->compressorBurdenOhms;
+                doc["fanBurdenOhms"] = proj->fanBurdenOhms;
+                doc["crankcaseBurdenOhms"] = proj->crankcaseBurdenOhms;
+                doc["crankcaseExpectedAmps"] = proj->crankcaseExpectedAmps;
+                doc["compressorOvercurrentAmps"] = proj->compressorOvercurrentAmps;
+                doc["fanOvercurrentAmps"] = proj->fanOvercurrentAmps;
+                doc["overcurrentDelaySec"] = proj->overcurrentDelayMs / 1000;
+                doc["lockedRotorThreshold"] = proj->lockedRotorThreshold;
+                doc["lockedRotorTimeoutSec"] = proj->lockedRotorTimeoutMs / 1000;
                 String json;
                 serializeJson(doc, json);
                 request->send(200, "application/json", json);
@@ -1416,7 +1432,7 @@ void WebHandler::setupRoutes() {
                 _wwwUploadOk = false;
                 _wwwUploadName = request->header("X-Filename");
                 if (_wwwUploadName.length() == 0 || _wwwUploadName.indexOf("..") >= 0 ||
-                    _wwwUploadName.indexOf('/') >= 0 || total > 51200) {
+                    _wwwUploadName.indexOf('/') >= 0 || total > 204800) {
                     _wwwUploadName = "";
                     return;
                 }
@@ -1934,6 +1950,82 @@ void WebHandler::setupRoutes() {
             if (stale < minStale) stale = minStale;
             proj->weatherStaleMinutes = stale;
             _hpController->setWeatherStaleMs(stale * 60000UL);
+        }
+
+        // Current monitoring — CT ratios, burden resistors, overcurrent/locked-rotor
+        // thresholds (live). These were previously present in config.html but never
+        // actually read here, so the "Current Monitoring" fieldset silently failed
+        // to save anything — see BUG-014 follow-up.
+        {
+            CurrentSensor* compCur = _hpController->getCurrentSensor("COMPRESSOR_CURRENT");
+            CurrentSensor* fanCur = _hpController->getCurrentSensor("FAN_CURRENT");
+
+            if (data["compressorCtRatio"].is<float>() || data["compressorCtRatio"].is<int>()) {
+                float r = data["compressorCtRatio"] | proj->compressorCtRatio;
+                if (r > 0.0f && r != proj->compressorCtRatio) {
+                    proj->compressorCtRatio = r;
+                    if (compCur) compCur->setCtRatio(r);
+                }
+            }
+            if (data["fanCtRatio"].is<float>() || data["fanCtRatio"].is<int>()) {
+                float r = data["fanCtRatio"] | proj->fanCtRatio;
+                if (r > 0.0f && r != proj->fanCtRatio) {
+                    proj->fanCtRatio = r;
+                    if (fanCur) fanCur->setCtRatio(r);
+                }
+            }
+            if (data["crankcaseCtRatio"].is<float>() || data["crankcaseCtRatio"].is<int>()) {
+                float r = data["crankcaseCtRatio"] | proj->crankcaseCtRatio;
+                if (r > 0.0f) proj->crankcaseCtRatio = r;  // no sensor object yet — channel not implemented
+            }
+            if (data["compressorBurdenOhms"].is<float>() || data["compressorBurdenOhms"].is<int>()) {
+                proj->compressorBurdenOhms = data["compressorBurdenOhms"] | proj->compressorBurdenOhms;
+            }
+            if (data["fanBurdenOhms"].is<float>() || data["fanBurdenOhms"].is<int>()) {
+                proj->fanBurdenOhms = data["fanBurdenOhms"] | proj->fanBurdenOhms;
+            }
+            if (data["crankcaseBurdenOhms"].is<float>() || data["crankcaseBurdenOhms"].is<int>()) {
+                proj->crankcaseBurdenOhms = data["crankcaseBurdenOhms"] | proj->crankcaseBurdenOhms;
+            }
+            if (data["crankcaseExpectedAmps"].is<float>() || data["crankcaseExpectedAmps"].is<int>()) {
+                proj->crankcaseExpectedAmps = data["crankcaseExpectedAmps"] | proj->crankcaseExpectedAmps;
+            }
+            if (data["compressorOvercurrentAmps"].is<float>() || data["compressorOvercurrentAmps"].is<int>()) {
+                float a = data["compressorOvercurrentAmps"] | proj->compressorOvercurrentAmps;
+                if (a != proj->compressorOvercurrentAmps) {
+                    proj->compressorOvercurrentAmps = a;
+                    if (compCur) compCur->setOvercurrentThreshold(a);
+                }
+            }
+            if (data["fanOvercurrentAmps"].is<float>() || data["fanOvercurrentAmps"].is<int>()) {
+                float a = data["fanOvercurrentAmps"] | proj->fanOvercurrentAmps;
+                if (a != proj->fanOvercurrentAmps) {
+                    proj->fanOvercurrentAmps = a;
+                    if (fanCur) fanCur->setOvercurrentThreshold(a);
+                }
+            }
+            if (data["overcurrentDelaySec"].is<int>()) {
+                uint32_t ms = (uint32_t)(data["overcurrentDelaySec"] | (int)(proj->overcurrentDelayMs / 1000)) * 1000UL;
+                if (ms != proj->overcurrentDelayMs) {
+                    proj->overcurrentDelayMs = ms;
+                    if (compCur) compCur->setOvercurrentDelayMs(ms);
+                    if (fanCur) fanCur->setOvercurrentDelayMs(ms);
+                }
+            }
+            if (data["lockedRotorThreshold"].is<float>() || data["lockedRotorThreshold"].is<int>()) {
+                float a = data["lockedRotorThreshold"] | proj->lockedRotorThreshold;
+                if (a != proj->lockedRotorThreshold) {
+                    proj->lockedRotorThreshold = a;
+                    if (compCur) compCur->setLockedRotorThreshold(a);
+                }
+            }
+            if (data["lockedRotorTimeoutSec"].is<int>()) {
+                uint32_t ms = (uint32_t)(data["lockedRotorTimeoutSec"] | (int)(proj->lockedRotorTimeoutMs / 1000)) * 1000UL;
+                if (ms != proj->lockedRotorTimeoutMs) {
+                    proj->lockedRotorTimeoutMs = ms;
+                    if (compCur) compCur->setLockedRotorTimeoutMs(ms);
+                }
+            }
         }
 
         // Failover test

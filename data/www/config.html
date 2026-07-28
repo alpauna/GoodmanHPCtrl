@@ -149,37 +149,40 @@ button:hover{background:#45a049;}
 <button type='button' class='btn-sm' id='applyDefaultsBtn' style='display:none' onclick='applyHPDefaults()'>Apply Defaults</button>
 </fieldset>
 <fieldset id='s-cur'><legend>Current Monitoring <span class='tag tag-live'>live</span></legend>
-<label>Compressor CT Clamp <span id='compCtRec' style='font-size:11px;color:#27ae60'></span></label>
-<select id='compressorCtRatio' onchange='toggleBurden("compressor")'>
-<option value='0'>SCT-013-000 (current output, needs burden)</option>
-<option value='5'>SCT-013-005 (5A)</option>
-<option value='10'>SCT-013-010 (10A)</option>
-<option value='15'>SCT-013-015 (15A)</option>
-<option value='20'>SCT-013-020 (20A)</option>
-<option value='25'>SCT-013-025 (25A)</option>
-<option value='30'>SCT-013-030 (30A)</option>
-<option value='50'>SCT-013-050 (50A)</option>
-<option value='100'>SCT-013-100 (100A)</option>
-</select>
+<label>Compressor CT Ratio (amps @ 1V out) <span id='compCtRec' style='font-size:11px;color:#27ae60'></span></label>
+<input type='number' step='0.01' min='0.1' id='compressorCtRatio' list='ctPresets' oninput='toggleBurden("compressor")'>
 <div id='compressorBurdenRow' style='display:none'>
 <label>Burden Resistor (&Omega;, 1% or better) <span id='compBurdenRange' style='font-size:11px;color:#27ae60'></span></label>
 <input type='number' step='1' min='1' id='compressorBurdenOhms' oninput='calcBurdenRange("compressor")'>
 </div>
-<label>Fan CT Clamp <span id='fanCtRec' style='font-size:11px;color:#27ae60'></span></label>
-<select id='fanCtRatio' onchange='toggleBurden("fan")'>
-<option value='0'>SCT-013-000 (current output, needs burden)</option>
-<option value='5'>SCT-013-005 (5A)</option>
-<option value='10'>SCT-013-010 (10A)</option>
-<option value='15'>SCT-013-015 (15A)</option>
-<option value='20'>SCT-013-020 (20A)</option>
-<option value='25'>SCT-013-025 (25A)</option>
-<option value='30'>SCT-013-030 (30A)</option>
-<option value='50'>SCT-013-050 (50A)</option>
-<option value='100'>SCT-013-100 (100A)</option>
-</select>
+<label>Fan CT Ratio (amps @ 1V out) <span id='fanCtRec' style='font-size:11px;color:#27ae60'></span></label>
+<input type='number' step='0.01' min='0.1' id='fanCtRatio' list='ctPresets' oninput='toggleBurden("fan")'>
 <div id='fanBurdenRow' style='display:none'>
 <label>Burden Resistor (&Omega;, 1% or better) <span id='fanBurdenRange' style='font-size:11px;color:#27ae60'></span></label>
 <input type='number' step='1' min='1' id='fanBurdenOhms' oninput='calcBurdenRange("fan")'>
+</div>
+<datalist id='ctPresets'>
+<option value='0' label='SCT-013-000 (current output, needs burden)'>
+<option value='5' label='SCT-013-005 (5A)'>
+<option value='10' label='SCT-013-010 (10A)'>
+<option value='15' label='SCT-013-015 (15A)'>
+<option value='20' label='SCT-013-020 (20A)'>
+<option value='25' label='SCT-013-025 (25A)'>
+<option value='30' label='SCT-013-030 (30A)'>
+<option value='50' label='SCT-013-050 (50A)'>
+<option value='100' label='SCT-013-100 (100A)'>
+</datalist>
+<p style='color:var(--text-secondary);font-size:11px;margin:2px 0 8px'>Start from the sensor's rated ratio (e.g. 30 for SCT-013-030), then use the calibration tool below to correct for actual circuit accuracy against a clamp meter.</p>
+<div id='ctCalibBox' style='margin:8px 0;padding:10px;border-radius:4px;background:var(--code-bg)'>
+<button type='button' class='btn-sm' onclick='toggleCtCalib()' id='ctCalibToggleBtn'>Calibrate with Clamp Meter</button>
+<div id='ctCalibPanel' style='display:none;margin-top:10px'>
+<p style='color:var(--text-secondary);font-size:11px;margin:0 0 8px'>With the compressor running, take 3 readings a minute or more apart. For each row, click Capture to record the live device reading, then enter what your clamp meter reads on the compressor and fan wires at that same moment.</p>
+<table style='width:100%;font-size:12px;border-collapse:collapse' id='ctCalibTable'>
+<tr style='text-align:left'><th>#</th><th>Device Comp</th><th>Device Fan</th><th>Clamp Comp (A)</th><th>Clamp Fan (A)</th><th></th></tr>
+</table>
+<button type='button' class='btn-sm' style='margin-top:8px' onclick='computeCtCalibration()'>Compute &amp; Fill</button>
+<span id='ctCalibStatus' style='font-size:11px;margin-left:8px'></span>
+</div>
 </div>
 <label>Crankcase Heater CT Clamp <span id='ccCtRec' style='font-size:11px;color:#27ae60'></span></label>
 <select id='crankcaseCtRatio' onchange='toggleBurden("crankcase")'>
@@ -612,6 +615,74 @@ document.getElementById('internalTempOffsetF').value=newOffset.toFixed(1);
 document.getElementById('internalTempOffsetF').dispatchEvent(new Event('input',{bubbles:true}));
 st.textContent='Set to '+newOffset.toFixed(1)+'\u00b0F ('+c.refName+': '+c.ref.toFixed(1)+'\u00b0F, raw ESP32: '+c.rawInternal.toFixed(1)+'\u00b0F). Save to apply.';st.style.color='#27ae60';
 }).catch(function(e){st.textContent='Error: '+e;st.style.color='#e74c3c';});
+}
+var _ctCalibRows=[null,null,null];
+function toggleCtCalib(){
+var panel=document.getElementById('ctCalibPanel');
+var show=panel.style.display==='none';
+panel.style.display=show?'block':'none';
+if(show&&document.getElementById('ctCalibTable').rows.length<=1)buildCtCalibRows();
+}
+function buildCtCalibRows(){
+var table=document.getElementById('ctCalibTable');
+for(var i=0;i<3;i++){
+var tr=document.createElement('tr');
+tr.innerHTML='<td>'+(i+1)+'</td>'+
+'<td id="ctDevComp'+i+'">--</td>'+
+'<td id="ctDevFan'+i+'">--</td>'+
+'<td><input type="number" step="0.01" min="0" style="width:70px" id="ctClampComp'+i+'"></td>'+
+'<td><input type="number" step="0.01" min="0" style="width:70px" id="ctClampFan'+i+'"></td>'+
+'<td><button type="button" class="btn-sm" onclick="captureCtRow('+i+')">Capture</button></td>';
+table.appendChild(tr);
+}
+}
+function captureCtRow(i){
+fetch('/state').then(function(r){return r.json();}).then(function(d){
+var c=d.current||{};
+var comp=c.COMPRESSOR_CURRENT,fan=c.FAN_CURRENT;
+_ctCalibRows[i]={comp:comp,fan:fan};
+document.getElementById('ctDevComp'+i).textContent=(comp!=null?comp.toFixed(1):'--')+'A';
+document.getElementById('ctDevFan'+i).textContent=(fan!=null?fan.toFixed(1):'--')+'A';
+}).catch(function(){
+document.getElementById('ctCalibStatus').textContent='Error reading live state';
+document.getElementById('ctCalibStatus').style.color='#e74c3c';
+});
+}
+function computeCtCalibration(){
+var compRatios=[],fanRatios=[];
+for(var i=0;i<3;i++){
+var row=_ctCalibRows[i];
+if(!row)continue;
+var clampComp=parseFloat(document.getElementById('ctClampComp'+i).value);
+var clampFan=parseFloat(document.getElementById('ctClampFan'+i).value);
+if(row.comp>0.05&&!isNaN(clampComp)&&clampComp>0)compRatios.push(clampComp/row.comp);
+if(row.fan>0.05&&!isNaN(clampFan)&&clampFan>0)fanRatios.push(clampFan/row.fan);
+}
+var st=document.getElementById('ctCalibStatus');
+if(compRatios.length===0&&fanRatios.length===0){
+st.textContent='Capture at least one row and enter clamp readings first.';
+st.style.color='#e74c3c';
+return;
+}
+var msgs=[];
+if(compRatios.length>0){
+var avgC=compRatios.reduce(function(a,b){return a+b;},0)/compRatios.length;
+var curC=parseFloat(document.getElementById('compressorCtRatio').value)||30;
+var newC=curC*avgC;
+document.getElementById('compressorCtRatio').value=newC.toFixed(2);
+document.getElementById('compressorCtRatio').dispatchEvent(new Event('input',{bubbles:true}));
+msgs.push('Compressor: '+curC.toFixed(1)+'\u2192'+newC.toFixed(2)+' ('+compRatios.length+' sample'+(compRatios.length>1?'s':'')+')');
+}
+if(fanRatios.length>0){
+var avgF=fanRatios.reduce(function(a,b){return a+b;},0)/fanRatios.length;
+var curF=parseFloat(document.getElementById('fanCtRatio').value)||30;
+var newF=curF*avgF;
+document.getElementById('fanCtRatio').value=newF.toFixed(2);
+document.getElementById('fanCtRatio').dispatchEvent(new Event('input',{bubbles:true}));
+msgs.push('Fan: '+curF.toFixed(1)+'\u2192'+newF.toFixed(2)+' ('+fanRatios.length+' sample'+(fanRatios.length>1?'s':'')+')');
+}
+st.textContent=msgs.join(' | ')+'. Save to apply.';
+st.style.color='#27ae60';
 }
 function failoverTest(on){
 fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({failoverTest:on})}).then(r=>r.json()).then(r=>{
