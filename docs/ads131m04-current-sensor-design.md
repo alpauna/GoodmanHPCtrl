@@ -86,23 +86,35 @@ daughter board, `H3` and `U43`, both matching the daughter board's own
 connectors by pin count and part number:
 
 **`H3` (`PM254V-11-07-H85`, 7-pin) ↔ daughter board `H1` (7-pin)** —
-**pin mapping not yet confirmed.** An initial guess (assume `H3`'s pins
-are positionally 1:1 with `H1`'s, in the order both appeared in the PDF
-text extraction) turned out to be wrong: it placed `GPIO1` on `DIN`, but
-`GPIO1` is actually hard-wired to `SW2`, a physical pushbutton on the main
-board (confirmed directly — `SW1` → `RESET`/`CHIP_PU`, `SW2` → `GPIO1`).
-A GPIO that's also a button input can't double as a dedicated SPI data
-line, so this mapping is invalid as written. PDF text extraction doesn't
-preserve true pin-to-net connectivity reliably enough to re-derive this
-safely — **needs the actual per-pin net list for `H3`, read directly off
-the live schematic (click each of the 7 pins in order)**, before writing
-any driver code or committing to a pin assignment.
+**confirmed pin-for-pin off the live schematic** (a straight ribbon/cable
+connection — `H3` pin *N* wires directly to `H1` pin *N*, not matched by
+signal-name position, which is what an earlier PDF-text-based guess got
+wrong):
 
-What's still solid: `GND`/`3.3V` on `H3`'s first two positions, and
-`GPIO42` (`MTMS`) is confirmed available and JTAG-repurposed elsewhere on
-this board (`836cca4`, "GPIO 42 is used for DOUT (MISO)"), so it's a
-plausible candidate for one of `H1`'s signals — just not confirmed which
-one. `GPIO45`/`GPIO46` are unconfirmed the same way `GPIO1`/`GPIO2` were.
+| `H3` pin # | Net (main board) | `H1` pin # | Net (daughter board) | Function |
+|---|---|---|---|---|
+| 1 | GND | 1 | DGND | ground |
+| 2 | 3.3V | 2 | 3.3V | power |
+| 3 | GPIO2 | 3 | DIN | SPI MOSI → ADC |
+| 4 | GPIO42 (`MTMS`) | 4 | DOUT | SPI MISO ← ADC |
+| 5 | GPIO1 | 5 | SCLK | SPI clock |
+| 6 | GPIO46 | 6 | DRDY# | data-ready interrupt |
+| 7 | GPIO45 | 7 | CS# | chip select |
+
+`GPIO42` = `MTMS` on ESP32-S3, consistent with this repo's own prior fix
+(`836cca4`, "GPIO 42 is used for DOUT (MISO)") — this board repurposes
+JTAG pins as general GPIO.
+
+**`GPIO1`/`SCLK` is shared with `SW2`** (a physical pushbutton — `SW1` →
+`RESET`/`CHIP_PU`, `SW2` → `GPIO1`, confirmed directly). This is more
+survivable than it would be on a data line: as SPI master the ESP32
+always actively drives `SCLK` as a push-pull output during a transaction,
+so a button press can't inject a false bit into the data stream the way
+it could on `DIN`/`DOUT` — it'd just be overridden by the driver.
+Firmware implication: reading `SW2` reliably means only sampling `GPIO1`
+as an input *between* SPI transactions, not during one. Worth confirming
+`SW2`'s intended function (debug/user button?) before relying on it
+alongside active current-sensor polling.
 
 **`U43` (`ZX-PM2.54-1-2PY`, 2-pin: `ZX`/`AGND`)** — separate from `H3`,
 matching the daughter board's own 2-pin `ZX`/`AGND` header. Traced `ZX`'s
@@ -185,13 +197,11 @@ the now-wired crankcase channel when that's implemented.
    pull-ups to 3.3V on `RESET#`/`CS#`), so likely doesn't need a dedicated
    GPIO — but confirm the ADC actually works correctly power-up without
    the MCU ever being able to assert `RESET#`/`SYNC#` in software.
-3. **ESP32 pin assignment — reopened.** The initial GPIO1/GPIO2/GPIO45/
-   GPIO46/GPIO42 guess was confirmed *wrong*: `GPIO1` is hard-wired to
-   `SW2` (a pushbutton), not available as a dedicated SPI line. PDF text
-   extraction isn't reliable enough to re-derive `H3`'s real per-pin net
-   list — needs reading directly off the live schematic tool, one pin at
-   a time. Still needs to avoid GPIO1 (SW2), whatever's driving `SW1`'s
-   reset behavior, and every pin already in the `CLAUDE.md` GPIO map.
+3. ~~**ESP32 pin assignment**~~ — **resolved**, confirmed pin-for-pin off
+   the live schematic (not inferred from PDF text): GPIO2 (DIN), GPIO42
+   /`MTMS` (DOUT), GPIO1 (SCLK), GPIO46 (DRDY#), GPIO45 (CS#). See
+   interconnect section above for the `GPIO1`/`SW2` sharing and its
+   firmware implication (only sample the button between SPI transactions).
 4. **Exact SPI frame/register protocol** — general architecture above is
    accurate to how the ADS131M0x family works, but exact command opcodes,
    register addresses, and frame word-length configuration need to be
