@@ -10,7 +10,13 @@ daughter-board interconnect)
 **Motivated by**: [BUG-014](bugs/014-main-loop-stall-from-ads1115-sample-rate.md) — the ADS1115-based
 current sensing needed a software calibration fudge factor (`ctRatio`), a
 hand-built non-blocking polling state machine, and still samples the two
-channels ~470ms apart from each other rather than simultaneously.
+channels ~470ms apart from each other rather than simultaneously. Also
+the ADS1115 has no path to power factor or true (real) power — RMS
+current is all it can give you.
+**Decision**: ADS1115 is being fully retired, not kept as a fallback —
+clean cutover to this SPI design. Goal now explicitly includes computing
+power factor and true power, not just RMS current (see "Power factor and
+true power" below).
 
 ## Why this is a real upgrade, not just a faster ADC
 
@@ -263,6 +269,44 @@ current sensor), so a `heaterCtRatio`/third `CurrentSensor` for the
 now-wired crankcase channel (`AIN3`) is still the only remaining channel
 to add — the ADC has no free channel beyond that.
 
+### Power factor and true power
+
+This is the actual reason `AIN2`/`ZX` exists, not an afterthought: with
+all 4 channels sampled simultaneously, the ADC provides everything needed
+to compute power factor via the phase-angle method, without a dedicated
+scaled-voltage channel:
+
+1. **Voltage zero-crossing** — already established: detect sign changes
+   in the `AIN2` sample stream (the line-voltage zero-cross reference).
+2. **Current zero-crossing, per channel** — the *same* sign-change
+   detection applied to `AIN0`/`AIN1`/`AIN3`'s own sampled RMS waveform
+   data (not just used for RMS accumulation — the raw samples already
+   have everything needed for this, no extra acquisition required).
+3. **Phase angle** — the time delta between a current channel's
+   zero-crossing and the nearest `AIN2` zero-crossing, converted to
+   degrees/radians using the line period (nominally 1/60Hz, or measured
+   directly from consecutive `AIN2` zero-crossings for accuracy against
+   real line frequency drift).
+4. **Power factor** ≈ `cos(phase angle)` — the standard displacement
+   power factor calculation, appropriate for a predominantly inductive
+   motor load (compressor, fan). This is *not* the same as true power
+   factor for a non-linear/harmonic-rich load (e.g. a VFD), which would
+   need full instantaneous `P = V(t) × I(t)` integration over a cycle —
+   worth being explicit that this method's accuracy assumption is "motor
+   load with roughly sinusoidal current," which fits a PSC/scroll
+   compressor and PSC fan motor.
+5. **True (real) power** = apparent power × PF = `(V_nominal × I_rms) ×
+   cos(phase angle)`. **Caveat**: there is no channel measuring line
+   voltage *magnitude* — `AIN2` only gives phase timing, not amplitude —
+   so `V_nominal` has to be a configured constant (e.g. 240V for the
+   compressor circuit) rather than a live measurement. True power
+   computed this way is only as accurate as that assumed voltage stays
+   close to the real supply voltage. A meaningfully more accurate design
+   would add a scaled *voltage* channel (resistor-divider or small PT)
+   instead of/alongside the zero-cross-only reference — worth keeping in
+   mind if power accuracy (not just PF) ever needs to be better than
+   "assumes nominal line voltage."
+
 ## Open questions
 
 1. ~~**`ZX` signal characteristics and destination**~~ — **resolved**:
@@ -285,10 +329,10 @@ to add — the ADC has no free channel beyond that.
    against the actual TI datasheet (SBAS890D, not assumed from memory).
    See "SPI protocol" above for commands, frame structure, and the
    specific registers needed for bring-up.
-5. **Whether the ADS1115 stays populated as a fallback**, or this fully
-   replaces it — affects whether `CurrentSensor`/`GoodmanHP` need to
-   support both ADC types simultaneously (config-selectable) or if this
-   is a clean cutover. Still a product decision, not a technical one.
+5. ~~**Whether the ADS1115 stays populated as a fallback**~~ —
+   **resolved**: clean cutover. ADS1115 is retired, not kept as a
+   config-selectable fallback. `CurrentSensor`/`GoodmanHP` don't need to
+   support both ADC types.
 
 ## Next steps
 
