@@ -1264,6 +1264,7 @@ All bug reports in [`docs/bugs/`](docs/bugs/).
 | [BUG-008](docs/bugs/008-ota-upload-hangs-device.md) | OTA upload hangs device — HTTPS httpd task does `httpd_req_recv()` + `SD.write()` in tight loop, concurrent SD access from main loop tasks corrupts SPI bus → deadlock. Fix: buffer firmware in PSRAM, single SD write. | High | `a75ab7b` |
 | [BUG-009](docs/bugs/009-defrost-triggers-in-off-state.md) | Defrost triggers in OFF state — `checkDefrostNeeded()` had no state guard before runtime threshold check, allowing defrost to start while Y inactive. Y-abort safety gate caught it within 500ms. Fix: gate new-defrost trigger on `State::HEAT`. 1 occurrence (Mar 3). | Low | `932b969` |
 | [BUG-010](docs/bugs/010-defrost-band-display-stuck-warm.md) | Defrost band display stuck on Warm in OFF/COOL — BUG-009 regression. `selectDefrostBand()` was below the HEAT guard so `_activeDefrostBand` never updated outside HEAT mode. Fix: moved band selection above guard. | Low | `fd030e4` |
+| [BUG-014](docs/bugs/014-main-loop-stall-from-ads1115-sample-rate.md) | Main loop stalled to ~1 iteration/sec — `CurrentSensor::readRMS()` never called `setDataRate()`, silently running the ADS1115 at the library default 128 SPS instead of the 860 SPS the code assumed. 60 samples × 2 sensors/sec blocked the loop ~900ms/sec for ~16 days, starving input debounce and short-cycle/defrost timing. Also reworked CPU load measurement, which had masked the stall by always reading 0%. | High | `9870f65` |
 
 ## Dependencies
 
