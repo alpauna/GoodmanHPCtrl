@@ -79,38 +79,30 @@ ADS1115 approach specifically:
   against `Goodman-Heatpump-Main-Board.pdf` (see below): this is a clean,
   isolated 3.3V-logic signal, not a raw analog comparator output.
 
-## Main-board interconnect (confirmed against `Goodman-Heatpump-Main-Board.pdf`)
+## Main-board interconnect
 
 The main board (`Board1`, CPU page) has two connectors dedicated to this
 daughter board, `H3` and `U43`, both matching the daughter board's own
 connectors by pin count and part number:
 
-**`H3` (`PM254V-11-07-H85`, 7-pin) ↔ daughter board `H1` (7-pin)** — `GND`
-and `3.3V` land in the same first two positions on both headers, which
-strongly implies the remaining 5 are positionally mapped 1:1 too:
+**`H3` (`PM254V-11-07-H85`, 7-pin) ↔ daughter board `H1` (7-pin)** —
+**pin mapping not yet confirmed.** An initial guess (assume `H3`'s pins
+are positionally 1:1 with `H1`'s, in the order both appeared in the PDF
+text extraction) turned out to be wrong: it placed `GPIO1` on `DIN`, but
+`GPIO1` is actually hard-wired to `SW2`, a physical pushbutton on the main
+board (confirmed directly — `SW1` → `RESET`/`CHIP_PU`, `SW2` → `GPIO1`).
+A GPIO that's also a button input can't double as a dedicated SPI data
+line, so this mapping is invalid as written. PDF text extraction doesn't
+preserve true pin-to-net connectivity reliably enough to re-derive this
+safely — **needs the actual per-pin net list for `H3`, read directly off
+the live schematic (click each of the 7 pins in order)**, before writing
+any driver code or committing to a pin assignment.
 
-| `H3` pin (main board) | `H1` pin (daughter board) | Function |
-|---|---|---|
-| GND | DGND | ground |
-| 3.3V | 3.3V | power |
-| GPIO1 | DIN | SPI MOSI → ADC |
-| GPIO2 | DOUT | SPI MISO ← ADC |
-| GPIO45 | SCLK | SPI clock |
-| GPIO46 | DRDY# | data-ready interrupt |
-| GPIO42 (`MTMS`) | CS# | chip select |
-
-`MTMS` = GPIO42 on ESP32-S3 — consistent with this repo's own prior fix
-(`836cca4`, "GPIO 42 is used for DOUT (MISO)"), confirming this board
-repurposes JTAG pins as general GPIO. This is a dedicated bus with no
-conflict against the SD card (GPIO10-13), MAX6675 (GPIO39-41),
-flash/PSRAM (GPIO33-37), or any pin in the existing `CLAUDE.md` GPIO map.
-
-**Caveat**: `IO1`/`IO2`/`IO3` also appear near `SW1`/`SW2` (apparent
-BOOT/RESET pushbuttons) elsewhere on the same schematic page. Most likely
-that's routed-trace label text passing through that area of the page, not
-an actual shared connection — but worth a quick confirmation against the
-live schematic, since a real conflict there would make GPIO1/GPIO2
-unusable for this bus.
+What's still solid: `GND`/`3.3V` on `H3`'s first two positions, and
+`GPIO42` (`MTMS`) is confirmed available and JTAG-repurposed elsewhere on
+this board (`836cca4`, "GPIO 42 is used for DOUT (MISO)"), so it's a
+plausible candidate for one of `H1`'s signals — just not confirmed which
+one. `GPIO45`/`GPIO46` are unconfirmed the same way `GPIO1`/`GPIO2` were.
 
 **`U43` (`ZX-PM2.54-1-2PY`, 2-pin: `ZX`/`AGND`)** — separate from `H3`,
 matching the daughter board's own 2-pin `ZX`/`AGND` header. Traced `ZX`'s
@@ -163,8 +155,8 @@ architecture rather than introducing a new one.
 
 ### Zero-cross synchronized windows
 
-Use the `ZX` line (once confirmed to be a clean GPIO-compatible signal)
-as a second interrupt source, timestamping each zero crossing. Instead of
+Use the `ZX` line (confirmed clean 3.3V logic, GPIO pin still TBD) as a
+second interrupt source, timestamping each zero crossing. Instead of
 "sample N times starting whenever the 1-second task tick happens to
 fire" (today's approach, and the source of the windowing/phase ambiguity
 noted above), start each RMS accumulation window on a `ZX` edge and stop
@@ -193,11 +185,13 @@ the now-wired crankcase channel when that's implemented.
    pull-ups to 3.3V on `RESET#`/`CS#`), so likely doesn't need a dedicated
    GPIO — but confirm the ADC actually works correctly power-up without
    the MCU ever being able to assert `RESET#`/`SYNC#` in software.
-3. ~~**ESP32 pin assignment**~~ — **resolved** (with one caveat): GPIO1
-   (DIN), GPIO2 (DOUT), GPIO45 (SCLK), GPIO46 (DRDY#), GPIO42/MTMS (CS#).
-   See interconnect section above for the caveat re: GPIO1/GPIO2 possibly
-   also being near `SW1`/`SW2` on the schematic — needs a quick live-tool
-   check, not expected to be a real conflict.
+3. **ESP32 pin assignment — reopened.** The initial GPIO1/GPIO2/GPIO45/
+   GPIO46/GPIO42 guess was confirmed *wrong*: `GPIO1` is hard-wired to
+   `SW2` (a pushbutton), not available as a dedicated SPI line. PDF text
+   extraction isn't reliable enough to re-derive `H3`'s real per-pin net
+   list — needs reading directly off the live schematic tool, one pin at
+   a time. Still needs to avoid GPIO1 (SW2), whatever's driving `SW1`'s
+   reset behavior, and every pin already in the `CLAUDE.md` GPIO map.
 4. **Exact SPI frame/register protocol** — general architecture above is
    accurate to how the ADS131M0x family works, but exact command opcodes,
    register addresses, and frame word-length configuration need to be
