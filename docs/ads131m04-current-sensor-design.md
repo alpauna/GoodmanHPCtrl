@@ -105,16 +105,10 @@ wrong):
 (`836cca4`, "GPIO 42 is used for DOUT (MISO)") — this board repurposes
 JTAG pins as general GPIO.
 
-**`GPIO1`/`SCLK` is shared with `SW2`** (a physical pushbutton — `SW1` →
-`RESET`/`CHIP_PU`, `SW2` → `GPIO1`, confirmed directly). This is more
-survivable than it would be on a data line: as SPI master the ESP32
-always actively drives `SCLK` as a push-pull output during a transaction,
-so a button press can't inject a false bit into the data stream the way
-it could on `DIN`/`DOUT` — it'd just be overridden by the driver.
-Firmware implication: reading `SW2` reliably means only sampling `GPIO1`
-as an input *between* SPI transactions, not during one. Worth confirming
-`SW2`'s intended function (debug/user button?) before relying on it
-alongside active current-sensor polling.
+No pin sharing on this bus: `SW1` → `RESET`/`CHIP_PU`, `SW2` → `GPIO0`
+(the standard ESP32 boot-mode-select pin, present but unused so far on
+this board) — both confirmed unrelated to `GPIO1`/`GPIO2`/`GPIO45`/
+`GPIO46`/`GPIO42`. All 5 signal pins on `H3` are dedicated to this bus.
 
 **`U43` (`ZX-PM2.54-1-2PY`, 2-pin: `ZX`/`AGND`)** — separate from `H3`,
 matching the daughter board's own 2-pin `ZX`/`AGND` header. Traced `ZX`'s
@@ -199,9 +193,8 @@ the now-wired crankcase channel when that's implemented.
    the MCU ever being able to assert `RESET#`/`SYNC#` in software.
 3. ~~**ESP32 pin assignment**~~ — **resolved**, confirmed pin-for-pin off
    the live schematic (not inferred from PDF text): GPIO2 (DIN), GPIO42
-   /`MTMS` (DOUT), GPIO1 (SCLK), GPIO46 (DRDY#), GPIO45 (CS#). See
-   interconnect section above for the `GPIO1`/`SW2` sharing and its
-   firmware implication (only sample the button between SPI transactions).
+   /`MTMS` (DOUT), GPIO1 (SCLK), GPIO46 (DRDY#), GPIO45 (CS#). No pin
+   sharing — `SW2` is on `GPIO0` (boot-select), not this bus.
 4. **Exact SPI frame/register protocol** — general architecture above is
    accurate to how the ADS131M0x family works, but exact command opcodes,
    register addresses, and frame word-length configuration need to be
