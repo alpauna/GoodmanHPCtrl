@@ -1880,6 +1880,14 @@ void GoodmanHP::setColdMaxTempF(float f) {
                  f, _lowTempThreshold, _lowTempThreshold);
         f = _lowTempThreshold;
     }
+    // Cold's ceiling must stay below Warm's floor — otherwise the Cold/Warm
+    // band ordering inverts and the Mid band range becomes nonsensical.
+    if (f >= _warmMinTempF) {
+        float clamped = _warmMinTempF - 1.0f;
+        Log.warn("HP", "Defrost cold max temp %.1fF at/above warm min temp %.1fF, clamping to %.1fF",
+                 f, _warmMinTempF, clamped);
+        f = clamped;
+    }
     _coldMaxTempF = f;
     Log.info("HP", "Defrost cold max temp set to %.1fF", f);
 }
@@ -1889,6 +1897,14 @@ float GoodmanHP::getColdMaxTempF() const {
 }
 
 void GoodmanHP::setWarmMinTempF(float f) {
+    // Keep the invariant symmetric: if lowering Warm's floor would drop it
+    // to/below the current Cold ceiling, raise it to maintain the gap.
+    if (f <= _coldMaxTempF) {
+        float clamped = _coldMaxTempF + 1.0f;
+        Log.warn("HP", "Defrost warm min temp %.1fF at/below cold max temp %.1fF, raising to %.1fF",
+                 f, _coldMaxTempF, clamped);
+        f = clamped;
+    }
     _warmMinTempF = f;
     Log.info("HP", "Defrost warm min temp set to %.1fF", f);
 }
