@@ -21,7 +21,13 @@ CurrentSensor::CurrentSensor(const String& name, uint8_t channel, float ctRatio)
 {
 }
 
-void CurrentSensor::readRMS(Adafruit_ADS1115* ads) {
+void CurrentSensor::startConversion(Adafruit_ADS1115* ads) {
+    uint16_t mux = (_channel == 0) ? ADS1X15_REG_CONFIG_MUX_DIFF_0_1
+                                    : ADS1X15_REG_CONFIG_MUX_DIFF_2_3;
+    ads->startADCReading(mux, /*continuous=*/false);
+}
+
+void CurrentSensor::beginSample(Adafruit_ADS1115* ads) {
     if (ads == nullptr) {
         _valid = false;
         return;
@@ -31,62 +37,69 @@ void CurrentSensor::readRMS(Adafruit_ADS1115* ads) {
     // SCT-013-030 outputs 0-1V AC for 0-30A
     ads->setGain(GAIN_TWO);
 
-    // Explicitly request 860 SPS — the library default is 128 SPS (~7.8ms/sample
-    // blocking one-shot read), which silently made every 60-sample RMS read take
-    // ~470ms instead of the ~70ms this function assumes, stalling the main loop
-    // for the better part of a second on every tReadCurrent tick (once/sec).
-    ads->setDataRate(RATE_ADS1115_860SPS);
+    // 128 SPS (the ADS1115 library default) — verified against a clamp meter
+    // to read meaningfully more accurately than 860 SPS, which widens the
+    // ADC's internal filter bandwidth and lets more line noise/harmonics
+    // through into each sample. At ~7.8ms/sample this can no longer block
+    // the main loop (see BUG-014) because sampling is spread across many
+    // non-blocking tick() calls instead of one 60-sample busy-wait loop.
+    ads->setDataRate(RATE_ADS1115_128SPS);
 
-    // Sample ~60 readings over ~3 full 60Hz cycles (~70ms at 860 SPS, one-shot
-    // reads — not continuous mode, but each blocking read still takes ~1.16ms).
-    // Increased from 20 to 60 to avoid "sample bunching" near a zero crossing
-    // (caused by I2C jitter from WiFi/AsyncTCP/log flush interrupts) that
-    // previously produced spurious 0.00A readings on the FAN channel.
-    const int numSamples = 60;
-    float sumV = 0.0f;
-    float sumSquares = 0.0f;
-    float peak = 0.0f;
-    int nonZeroCount = 0;
+    _sumV = 0.0f;
+    _sumSquares = 0.0f;
+    _peakAccum = 0.0f;
+    _nonZeroCount = 0;
+    _sampleIndex = 0;
+    startConversion(ads);
+    _sampleState = SampleState::CONVERTING;
+}
 
-    int16_t muxChannel;
-    if (_channel == 0) {
-        muxChannel = ADS1X15_REG_CONFIG_MUX_DIFF_0_1;
-    } else {
-        muxChannel = ADS1X15_REG_CONFIG_MUX_DIFF_2_3;
+bool CurrentSensor::tick(Adafruit_ADS1115* ads) {
+    if (_sampleState != SampleState::CONVERTING) return false;
+    if (ads == nullptr) {
+        _valid = false;
+        _sampleState = SampleState::IDLE;
+        return true;
+    }
+    if (!ads->conversionComplete()) return false;  // not ready — check again next tick
+
+    int16_t raw = ads->getLastConversionResults();
+    // Convert to voltage: at GAIN_TWO, 1 bit = 0.0625mV = 0.0000625V
+    float voltage = raw * 0.0000625f;
+    _sumV += voltage;
+    _sumSquares += voltage * voltage;
+    float absV = fabsf(voltage);
+    if (absV > _peakAccum) _peakAccum = absV;
+    if (raw != 0) _nonZeroCount++;
+    _sampleIndex++;
+
+    // Sample ~60 readings over ~3 full 60Hz cycles (~470ms at 128 SPS, spread
+    // non-blocking). Increased from 20 to 60 to avoid "sample bunching" near
+    // a zero crossing (caused by I2C jitter from WiFi/AsyncTCP/log flush
+    // interrupts) that previously produced spurious 0.00A readings on the
+    // FAN channel.
+    if (_sampleIndex < NUM_RMS_SAMPLES) {
+        startConversion(ads);
+        return false;
     }
 
-    for (int i = 0; i < numSamples; i++) {
-        int16_t raw;
-        if (_channel == 0) {
-            raw = ads->readADC_Differential_0_1();
-        } else {
-            raw = ads->readADC_Differential_2_3();
-        }
-
-        // Convert to voltage: at GAIN_TWO, 1 bit = 0.0625mV = 0.0000625V
-        float voltage = raw * 0.0000625f;
-        sumV += voltage;
-        sumSquares += voltage * voltage;
-        float absV = fabsf(voltage);
-        if (absV > peak) peak = absV;
-        if (raw != 0) nonZeroCount++;
-    }
+    _sampleState = SampleState::IDLE;
 
     // Reject "all zeros" reads (I2C NACK / bus contention signature) — mark
     // sample invalid instead of publishing a fake 0.00A that would trigger
     // spurious FAN_FAULT warnings.
-    if (nonZeroCount == 0) {
+    if (_nonZeroCount == 0) {
         _valid = false;
         Log.warn("CURRENT", "%s read invalid: all-zero samples (I2C contention?)", _name.c_str());
-        return;
+        return true;
     }
 
     // Proper AC-RMS: subtract DC mean before squaring. The prior implementation
     // (sqrt(mean(v^2))) is only correct if the differential is perfectly
     // centered on 0V; ADS1115 offset drift + non-symmetric sample windows
     // caused occasional near-zero RMS on the FAN channel.
-    float mean = sumV / numSamples;
-    float variance = sumSquares / numSamples - mean * mean;
+    float mean = _sumV / NUM_RMS_SAMPLES;
+    float variance = _sumSquares / NUM_RMS_SAMPLES - mean * mean;
     if (variance < 0.0f) variance = 0.0f;  // guard against FP round-off
     float vRMS = sqrtf(variance);
 
@@ -94,8 +107,9 @@ void CurrentSensor::readRMS(Adafruit_ADS1115* ads) {
     // For SCT-013-030: 1V output = 30A, so ctRatio = 30.0
     _previous = _rmsAmps;
     _rmsAmps = vRMS * _ctRatio;
-    _peakAmps = peak * _ctRatio;
+    _peakAmps = _peakAccum * _ctRatio;
     _valid = true;
+    return true;
 }
 
 void CurrentSensor::checkProtections() {

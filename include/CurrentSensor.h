@@ -12,8 +12,16 @@ class CurrentSensor {
   public:
     CurrentSensor(const String& name, uint8_t channel, float ctRatio = 30.0f);
 
-    // Read RMS current from ADS1115 differential pair
-    void readRMS(Adafruit_ADS1115* ads);
+    // Non-blocking RMS acquisition. Sampling the ADS1115 60x per read to
+    // compute RMS current used to block synchronously (~470ms per sensor
+    // at 128 SPS) — see BUG-014. beginSample() starts a new 60-sample
+    // acquisition; tick() advances it by one non-blocking conversion per
+    // call and must be called repeatedly (e.g. every loop pass) until it
+    // returns true, at which point getRMSAmps()/getPeakAmps()/isValid()
+    // reflect the completed read.
+    void beginSample(Adafruit_ADS1115* ads);
+    bool tick(Adafruit_ADS1115* ads);
+    bool isSampling() const { return _sampleState == SampleState::CONVERTING; }
 
     // Check overcurrent and locked rotor protections
     void checkProtections();
@@ -67,6 +75,18 @@ class CurrentSensor {
     uint32_t _lockedRotorTimeoutMs; // Max inrush settle time (default 5000ms)
     uint32_t _cntActivateTick;     // When CNT was last activated
     bool _cntJustActivated;        // Tracking flag for locked rotor window
+
+    // Non-blocking RMS acquisition state
+    enum class SampleState { IDLE, CONVERTING };
+    SampleState _sampleState = SampleState::IDLE;
+    static const int NUM_RMS_SAMPLES = 60;
+    int _sampleIndex = 0;
+    float _sumV = 0.0f;
+    float _sumSquares = 0.0f;
+    float _peakAccum = 0.0f;
+    int _nonZeroCount = 0;
+
+    void startConversion(Adafruit_ADS1115* ads);
 };
 
 #endif

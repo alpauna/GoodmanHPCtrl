@@ -8,6 +8,7 @@ GoodmanHP::GoodmanHP(Scheduler *ts)
     : _ts(ts)
     , _sensors(nullptr)
     , _ads1115(nullptr)
+    , _currentSamplingActive(false)
     , _state(State::OFF)
     , _yActiveStartTick(0)
     , _yWasActive(false)
@@ -253,14 +254,47 @@ CurrentSensorMap& GoodmanHP::getCurrentSensorMap() {
     return _currentSensorMap;
 }
 
+// Starts a new non-blocking round of RMS acquisition across all current
+// sensors. Only kicks off the first sensor's sampling — tickCurrentSensors()
+// (called every loop pass) advances it and round-robins to the rest. If a
+// prior round is still in progress (shouldn't normally happen at a 1s
+// trigger interval given sampling takes ~470ms/sensor), this is a no-op so
+// we don't abandon an in-flight acquisition.
 void GoodmanHP::readCurrentSensors() {
-    if (_ads1115 == nullptr) return;
-    for (auto& pair : _currentSensorMap) {
-        if (pair.second != nullptr) {
-            pair.second->readRMS(_ads1115);
-            pair.second->checkProtections();
-        }
+    if (_ads1115 == nullptr || _currentSensorMap.empty()) return;
+    if (_currentSamplingActive) return;
+
+    _currentSampleIt = _currentSensorMap.begin();
+    while (_currentSampleIt != _currentSensorMap.end() && _currentSampleIt->second == nullptr) {
+        ++_currentSampleIt;
     }
+    if (_currentSampleIt == _currentSensorMap.end()) return;
+
+    _currentSamplingActive = true;
+    _currentSampleIt->second->beginSample(_ads1115);
+}
+
+void GoodmanHP::tickCurrentSensors() {
+    if (!_currentSamplingActive || _ads1115 == nullptr) return;
+
+    CurrentSensor* sensor = _currentSampleIt->second;
+    if (!sensor->tick(_ads1115)) return;  // still converting, nothing more to do this pass
+
+    // This sensor's 60-sample cycle just completed.
+    sensor->checkProtections();
+
+    // Advance to the next sensor in the map, skipping any null entries.
+    ++_currentSampleIt;
+    while (_currentSampleIt != _currentSensorMap.end() && _currentSampleIt->second == nullptr) {
+        ++_currentSampleIt;
+    }
+
+    if (_currentSampleIt == _currentSensorMap.end()) {
+        _currentSamplingActive = false;  // round complete — wait for next readCurrentSensors() trigger
+        return;
+    }
+
+    _currentSampleIt->second->beginSample(_ads1115);
 }
 
 bool GoodmanHP::isOvercurrentActive() const {

@@ -1571,6 +1571,11 @@ void loop() {
     _workLoopCount++;
   }
 
+  // Advance non-blocking current-sensor ADC sampling (see BUG-014) — must
+  // run every pass, not just once/sec, since each RMS read is now spread
+  // across many loop iterations instead of blocking in one call.
+  hpController.tickCurrentSensors();
+
   _busyUsCore1 += (uint32_t)(esp_timer_get_time() - workStartUs);
   vTaskDelay(1); // Yield to FreeRTOS so core 0's idle hook can fire
 }

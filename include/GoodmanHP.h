@@ -103,6 +103,10 @@ class GoodmanHP {
     CurrentSensor* getCurrentSensor(const String& name);
     CurrentSensorMap& getCurrentSensorMap();
     void readCurrentSensors();
+    // Advance the non-blocking current-sensor round robin by one step.
+    // Call frequently (every loop pass) — readCurrentSensors() only starts
+    // a new round; this is what actually steps ADC conversions forward.
+    void tickCurrentSensors();
     bool isOvercurrentActive() const;
     bool isLockedRotorActive() const;
 
@@ -250,6 +254,10 @@ class GoodmanHP {
     // Current sensors (ADS1115 ADC)
     Adafruit_ADS1115* _ads1115;
     CurrentSensorMap _currentSensorMap;
+    // Non-blocking round-robin driver for tickCurrentSensors() — only one
+    // sensor can be mid-acquisition on the shared ADS1115 at a time.
+    CurrentSensorMap::iterator _currentSampleIt;
+    bool _currentSamplingActive;
 
     State _state;
     uint32_t _yActiveStartTick;
