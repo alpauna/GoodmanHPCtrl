@@ -22,7 +22,7 @@ channels ~470ms apart from each other rather than simultaneously.
 | Clock | Internal RC oscillator | External 8.192MHz crystal |
 | Anti-alias filtering | None (raw CT signal straight to ADC) | RC low-pass per channel before the ADC |
 | DC bias / offset | Software: subtract computed mean per 60-sample window | Hardware: AC-coupled into a precision 1.65V `VBIAS` (`OP07CDR` buffer) |
-| Phase reference | None — sampling starts whenever the 1s task tick fires | Zero-cross detector (`ZX`) available |
+| Phase reference | None — sampling starts whenever the 1s task tick fires | Zero-cross detector (`ZX`) fed into `AIN2` — sampled in the same synchronized frame as every other channel |
 
 Every one of BUG-014's pain points traces back to a limitation of the
 ADS1115 approach specifically:
@@ -54,30 +54,34 @@ ADS1115 approach specifically:
 ## Hardware overview (from the schematic)
 
 - **`U3` — ADS131M04IRUKR**: 4-ch, 24-bit, simultaneous-sampling SPI ADC.
-  Only 3 of 4 channels are wired: `AIN0` (compressor), `AIN1` (fan),
-  `AIN3` (heater/crankcase — not currently implemented in firmware at
-  all; `crankcaseCtRatio`/`crankcaseBurdenOhms`/`crankcaseExpectedAmps`
-  exist in `Config.h` but have no `CurrentSensor` instance behind them).
-  `AIN2` is unused — a spare channel if a 4th sensor is ever needed.
+  All 4 channels are used: `AIN0` (compressor), `AIN1` (fan), `AIN3`
+  (heater/crankcase — not currently implemented in firmware at all;
+  `crankcaseCtRatio`/`crankcaseBurdenOhms`/`crankcaseExpectedAmps` exist
+  in `Config.h` but have no `CurrentSensor` instance behind them), and
+  **`AIN2` carries the zero-cross reference** (`AIN2P` = `ZX`, `AIN2N` =
+  `AGND` — single-ended into a differential input). There is no spare
+  channel on this ADC; a 5th sensor would need a second chip.
 - **`U1` — 8.192MHz oscillator** on `CLKIN`, with `RESET#`/`CS#` pulled up
   (`R1`/`R2`/`R3`, 100kΩ) so the ADC idles in a safe state if the MCU's
   GPIOs are tri-stated at boot.
 - **`H1`** — 7-pin header: `CS#`, `DRDY#`, `SCLK`, `DOUT`, `DIN`, `3.3V`,
-  `DGND`. This is the connector to the main board — confirms the ESP32
-  side needs 4 SPI-ish signals plus a `DRDY#` GPIO input (and probably
-  `RESET#`/`SYNC#` too, though that's not on the header — need to check
-  whether it's tied to a fixed level or actually needs a GPIO once the
-  board is in hand).
+  `DGND`. `RESET#`/`SYNC#` is *not* on this header — it's pulled up to
+  3.3V via `R3` on the daughter board and never reaches the ESP32 (see
+  "Open questions" below, now resolved).
 - **`U8` — `OP07CDR`** precision op-amp, buffering a `10k`/`10k` divider
-  off 3.3V into a stable `VBIAS = 1.65V` reference, fed to all three
-  channels' bias networks.
-- **Per channel** (compressor/fan/heater identical): CT clamp jack
+  off 3.3V into a stable `VBIAS = 1.65V` reference, fed to the three CT
+  channels' bias networks (not `AIN2`/`ZX`, which is a digital signal, not
+  an AC current waveform needing bias).
+- **Per current channel** (compressor/fan/heater identical): CT clamp jack
   (`PJ-3200A-3A`, standard 3.5mm CT connector) → `1k`/`10nF` RC low-pass
   → `10µF` AC-coupling caps into the ADC's differential input pair, biased
   to `VBIAS` through `10k` resistors on both legs.
-- **`ZX`** — routed near `AGND` to a small 2-pin header (`U2`). Confirmed
-  against `Goodman-Heatpump-Main-Board.pdf` (see below): this is a clean,
-  isolated 3.3V-logic signal, not a raw analog comparator output.
+- **`ZX`** — a 2-pin header (`U2` on the daughter board, `U43` on the main
+  board) carries the zero-cross signal from the main board's isolated
+  detector (`U33`/`AT3H4B-CuH-S`) directly into `AIN2P` on `U3`, with
+  `AIN2N` grounded to `AGND`. It does **not** go to an ESP32 GPIO at all —
+  see the "Zero-cross synchronized windows" section below for what that
+  means for firmware.
 
 ## Main-board interconnect
 
@@ -111,15 +115,15 @@ this board) — both confirmed unrelated to `GPIO1`/`GPIO2`/`GPIO45`/
 `GPIO46`/`GPIO42`. All 5 signal pins on `H3` are dedicated to this bus.
 
 **`U43` (`ZX-PM2.54-1-2PY`, 2-pin: `ZX`/`AGND`)** — separate from `H3`,
-matching the daughter board's own 2-pin `ZX`/`AGND` header. Traced `ZX`'s
-origin on the triacs page: it comes from `U33` (`AT3H4B-CuH-S`), an
-opto-isolated zero-cross detector sensing the 24VAC line directly
-(isolated ground domain `E-GND`), with its output pulled up to 3.3V
-through `R28` (33kΩ). So `ZX` is already a clean, isolated, 3.3V
-logic-level square wave — no extra conditioning needed for a GPIO
-interrupt. **Not yet confirmed**: which specific ESP32 GPIO `ZX` lands on
-beyond this 2-pin breakout — the trace from `U43` back to a labeled `IOxx`
-net isn't visible on this schematic page.
+matching the daughter board's own 2-pin `ZX`/`AGND` header. `ZX` originates
+on the triacs page at `U33` (`AT3H4B-CuH-S`), an opto-isolated zero-cross
+detector sensing the 24VAC line directly (isolated ground domain
+`E-GND`), with its output pulled up to 3.3V through `R28` (33kΩ) — a
+clean, isolated 3.3V logic-level square wave. **Confirmed destination**:
+this signal does *not* go to an ESP32 GPIO — it's wired straight into
+`AIN2P` on the daughter board's ADC (`AIN2N` tied to `AGND`), so the
+ADS131M04 samples it as a 4th channel in the same synchronized frame as
+the current channels. No interrupt, no GPIO, no separate timing domain.
 
 ## Firmware architecture (proposed)
 
@@ -161,14 +165,33 @@ architecture rather than introducing a new one.
 
 ### Zero-cross synchronized windows
 
-Use the `ZX` line (confirmed clean 3.3V logic, GPIO pin still TBD) as a
-second interrupt source, timestamping each zero crossing. Instead of
-"sample N times starting whenever the 1-second task tick happens to
-fire" (today's approach, and the source of the windowing/phase ambiguity
-noted above), start each RMS accumulation window on a `ZX` edge and stop
-it on the `ZX` edge N half-cycles later — guarantees every window covers
-an exact integer number of half-cycles regardless of task scheduling
-jitter.
+No GPIO interrupt involved — `ZX` isn't wired to the ESP32 at all. It's
+fed into `AIN2P` (`AIN2N` = `AGND`) on the ADC itself, so every `DRDY#`
+frame that delivers compressor/fan/heater samples *also* delivers a
+zero-cross-channel sample, already time-aligned with the others by the
+ADC's simultaneous-sampling architecture. This is a cleaner mechanism
+than a second interrupt would have been: no ISR latency, no separate
+timing domain to reconcile against the current channels, nothing to
+synchronize — it's synchronized by construction.
+
+Firmware-side, zero-cross detection becomes a software job on the
+`AIN2` sample stream instead of a hardware edge interrupt: watch
+consecutive `AIN2` readings for a sign change (or a threshold crossing,
+depending on what `ZX`'s actual signal shape looks like once the board's
+in hand — likely a clean square wave given the opto-isolated source, in
+which case this is a simple "did the sign flip since last frame" check).
+`SPICurrentADC` (or `CurrentSensor` for the `AIN2` channel specifically)
+starts/stops each RMS accumulation window on those detected transitions
+instead of on an arbitrary task-tick boundary — same goal as originally
+described (windows covering an exact integer number of half-cycles), just
+achieved by watching a sampled channel rather than timestamping a GPIO
+edge.
+
+One consideration for when the board's in hand: `ZX` is a 3.3V-ish
+digital square wave feeding an ADC input whose common-mode/PGA range may
+not be designed for a full-rail digital swing — worth confirming `AIN2`
+reads sensibly (not clipped/saturated) rather than assuming it "just
+works" because the signal is clean at the source.
 
 ### Calibration
 
@@ -176,21 +199,25 @@ The 3-point clamp-meter calibration tool added in `config.html` tonight
 (`toggleCtCalib()`/`captureCtRow()`/`computeCtCalibration()`) should carry
 over with no changes — it operates on whatever `ctRatio` the backend
 reports, independent of which ADC is producing the underlying reading.
-Given `AIN2` is unused, there's room to keep the config schema (and this
-tool) unchanged and simply add a `heaterCtRatio`/third `CurrentSensor` for
-the now-wired crankcase channel when that's implemented.
+`AIN2` is committed to the zero-cross reference (not available for a 4th
+current sensor), so a `heaterCtRatio`/third `CurrentSensor` for the
+now-wired crankcase channel (`AIN3`) is still the only remaining channel
+to add — the ADC has no free channel beyond that.
 
 ## Open questions
 
-1. ~~**`ZX` signal characteristics**~~ — **resolved**: clean, isolated
-   3.3V logic square wave from an opto-isolated zero-cross detector
-   (`U33`/`AT3H4B-CuH-S`) on the main board. Which GPIO it lands on is
-   still unconfirmed (see interconnect section above).
-2. **`RESET#`/`SYNC#` wiring** — not part of `H3`'s 7 pins. Pulled to a
-   fixed level on the daughter board (it has its own `R2`/`R3` 100kΩ
-   pull-ups to 3.3V on `RESET#`/`CS#`), so likely doesn't need a dedicated
-   GPIO — but confirm the ADC actually works correctly power-up without
-   the MCU ever being able to assert `RESET#`/`SYNC#` in software.
+1. ~~**`ZX` signal characteristics and destination**~~ — **resolved**:
+   clean, isolated 3.3V logic square wave from an opto-isolated
+   zero-cross detector (`U33`/`AT3H4B-CuH-S`) on the main board, fed
+   directly into `AIN2P` on the ADC (`AIN2N` = `AGND`) — not a GPIO at
+   all. See "Zero-cross synchronized windows" above for the firmware
+   implication (software edge-detection on a sampled channel, not a
+   hardware interrupt).
+2. ~~**`RESET#`/`SYNC#` wiring**~~ — **resolved**: not part of `H3`'s 7
+   pins, pulled up to 3.3V via `R3` (100kΩ) on the daughter board only —
+   never reaches the ESP32. No software control over the physical pin;
+   an in-field reset would need a power cycle or the ADS131M0x's
+   SPI-based RESET command.
 3. ~~**ESP32 pin assignment**~~ — **resolved**, confirmed pin-for-pin off
    the live schematic (not inferred from PDF text): GPIO2 (DIN), GPIO42
    /`MTMS` (DOUT), GPIO1 (SCLK), GPIO46 (DRDY#), GPIO45 (CS#). No pin
