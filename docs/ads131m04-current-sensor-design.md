@@ -333,6 +333,35 @@ scaled-voltage channel:
    **resolved**: clean cutover. ADS1115 is retired, not kept as a
    config-selectable fallback. `CurrentSensor`/`GoodmanHP` don't need to
    support both ADC types.
+6. **Will a loose/marginal SPI connection produce the same silent-freeze
+   failure as [BUG-015](bugs/015-frozen-ads1115-read-passes-as-valid-current.md)?**
+   Lower risk, but **not automatically avoided by switching to SPI** —
+   the new driver has to actually use the tools SPI provides, since
+   nothing does that by default:
+   - The I2C failure mode was specifically a *shared, open-drain* bus
+     where a failed transaction leaves the ADS1115 library's internal
+     buffer holding stale data with no error surfaced. SPI's point-to-point
+     `DIN`/`DOUT`/`SCLK`/`CS#` lines don't have the same "silently NACK and
+     keep the old value" failure shape — a loose connection is more likely
+     to produce garbage bits or a dead line than a clean freeze.
+   - However, this design's own "SPI protocol" section above lists CRC
+     (`REGCRC_EN`/`RX_CRC_EN`) as **"not yet needed for this design"** —
+     if the driver doesn't check the CRC word every frame includes, a
+     corrupted read from a marginal connection can still look like valid
+     data, the same class of bug as BUG-015, just via a different
+     transport.
+   - `DRDY#` is the other line of defense worth using deliberately: the
+     bring-up test plan below already confirms it toggles once, but the
+     production driver should also watch that it *keeps* toggling at the
+     expected cadence — a `DRDY#` that stops changing is directly
+     analogous to the frozen ADS1115 register and just as detectable, but
+     only if something actually watches for it.
+   - **Recommendation for the real driver** (not needed for the bring-up
+     sketch): enable CRC on both read and write, reject any frame with a
+     CRC mismatch, and add a "no `DRDY#` transition in N ms while a
+     conversion should be in progress" watchdog — both are cheap, direct
+     analogues of the stale-value detector proposed as the still-open fix
+     for BUG-015.
 
 ## Next steps
 
@@ -359,3 +388,12 @@ actually connecting the daughter board. Test plan for the next session:
    plausible values), not writing the production driver class described
    above. Confirm the hardware first, then build the real driver on top
    of a known-working bring-up sketch.
+5. **Deliberately provoke a bad connection** (gently wiggle/partially
+   unseat `H3` while the bring-up sketch is running) and confirm this is
+   actually observable — `DRDY#` stops toggling and/or a CRC check fails
+   — rather than the driver quietly continuing to report the last-good
+   values. This is the direct SPI-side test for the failure class in
+   [BUG-015](bugs/015-frozen-ads1115-read-passes-as-valid-current.md); if
+   the bring-up sketch can't tell "connector wiggled" from "still fine,"
+   that's a sign CRC/`DRDY#` watchdog logic needs to be added before the
+   real driver is written, not after.
