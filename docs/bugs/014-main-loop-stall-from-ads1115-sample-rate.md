@@ -4,7 +4,7 @@
 **Severity**: High
 **Status**: Fixed
 **Affected versions**: `f9f836a` through `45e2696` (~16 days in production)
-**Fixed in**: `9870f65` (loop stall + CPU load metric), `3c202f7` (accuracy regression from the interim fix)
+**Fixed in**: `9870f65` (loop stall + CPU load metric), `3c202f7` (accuracy regression from the interim fix), `5c5cbf5` (current-monitoring config save + calibration tool); calibrated `compressorCtRatio`/`fanCtRatio` values applied live via the device config (not a code change)
 
 ## Symptom
 
@@ -172,6 +172,81 @@ draw had already shifted between checks — 5.4A vs. the earlier 7.14A/8.16A
 reading — but the fan-channel result alone confirms the noise-bandwidth
 hypothesis and that reverting to 128 SPS recovers the original accuracy.)
 
+## Fix attempt #3 (config, not code) — the "within tolerance" 128 SPS reading was still a real ~20-25% calibration gap
+
+The +11% fan-channel reading above was taken from a single pair of
+readings at two different points in time (clamp meter, then device) and
+written off as "close enough." Three more clamp-meter sessions later the
+same evening, taken as close to simultaneously as possible with the
+compressor in steady, continuous operation, told a different story —
+both channels were **consistently low**, not high, and consistently by a
+similar margin:
+
+| Session | Compressor (device / clamp) | Error | Fan (device / clamp) | Error |
+|---|---|---|---|---|
+| 1 | 5.5A / 7.19A | −23.5% | 0.6A / 0.75A | −20% |
+| 2 | ~5.4A / 7.26A | ~−25% | ~0.6A / 0.768A | ~−22% |
+| 3 | 5.3A / 7.03A | −24.6% | 0.6A / 0.767A | −21.8% |
+
+Ambient temperature (and therefore heat load) affects compressor current
+but not fan current much — fan current tracking a tight, consistent error
+band across all three sessions (independent of the compressor swinging
+with load) was the tell that this was a real, fixable calibration
+constant, not noise or a timing mismatch. Averaging the device/clamp
+ratios across all three sessions gave corrected `ctRatio` targets:
+`compressorCtRatio` 30.0 → **39.7**, `fanCtRatio` 30.0 → **37.7**. Both
+channels needing a similar ~25-30% correction independently points at one
+shared root cause (most likely the assumed ADC LSB/reference-voltage
+conversion constant, `0.0000625V/bit` at `GAIN_TWO`, being off for this
+specific board) rather than two coincidentally similar per-sensor
+miscalibrations — though the fix (correcting `ctRatio` per channel) is
+correct regardless of which it is.
+
+**Blocker**: there was no way to actually persist a `ctRatio` change on
+the device. `config.html`'s "Current Monitoring" fieldset has UI for
+`compressorCtRatio`, `fanCtRatio`, `crankcaseCtRatio`, burden resistors,
+overcurrent thresholds, and locked-rotor threshold — but `POST /config`
+never read any of them, so saves silently did nothing, and `GET
+/config?format=json` never exposed them either, so the form always
+loaded blank. Separately, `compressorCtRatio`/`fanCtRatio` were `<select>`
+dropdowns limited to commercial SCT-013-xxx presets (5/10/15/20/25/30/50/100),
+which can't hold a calibrated value like 39.7 at all.
+
+Fixed in `5c5cbf5`:
+
+- Wired up both sides of `/config` for the whole current-monitoring
+  fieldset, applying live values through the existing `CurrentSensor`
+  setters (`setCtRatio()`, `setOvercurrentThreshold()`, etc.) the same
+  way every other live setting in the handler works.
+- Converted the CT ratio fields from `<select>` to free-form
+  `<input type=number>`, keeping the standard presets as a `<datalist>`
+  for quick-pick convenience instead of a hard constraint.
+- Added a 3-point calibration tool to the config page: capture the live
+  device reading, enter the simultaneous clamp-meter reading, repeat 3x,
+  and it averages the device/clamp ratio to compute and fill in a
+  corrected `ctRatio` per channel — so this doesn't require a full manual
+  investigation to redo next time.
+- Also bumped `/www/upload`'s hardcoded 50KB cap to 200KB — `config.html`
+  (57KB before this change, 61KB after) already exceeded the old 50KB
+  limit, so this SD-card page-upload path had likely been silently broken
+  independent of anything else in this report.
+
+`compressorCtRatio=39.7` / `fanCtRatio=37.7` were then applied via the
+now-working `POST /config` and persisted to `config.txt` on the SD card —
+this part isn't a code change, so it isn't in a commit; it's live device
+configuration, and would need to be reapplied (or re-derived with the
+calibration tool) if the SD card config is ever reset.
+
+Final verification, same evening, device polled ~3 minutes after a fresh
+clamp reading with the compressor in the same steady run:
+
+| | Device | Clamp meter | Error |
+|---|---|---|---|
+| Compressor | 7.1A | 7.01A | **+0.09A (+1.3%)** |
+| Fan | 0.8A | 0.743A | **+0.057A (+7.7%)** |
+
+Both channels now well within normal clamp-meter/CT tolerance.
+
 ## Affected Code
 
 - `src/main.cpp`: `idleHookCore0/1` → single `idleHookCore0` +
@@ -184,22 +259,28 @@ hypothesis and that reverting to 128 SPS recovers the original accuracy.)
 - `include/GoodmanHP.h` / `src/GoodmanHP.cpp`: `readCurrentSensors()`
   changed to start-a-round semantics; new `tickCurrentSensors()` round-robin
   driver, `_currentSampleIt`/`_currentSamplingActive` state
+- `src/WebHandler.cpp`: `POST /config` and `GET /config?format=json` — wired
+  up `compressorCtRatio`, `fanCtRatio`, `crankcaseCtRatio`,
+  `compressorBurdenOhms`, `fanBurdenOhms`, `crankcaseBurdenOhms`,
+  `crankcaseExpectedAmps`, `compressorOvercurrentAmps`, `fanOvercurrentAmps`,
+  `overcurrentDelaySec`, `lockedRotorThreshold`, `lockedRotorTimeoutSec`;
+  `/www/upload` size cap 50KB → 200KB
+- `data/www/config.html`: CT ratio fields `<select>` → `<input type=number>`
+  with `<datalist>` presets; new 3-point calibration tool
+  (`toggleCtCalib()`, `captureCtRow()`, `computeCtCalibration()`)
 
 ## Verification (production, `192.168.0.49`)
 
-| | Before | After busy-time fix (revealed the stall) | Fix #1: 860 SPS (blocking) | Fix #2: 128 SPS (non-blocking) |
-|---|---|---|---|---|
-| `loopItersPerSec` | not measured | **1** | ~660–673 | ~390–840 (varies with real workload) |
-| `cpuLoad1` | `0` (always, artifact) | ~99% (real, caused by the stall) | settles ~45% | settles ~38–42% |
-| `cpuLoad0` | `0` | `0` | ~3–6% | ~2–3% |
-| Current-sensor accuracy vs. clamp meter | not checked | not checked | fan +67% high | fan +11% high |
+| | Before | After busy-time fix (revealed the stall) | Fix #1: 860 SPS (blocking) | Fix #2: 128 SPS (non-blocking) | Fix #3: calibrated ctRatio |
+|---|---|---|---|---|---|
+| `loopItersPerSec` | not measured | **1** | ~660–673 | ~390–840 (varies with real workload) | ~390–840 |
+| `cpuLoad1` | `0` (always, artifact) | ~99% (real, caused by the stall) | settles ~45% | settles ~38–42% | ~38–42% |
+| `cpuLoad0` | `0` | `0` | ~3–6% | ~2–3% | ~2–3% |
+| Current-sensor accuracy vs. clamp meter | not checked | not checked | fan +67% high | fan +11% high (compressor unverified) | compressor +1.3%, fan +7.7% |
 
 Each stage deployed via OTA (`/update` + `/apply`, which auto-backs up the
 running firmware first). Device came back with a clean `SW_RESET`,
-`crashBootCount:0`, `safeMode:false` after every deploy. Compressor-channel
-accuracy at the final fix wasn't re-verified against a simultaneous clamp
-reading (real compressor draw had shifted between checks) — worth another
-spot check next cycle.
+`crashBootCount:0`, `safeMode:false` after every deploy.
 
 ## Lessons Learned
 
@@ -238,3 +319,25 @@ spot check next cycle.
   serious latent one.** The internal-temp offset question that started this
   session had nothing to do with the current-sensor stall, but following
   the CPU-load thread all the way through was what found it.
+- **"Within plausible tolerance" from a single comparison is not
+  verification.** The +11% fan reading after fix #2 was accepted as good
+  enough — but it compared a fresh device reading against a *stale* clamp
+  reading taken earlier, at a different (and by then already-changed)
+  load. Three more sessions, timed as close to simultaneously as possible,
+  showed both channels were actually off by ~20-25%, consistently, in the
+  same direction. A single data point can't distinguish "correct" from
+  "coincidentally close."
+- **Find a control variable to separate real signal from measurement
+  error.** Compressor current legitimately varies with ambient/heat load,
+  which made compressor-channel deltas across sessions ambiguous on their
+  own. Fan current doesn't vary with heat load the same way, so a fan
+  channel that showed the *same* error magnitude across independent
+  sessions — while its own raw reading also stayed roughly flat — was the
+  signal that separated "real, fixable calibration gap" from "the load
+  changed" or "one bad reading."
+- **A form with UI for a field but no backend wiring fails silently, not
+  loudly.** The current-monitoring config fields looked fully implemented
+  (dropdowns, burden-resistor inputs, overcurrent thresholds, a live tag)
+  and had presumably looked that way for a while — nothing in the UI
+  indicated the save was a no-op. Worth periodically checking that every
+  input on a settings form actually round-trips, not just that it renders.
