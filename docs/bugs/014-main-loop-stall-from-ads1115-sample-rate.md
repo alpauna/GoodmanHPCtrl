@@ -1,10 +1,10 @@
-# BUG-014: Main loop stalled ~1s per pass — ADS1115 defaulted to 128 SPS instead of 860 SPS
+# BUG-014: Main loop stalled ~1s per pass — blocking ADS1115 current-sensor reads
 
 **Date**: 2026-07-27
 **Severity**: High
 **Status**: Fixed
 **Affected versions**: `f9f836a` through `45e2696` (~16 days in production)
-**Fixed in**: `9870f65`
+**Fixed in**: `9870f65` (loop stall + CPU load metric), `3c202f7` (accuracy regression from the interim fix)
 
 ## Symptom
 
@@ -94,53 +94,112 @@ read exactly **1** on the live device, which pointed directly at whatever
 single per-second task was blocking: `tReadCurrent`, and from there,
 `CurrentSensor::readRMS()`'s undeclared sample rate.
 
-## Fix
+## Fix attempt #1 (`9870f65`) — bumped to 860 SPS, caused an accuracy regression
 
-### CPU load measurement (`src/main.cpp`)
+The first fix was minimal: explicitly call `ads->setDataRate(RATE_ADS1115_860SPS)`,
+matching what the code comment already assumed. At 860 SPS the same 60-sample
+blocking read drops from ~936ms to ~140ms for both sensors combined — loop
+iteration rate went from ~1/sec to ~660+/sec, and `cpuLoad1` (now measured
+correctly) settled at a believable ~45%.
 
-- Core 0 (WiFi/system tasks, not app-controlled): unchanged, still
-  idle-hook timing — not affected by this bug since it's a different core
-  than the one running `loop()`.
-- Core 1 (Arduino loopTask): replaced the idle hook entirely with direct
-  busy-time accounting — timestamp before/after the real work block
-  (`ftpSrv.handleFTP()` + `ts.execute()`) each pass with
-  `esp_timer_get_time()`, sum busy microseconds over the 1-second sampling
-  window. `vTaskDelay(1)` still runs at the end of `loop()` (core 0 still
-  needs it) but is now excluded from core 1's measurement window, so it can
-  no longer swamp the reading.
-- Added `loopItersPerSec` (`_loopIterCount`, `getLoopItersPerSec()`),
-  exposed via `GET /heap`, as a permanent diagnostic — cheap, and the single
-  most direct signal for "is the main loop actually running normally."
+This looked like a full fix until a clamp meter was put on the compressor and
+fan leads next to the board and compared against the live readings at the
+same moment:
 
-### Current sensor sample rate (`src/CurrentSensor.cpp`)
+| | Device (860 SPS) | Clamp meter | Error |
+|---|---|---|---|
+| Compressor | ~8.16A | 7.14A | **+1.02A (+14.3%)** |
+| Fan | 0.9A | 0.54A | **+0.36A (+66.7%)** |
 
-- `readRMS()` now explicitly calls `ads->setDataRate(RATE_ADS1115_860SPS)`
-  before sampling, matching what the existing code comment already assumed
-  was happening.
+Both channels read high, and the fan channel — the smaller signal — was hit
+much harder proportionally. That pattern (same sensor type, same `ctRatio`,
+very different % error) doesn't fit a simple ratio/calibration problem; it
+fits a noise floor that's a fixed fraction of full scale regardless of the
+actual signal. The ADS1115's internal digital filter bandwidth widens as
+data rate increases, so 860 SPS lets more line noise and motor/switching
+harmonics through into each individual sample than 128 SPS does — inflating
+the RMS calculation, and inflating it worst on the channel where the noise
+is a bigger fraction of the real signal.
+
+**This was a real regression, live on production current-sensing hardware
+that feeds overcurrent and locked-rotor safety logic**, introduced by fix
+attempt #1 in the course of fixing the loop stall.
+
+## Fix attempt #2 (`3c202f7`) — non-blocking sampling, back to 128 SPS
+
+Bumping the data rate traded accuracy for speed on a single knob. The actual
+problem was never the *sample rate* — it was that the code sampled the ADC
+*synchronously*, busy-waiting through all 60 conversions in one call. The
+correct fix decouples the two: keep 128 SPS's better accuracy, but stop
+blocking the loop while waiting for each conversion.
+
+`CurrentSensor` was converted from a single blocking `readRMS()` call into a
+non-blocking state machine:
+
+- `beginSample(ads)` — resets accumulators, sets gain + 128 SPS, starts one
+  ADS1115 one-shot conversion (`startADCReading(mux, /*continuous=*/false)`)
+  and returns immediately.
+- `tick(ads)` — call every `loop()` pass. Checks `ads->conversionComplete()`;
+  if not ready, returns `false` and does nothing else this pass (no busy
+  wait — other scheduler work runs in the gap). If ready, accumulates the
+  sample and either starts the next conversion (still 59 to go) or, once all
+  60 are in, runs the same AC-RMS math as before and returns `true`.
+
+Since the ADS1115 is one shared I2C ADC, only one sensor can be
+mid-acquisition at a time. `GoodmanHP` round-robins:
+
+- `readCurrentSensors()` (still triggered once/sec by `tReadCurrent`) now
+  only *starts* a round — `beginSample()` on the first sensor.
+- `tickCurrentSensors()` — called every `loop()` pass — advances whichever
+  sensor is currently converting. When a sensor's `tick()` returns `true`,
+  its `checkProtections()` runs and the round-robin moves to the next
+  sensor; when the last one finishes, sampling goes idle until the next
+  1-second trigger.
+
+Net effect: a ~7.8ms conversion no longer blocks anything — it's spread
+across however many `loop()` passes happen to occur while it completes.
+
+Re-verified against the clamp meter after this fix:
+
+| | Device (128 SPS, non-blocking) | Clamp meter | Error |
+|---|---|---|---|
+| Fan | 0.6A | 0.54A | +0.06A (+11%) |
+
+Fan-channel error dropped from +67% (860 SPS) to +11% (128 SPS,
+non-blocking) — within plausible clamp-meter/CT tolerance. (Compressor
+current wasn't directly comparable at this checkpoint since real compressor
+draw had already shifted between checks — 5.4A vs. the earlier 7.14A/8.16A
+reading — but the fan-channel result alone confirms the noise-bandwidth
+hypothesis and that reverting to 128 SPS recovers the original accuracy.)
 
 ## Affected Code
 
 - `src/main.cpp`: `idleHookCore0/1` → single `idleHookCore0` +
   `_busyUsCore1` busy-time accounting, `onCalcCpuLoad()`, `loop()`,
-  `_loopIterCount`/`getLoopItersPerSec()`
+  `_loopIterCount`/`getLoopItersPerSec()`, `hpController.tickCurrentSensors()`
+  call added to `loop()`
 - `src/WebHandler.cpp`: `GET /heap` — added `loopItersPerSec` field
-- `src/CurrentSensor.cpp`: `readRMS()` — explicit `setDataRate()` call
+- `include/CurrentSensor.h` / `src/CurrentSensor.cpp`: `readRMS()` replaced
+  with `beginSample()` + `tick()` non-blocking state machine (128 SPS)
+- `include/GoodmanHP.h` / `src/GoodmanHP.cpp`: `readCurrentSensors()`
+  changed to start-a-round semantics; new `tickCurrentSensors()` round-robin
+  driver, `_currentSampleIt`/`_currentSamplingActive` state
 
 ## Verification (production, `192.168.0.49`)
 
-| | Before | After busy-time fix (revealed the stall) | After datarate fix |
-|---|---|---|---|
-| `loopItersPerSec` | not measured | **1** | **~660–673** |
-| `cpuLoad1` | `0` (always, artifact) | ~99% (real, but caused by the stall) | settles ~45% |
-| `cpuLoad0` | `0` | `0` | ~3–6% (normal) |
+| | Before | After busy-time fix (revealed the stall) | Fix #1: 860 SPS (blocking) | Fix #2: 128 SPS (non-blocking) |
+|---|---|---|---|---|
+| `loopItersPerSec` | not measured | **1** | ~660–673 | ~390–840 (varies with real workload) |
+| `cpuLoad1` | `0` (always, artifact) | ~99% (real, caused by the stall) | settles ~45% | settles ~38–42% |
+| `cpuLoad0` | `0` | `0` | ~3–6% | ~2–3% |
+| Current-sensor accuracy vs. clamp meter | not checked | not checked | fan +67% high | fan +11% high |
 
-Deployed via OTA (`/update` + `/apply`, which auto-backs up the running
-firmware first). Device came back with a clean `SW_RESET`,
-`crashBootCount:0`, `safeMode:false`, and current-sensor readings
-(`COMPRESSOR_CURRENT`/`FAN_CURRENT`) still reporting cleanly. The system
-was `OFF` at verification time (both readings 0.0A as expected); a
-non-zero-load spot check is still owed the next time the compressor cycles
-on, to confirm current-sensing accuracy held up at the faster sample rate.
+Each stage deployed via OTA (`/update` + `/apply`, which auto-backs up the
+running firmware first). Device came back with a clean `SW_RESET`,
+`crashBootCount:0`, `safeMode:false` after every deploy. Compressor-channel
+accuracy at the final fix wasn't re-verified against a simultaneous clamp
+reading (real compressor draw had shifted between checks) — worth another
+spot check next cycle.
 
 ## Lessons Learned
 
@@ -154,6 +213,18 @@ on, to confirm current-sensing accuracy held up at the faster sample rate.
   SPS) silently won because nothing called `setDataRate()`. Assumptions
   about hardware config belong in an assertion or an explicit call, not
   just a comment.
+- **The fastest fix for a blocking-call problem (crank up the hardware
+  speed) can trade away accuracy you didn't know you were relying on.**
+  Sample rate and filter bandwidth are coupled on a sigma-delta ADC; "make
+  it faster" and "keep it accurate" are two different knobs, and only one
+  of them (making the read non-blocking) actually solves the scheduling
+  problem without a tradeoff.
+- **Verify safety-relevant sensor changes against a real reference, not
+  just "does it still report a number."** The 860 SPS fix passed every
+  check available at the time (builds, boots cleanly, current values look
+  plausible, no invalid/zero reads) and still had a 67% error on one
+  channel. A clamp meter on the actual wire caught what none of the
+  software-side checks could.
 - **Wall-clock busy-time accounting can conflate "genuinely executing" with
   "blocked in a busy-poll."** The fix here happened to reveal the real bug
   because the blocking ADC poll *is* wall-clock CPU-bound (a tight
