@@ -85,16 +85,30 @@ u_int32_t _idleLoopCount = 0;
 u_int32_t _workLoopCount = 0;
 volatile bool InISR, InitialPinStateSet, FinalPinSetState;
 
-// CPU load monitoring via FreeRTOS idle hooks (timer-based)
-// Tracks actual idle microseconds per second using esp_timer_get_time().
-// Consecutive idle hook calls < 200us apart = continuous idle time.
-// Gaps > 200us = preempted by higher-priority task (not counted as idle).
+// CPU load monitoring
+// Core 0 (WiFi/system tasks, not app-controlled): FreeRTOS idle-hook timing.
+//   Tracks actual idle microseconds per second using esp_timer_get_time().
+//   Consecutive idle hook calls < 200us apart = continuous idle time.
+//   Gaps > 200us = preempted by higher-priority task (not counted as idle).
+// Core 1 (Arduino loopTask, runs ts.execute()): direct busy-time
+//   accounting. loop() must call vTaskDelay(1) every pass so core 0's
+//   idle task (and its hook) gets a chance to run; that forced delay
+//   makes loopTask look idle almost 100% of the time, so an idle-hook
+//   reading taken on core 1 itself is swamped by the delay rather than
+//   reflecting real work. Instead we timestamp the actual work done each
+//   pass and sum it directly. Note this measures wall-clock time the work
+//   block took, not pure CPU cycles — AsyncTCP runs at priority 10 (vs.
+//   loopTask's priority 1) and isn't pinned to a core, so if it preempts
+//   loopTask mid-pass to service network I/O, that time is included too.
+//   _loopIterCount (iterations/sec, see getLoopItersPerSec()) helps tell
+//   "genuinely busy" apart from "frequently preempted".
 static volatile int64_t _lastIdleCore0 = 0;
-static volatile int64_t _lastIdleCore1 = 0;
 static volatile uint32_t _idleUsCore0 = 0;
-static volatile uint32_t _idleUsCore1 = 0;
+static volatile uint32_t _busyUsCore1 = 0;
+static volatile uint32_t _loopIterCount = 0;
 static uint8_t _cpuLoadCore0 = 0;
 static uint8_t _cpuLoadCore1 = 0;
+static uint32_t _loopItersPerSec = 0;
 
 static bool idleHookCore0() {
   int64_t now = esp_timer_get_time();
@@ -103,16 +117,10 @@ static bool idleHookCore0() {
   if (delta > 0 && delta < 200) _idleUsCore0 += (uint32_t)delta;
   return false;
 }
-static bool idleHookCore1() {
-  int64_t now = esp_timer_get_time();
-  int64_t delta = now - _lastIdleCore1;
-  _lastIdleCore1 = now;
-  if (delta > 0 && delta < 200) _idleUsCore1 += (uint32_t)delta;
-  return false;
-}
 
 uint8_t getCpuLoadCore0() { return _cpuLoadCore0; }
 uint8_t getCpuLoadCore1() { return _cpuLoadCore1; }
+uint32_t getLoopItersPerSec() { return _loopItersPerSec; }
 
 u_int32_t _wifiStartMillis = 0;
 
@@ -1009,7 +1017,7 @@ void setup() {
     // Add input pins to GoodmanHP controller
     hpController.addInput("LPS", new InputPin(&ts, proj.inputDelayMs, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _lpsPin, "LPS", "LPS", onInput));
     hpController.addInput("DFT", new InputPin(&ts, proj.inputDelayMs, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _dftPin, "DFT", "DFT", onInput));
-    hpController.addInput("Y", new InputPin(&ts, proj.inputDelayMs, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _yPin, "Y", "OT-NO", onInput));
+    hpController.addInput("Y", new InputPin(&ts, proj.inputDelayMs, InputResistorType::NONE, InputPinType::IT_DIGITAL, _yPin, "Y", "OT-NO", onInput));
     hpController.addInput("O", new InputPin(&ts, proj.inputDelayMs, InputResistorType::IT_PULLDOWN, InputPinType::IT_DIGITAL, _oPin, "O", "OT-NC", onInput));
 
     // Read raw GPIO states before initPin() drives them LOW — detect if relays
@@ -1117,7 +1125,6 @@ void setup() {
   }
 
   esp_register_freertos_idle_hook_for_cpu(idleHookCore0, 0);
-  esp_register_freertos_idle_hook_for_cpu(idleHookCore1, 1);
   tCpuLoad.enable();
 
   Log.info("MAIN", "Starting Main Loop%s", _safeMode ? " (SAFE MODE)" : "");
@@ -1184,21 +1191,23 @@ void onSaveRuntime(){
   }
 }
 
-static uint8_t _cpuLoadWarmup = 5; // Skip first 5s for idle hooks to stabilize
+static uint8_t _cpuLoadWarmup = 5; // Skip first 5s for readings to stabilize
 
 void onCalcCpuLoad() {
-  // Atomically read and reset idle microsecond accumulators
+  // Atomically read and reset accumulators
   uint32_t idle0 = _idleUsCore0; _idleUsCore0 = 0;
-  uint32_t idle1 = _idleUsCore1; _idleUsCore1 = 0;
+  uint32_t busy1 = _busyUsCore1; _busyUsCore1 = 0;
+  _loopItersPerSec = _loopIterCount; _loopIterCount = 0;
 
   if (_cpuLoadWarmup > 0) {
     _cpuLoadWarmup--;
     return;
   }
 
-  // Convert idle microseconds to load % (1 second = 1,000,000 us)
+  // Core 0: idle-hook based (1 second = 1,000,000 us of possible idle time)
   uint8_t raw0 = (idle0 >= 1000000) ? 0 : (uint8_t)(100 - idle0 / 10000);
-  uint8_t raw1 = (idle1 >= 1000000) ? 0 : (uint8_t)(100 - idle1 / 10000);
+  // Core 1: direct busy-time based (1 second = 1,000,000 us of possible work time)
+  uint8_t raw1 = (busy1 >= 1000000) ? 100 : (uint8_t)(busy1 / 10000);
 
   // EMA smoothing: 25% new + 75% old
   _cpuLoadCore0 = (_cpuLoadCore0 * 3 + raw0 + 2) / 4;
@@ -1543,6 +1552,9 @@ void loop() {
     ESP.restart();
   }
 
+  _loopIterCount++;
+  int64_t workStartUs = esp_timer_get_time();
+
   if (ftpActive && ftpStopTime > 0 && millis() >= ftpStopTime) {
     ftpSrv.end();
     ftpActive = false;
@@ -1558,5 +1570,7 @@ void loop() {
   } else {
     _workLoopCount++;
   }
-  vTaskDelay(1); // Yield to FreeRTOS so idle hooks can fire on both cores
+
+  _busyUsCore1 += (uint32_t)(esp_timer_get_time() - workStartUs);
+  vTaskDelay(1); // Yield to FreeRTOS so core 0's idle hook can fire
 }

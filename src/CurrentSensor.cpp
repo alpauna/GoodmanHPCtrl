@@ -31,8 +31,14 @@ void CurrentSensor::readRMS(Adafruit_ADS1115* ads) {
     // SCT-013-030 outputs 0-1V AC for 0-30A
     ads->setGain(GAIN_TWO);
 
-    // Sample ~60 readings over ~3 full 60Hz cycles (~70ms).
-    // ADS1115 at 860 SPS in continuous mode gives ~1.16ms per sample.
+    // Explicitly request 860 SPS — the library default is 128 SPS (~7.8ms/sample
+    // blocking one-shot read), which silently made every 60-sample RMS read take
+    // ~470ms instead of the ~70ms this function assumes, stalling the main loop
+    // for the better part of a second on every tReadCurrent tick (once/sec).
+    ads->setDataRate(RATE_ADS1115_860SPS);
+
+    // Sample ~60 readings over ~3 full 60Hz cycles (~70ms at 860 SPS, one-shot
+    // reads — not continuous mode, but each blocking read still takes ~1.16ms).
     // Increased from 20 to 60 to avoid "sample bunching" near a zero crossing
     // (caused by I2C jitter from WiFi/AsyncTCP/log flush interrupts) that
     // previously produced spurious 0.00A readings on the FAN channel.

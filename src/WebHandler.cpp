@@ -11,6 +11,7 @@ extern const char compile_date[];
 
 extern uint8_t getCpuLoadCore0();
 extern uint8_t getCpuLoadCore1();
+extern uint32_t getLoopItersPerSec();
 extern bool _apModeActive;
 
 WebHandler::WebHandler(uint16_t port, Scheduler* ts, GoodmanHP* hpController)
@@ -446,6 +447,7 @@ void WebHandler::setupRoutes() {
         json += ",\"used psram MB\":" + String((ESP.getPsramSize() - ESP.getFreePsram()) * MB_MULTIPLIER);
         json += ",\"cpuLoad0\":" + String(getCpuLoadCore0());
         json += ",\"cpuLoad1\":" + String(getCpuLoadCore1());
+        json += ",\"loopItersPerSec\":" + String(getLoopItersPerSec());
         json += "}";
         request->send(200, "application/json", json);
     });
