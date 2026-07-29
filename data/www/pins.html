@@ -115,22 +115,9 @@ This will auto shut off after <span class='countdown' id='countdown'>30:00</span
 
 <h2>I2C Devices <button class='btn-refresh' onclick='scanI2C()'>Scan</button></h2>
 <table>
-<thead><tr><th>Address</th><th>Driver</th><th>Role</th></tr></thead>
+<thead><tr><th>Address</th><th>Device</th></tr></thead>
 <tbody id='i2cBody'></tbody>
 </table>
-<div class='info-text'>I2C driver changes require a reboot to take effect.</div>
-
-<h2>SPI Sensors</h2>
-<table>
-<thead><tr><th>Device</th><th>Role</th><th>Value</th><th>Status</th></tr></thead>
-<tbody id='spiBody'></tbody>
-</table>
-<div id='spiPins' style='display:none;margin-top:-10px;margin-bottom:16px;'>
-<table>
-<thead><tr><th>Pin</th><th>Function</th><th>JTAG</th></tr></thead>
-<tbody id='spiPinBody'></tbody>
-</table>
-</div>
 
 <h2>Bus Pins</h2>
 <table>
@@ -186,7 +173,7 @@ unintended boot mode during power-on. <span class='v-off'>Checking eFuse state..
 <tr><td class='pin'>20</td><td>USB</td><td id='prot_20' class='v-off'>--</td><td>USB_D+ (USB-JTAG) — unused by app</td></tr>
 <tr><td class='pin'>26-32</td><td>SPI Flash</td><td class='v-off'>--</td><td>QIO flash — do not use</td></tr>
 <tr><td class='pin'>33-37</td><td>Octal PSRAM</td><td class='v-off'>--</td><td>OPI PSRAM — do not use</td></tr>
-<tr><td class='pin'>39-41</td><td>JTAG</td><td id='prot_39' class='v-off'>--</td><td>MAX6675 SPI CLK/CS/DO (configurable)</td></tr>
+<tr><td class='pin'>39-41</td><td>JTAG</td><td id='prot_39' class='v-off'>--</td><td>Unused (formerly MAX6675 SPI CLK/CS/DO)</td></tr>
 <tr><td class='pin'>42</td><td>JTAG</td><td class='v-off'>--</td><td>MTMS — SPI current sensor DOUT (bring-up only)</td></tr>
 <tr><td class='pin'>43</td><td>UART</td><td class='v-off'>--</td><td>U0TXD — serial console</td></tr>
 <tr><td class='pin'>44</td><td>UART</td><td class='v-off'>--</td><td>U0RXD — serial console</td></tr>
@@ -221,8 +208,6 @@ unintended boot mode during power-on. <span class='v-off'>Checking eFuse state..
 var stateColors={'COOL':'#2196F3','HEAT':'#f44336','DEFROST':'#ff9800','OFF':'#9e9e9e','ERROR':'#d32f2f','LOW_TEMP':'#7b1fa2'};
 var roles=['COMPRESSOR_TEMP','SUCTION_TEMP','AMBIENT_TEMP','CONDENSER_TEMP','LIQUID_TEMP','VAPOR_TEMP'];
 var roleLabels={'COMPRESSOR_TEMP':'Compressor','SUCTION_TEMP':'Suction','AMBIENT_TEMP':'Ambient','CONDENSER_TEMP':'Condenser','LIQUID_TEMP':'Liquid Line','VAPOR_TEMP':'Vapor Line'};
-var drivers=['','MCP9600','MAX6675','Other'];
-var driverLabels={'':'Unassigned','MCP9600':'MCP9600 (I2C Thermocouple)','MAX6675':'MAX6675 (SPI Thermocouple)','Other':'Other'};
 var manualActive=false;
 var authHeader='';
 var tempSensors=[];
@@ -286,7 +271,7 @@ function shortAddr(a){
   return a.substring(0,4)+'..'+a.substring(a.length-4);
 }
 
-function roleSelect(id,current,isI2C){
+function roleSelect(id,current){
   var h='<select id="'+id+'" onchange="checkDups()">';
   h+='<option value="">Unassigned</option>';
   for(var i=0;i<roles.length;i++){
@@ -297,31 +282,9 @@ function roleSelect(id,current,isI2C){
   return h;
 }
 
-function driverSelect(id,current){
-  var h='<select id="'+id+'" onchange="onDriverChange(\''+id+'\')">';
-  for(var i=0;i<drivers.length;i++){
-    var sel=(current===drivers[i])?' selected':'';
-    h+='<option value="'+drivers[i]+'"'+sel+'>'+(driverLabels[drivers[i]]||drivers[i])+'</option>';
-  }
-  h+='</select>';
-  return h;
-}
-
-function onDriverChange(selId){
-  var sel=document.getElementById(selId);
-  var idx=selId.replace('i2c_drv_','');
-  var cell=document.getElementById('i2c_rolecell_'+idx);
-  if(cell){
-    var roleEl=document.getElementById('i2c_role_'+idx);
-    var curRole=roleEl?roleEl.value:'';
-    cell.innerHTML=(sel.value==='MCP9600')?roleSelect('i2c_role_'+idx,curRole,true):'<span class="v-off">--</span>';
-  }
-  checkDups();
-}
-
 function checkDups(){
   var used={};
-  var sels=document.querySelectorAll('select[id^="ow_role_"],select[id^="i2c_role_"]');
+  var sels=document.querySelectorAll('select[id^="ow_role_"]');
   // Count roles
   for(var i=0;i<sels.length;i++){
     var v=sels[i].value;
@@ -338,8 +301,6 @@ function loadTemps(){
   fetch('/temps').then(function(r){return r.json();}).then(function(data){
     tempSensors=data;
     renderOneWire();
-    renderI2CRoles();
-    renderSPI();
     checkDups();
   });
 }
@@ -354,7 +315,7 @@ function renderOneWire(){
     h+='<tr>';
     h+='<td class="addr" title="'+s.devid+'">'+shortAddr(s.devid)+'</td>';
     h+='<td>'+valStr+'</td>';
-    h+='<td>'+roleSelect('ow_role_'+idx,s.name,false)+'</td>';
+    h+='<td>'+roleSelect('ow_role_'+idx,s.name)+'</td>';
     h+='</tr>';
     idx++;
   }
@@ -372,91 +333,17 @@ function scanI2C(){
   });
 }
 
-var knownI2C={'0x3C':'SSD1306 OLED','0x48':'ADS1115 ADC','0x67':'MCP9600 Thermocouple'};
+var knownI2C={'0x3C':'SSD1306 OLED','0x48':'ADS1115 ADC'};
 
 function renderI2C(){
   var tb=document.getElementById('i2cBody'),h='';
-  // Build lookup of current I2C temp sensors from /temps data
-  var i2cTemps={};
-  for(var i=0;i<tempSensors.length;i++){
-    if(tempSensors[i].type==='i2c'){
-      i2cTemps[tempSensors[i].devid]={name:tempSensors[i].name,driver:'MCP9600'};
-    }
-  }
   for(var i=0;i<i2cDevices.length;i++){
-    var d=i2cDevices[i];
-    var addr=d.address;
-    var cur=i2cTemps[addr]||{driver:'',name:''};
-    var known=knownI2C[addr];
-    var addrLabel=addr+(known?' <span class="v-off">('+known+')</span>':'');
-    var roleCell='';
-    if(known&&!cur.driver){
-      // Known fixed-function device (LCD, ADC) — show label, no dropdown
-      h+='<tr><td class="addr">'+addrLabel+'</td><td>'+known+'</td><td><span class="v-off">--</span></td></tr>';
-      continue;
-    }
-    if(cur.driver==='MCP9600'){
-      roleCell=roleSelect('i2c_role_'+i,cur.name,true);
-    } else {
-      roleCell='<span class="v-off">--</span>';
-    }
-    h+='<tr>';
-    h+='<td class="addr">'+addrLabel+'</td>';
-    h+='<td>'+driverSelect('i2c_drv_'+i,cur.driver)+'</td>';
-    h+='<td id="i2c_rolecell_'+i+'">'+roleCell+'</td>';
-    h+='</tr>';
+    var addr=i2cDevices[i].address;
+    var known=knownI2C[addr]||'Unknown device';
+    h+='<tr><td class="addr">'+addr+'</td><td>'+known+'</td></tr>';
   }
-  if(i2cDevices.length===0) h='<tr><td colspan="3" class="v-off">No I2C devices found</td></tr>';
+  if(i2cDevices.length===0) h='<tr><td colspan="2" class="v-off">No I2C devices found</td></tr>';
   tb.innerHTML=h;
-}
-
-function renderI2CRoles(){
-  // Re-render I2C roles if devices already scanned
-  if(i2cDevices.length>0) renderI2C();
-}
-
-var _spiCfg=null;
-var _jtagMap={39:'TCK',40:'TDO',41:'TDI',42:'TMS'};
-function renderSPI(){
-  var tb=document.getElementById('spiBody'),h='';
-  var found=false;
-  for(var i=0;i<tempSensors.length;i++){
-    if(tempSensors[i].type==='spi'){
-      found=true;
-      var s=tempSensors[i];
-      h+='<tr>';
-      h+='<td class="pin">'+s.devid+'</td>';
-      h+='<td>'+(roleLabels[s.name]||s.name)+'</td>';
-      h+='<td class="v">'+(s.valid==='true'?s.value.toFixed(1)+'\u00B0F':'--')+'</td>';
-      h+='<td><span class="v '+(s.valid==='true'?'v-on':'v-off')+'">'+(s.valid==='true'?'OK':'Invalid')+'</span></td>';
-      h+='</tr>';
-    }
-  }
-  if(!found) h='<tr><td colspan="4" class="v-off">No SPI sensors detected</td></tr>';
-  tb.innerHTML=h;
-  renderSPIPins();
-}
-function renderSPIPins(){
-  var wrap=document.getElementById('spiPins');
-  if(!_spiCfg||!_spiCfg.max6675Enabled){wrap.style.display='none';return;}
-  var pins=[
-    {pin:_spiCfg.max6675Clk,fn:'CLK'},
-    {pin:_spiCfg.max6675Cs,fn:'CS'},
-    {pin:_spiCfg.max6675Do,fn:'DO'}
-  ];
-  var h='';
-  for(var i=0;i<pins.length;i++){
-    var p=pins[i],jtag=_jtagMap[p.pin]||'--';
-    h+='<tr><td class="pin">GPIO '+p.pin+'</td><td>'+p.fn+'</td><td>'+jtag+'</td></tr>';
-  }
-  document.getElementById('spiPinBody').innerHTML=h;
-  wrap.style.display='block';
-}
-function loadSPIConfig(){
-  fetch('/config?format=json').then(function(r){if(r.redirected&&r.url.indexOf('/login')>=0){location.href=r.url;return;}return r.json();}).then(function(d){if(!d)return;
-    _spiCfg=d;
-    renderSPIPins();
-  }).catch(function(){});
 }
 
 function saveAssignments(){
@@ -466,7 +353,7 @@ function saveAssignments(){
 
   // Check for duplicates
   var used={};
-  var sels=document.querySelectorAll('select[id^="ow_role_"],select[id^="i2c_role_"]');
+  var sels=document.querySelectorAll('select[id^="ow_role_"]');
   for(var i=0;i<sels.length;i++){
     var v=sels[i].value;
     if(v){
@@ -478,7 +365,7 @@ function saveAssignments(){
     }
   }
 
-  var body={onewire:{},i2c:{}};
+  var body={onewire:{}};
 
   // Collect OneWire assignments
   var owIdx=0;
@@ -489,17 +376,6 @@ function saveAssignments(){
       body.onewire[tempSensors[i].devid]=sel.value;
     }
     owIdx++;
-  }
-
-  // Collect I2C assignments
-  for(var i=0;i<i2cDevices.length;i++){
-    var drvSel=document.getElementById('i2c_drv_'+i);
-    var roleSel=document.getElementById('i2c_role_'+i);
-    var drv=drvSel?drvSel.value:'';
-    var role=roleSel?roleSel.value:'';
-    if(drv){
-      body.i2c[i2cDevices[i].address]={driver:drv,role:role};
-    }
   }
 
   document.getElementById('saveBtn').disabled=true;
@@ -773,7 +649,6 @@ fetch('/theme').then(function(r){return r.json();}).then(function(d){
 });
 loadTemps();
 scanI2C();
-loadSPIConfig();
 refresh();startPolling(2000);
 </script>
 <div class="btt" id="btt" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Back to top">&#9650;</div>

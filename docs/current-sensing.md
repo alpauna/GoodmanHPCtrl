@@ -202,7 +202,7 @@ unit's actual ratings.
 
 ## Notes
 
-- The I2C bus is shared with the MCP9600 thermocouple at 0x67. The ADS1115 at
+- The I2C bus is shared with the SSD1306 OLED at 0x3C. The ADS1115 at
   0x48 coexists without conflict on GPIO8 (SDA) / GPIO9 (SCL).
 - I2C level shifting (3.3V ESP32 ↔ 5V ADS1115) handled by PCA9306DCUR on the
   main board. No additional level shifting needed on the current monitor PCB.

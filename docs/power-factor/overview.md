@@ -101,7 +101,7 @@ is not required — zero crossings are detected from the sampled waveform.
 | 5 | CNT output relay |
 | 6 | W output relay |
 | 7 | RV output relay |
-| 8 | I2C SDA (OLED, MCP9600) |
+| 8 | I2C SDA (OLED, ADS1115) |
 | 9 | I2C SCL |
 | 10–13 | SD card SPI (CS, MOSI, MISO, CLK) |
 | 14 | CAN RX (TWAI) |
@@ -111,7 +111,7 @@ is not required — zero crossings are detected from the sampled waveform.
 | 18 | O input |
 | 21 | OneWire bus |
 | 38 | CAN TX (TWAI) |
-| 39–41 | MAX6675 SPI (CLK, CS, DO) |
+| 39–41 | Unused (formerly MAX6675 SPI CLK/CS/DO) |
 
 **Unavailable:** 0 (boot), 19–20 (USB), 26–37 (flash/PSRAM), 43–44 (Serial).
 

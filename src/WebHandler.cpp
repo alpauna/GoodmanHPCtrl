@@ -409,18 +409,8 @@ void WebHandler::setupRoutes() {
                 json += "{";
                 json += "\"name\":\"" + m.first + "\"";
                 json += ",\"description\":\"" + m.second->getDescription() + "\"";
-                String sensorType = m.second->hasMCP9600() ? "i2c" :
-                                    m.second->hasMAX6675() ? "spi" : "onewire";
-                json += ",\"type\":\"" + sensorType + "\"";
-                if (m.second->hasMCP9600()) {
-                    char hex[7];
-                    snprintf(hex, sizeof(hex), "0x%02X", m.second->getI2CAddress());
-                    json += ",\"devid\":\"" + String(hex) + "\"";
-                } else if (m.second->hasMAX6675()) {
-                    json += ",\"devid\":\"MAX6675\"";
-                } else {
-                    json += ",\"devid\":\"" + TempSensor::addressToString(m.second->getDeviceAddress()) + "\"";
-                }
+                json += ",\"type\":\"onewire\"";
+                json += ",\"devid\":\"" + TempSensor::addressToString(m.second->getDeviceAddress()) + "\"";
                 json += ",\"value\":" + String(m.second->getValue());
                 json += ",\"previous\":" + String(m.second->getPrevious());
                 json += ",\"valid\":\"" + String(m.second->isValid() ? "true" : "false") + "\"";
@@ -697,24 +687,8 @@ void WebHandler::setupRoutes() {
         String json = "[";
         bool first = true;
         for (uint8_t addr = 1; addr < 127; addr++) {
-            // MCP9600 at 0x67: bare I2C probe crashes some chips — do a full
-            // register read (Device ID at 0x20) instead of address-only probe.
-            // See: https://forums.adafruit.com/viewtopic.php?t=163742
-            bool found = false;
-            if (addr == 0x67) {
-                Wire.beginTransmission(addr);
-                Wire.write(0x20);  // Device ID register
-                if (Wire.endTransmission() == 0) {
-                    uint8_t n = Wire.requestFrom(addr, (uint8_t)2);
-                    if (n == 2) {
-                        Wire.read(); Wire.read();
-                        found = true;
-                    }
-                }
-            } else {
-                Wire.beginTransmission(addr);
-                found = (Wire.endTransmission() == 0);
-            }
+            Wire.beginTransmission(addr);
+            bool found = (Wire.endTransmission() == 0);
             if (found) {
                 if (!first) json += ",";
                 char hex[7];
@@ -1012,19 +986,19 @@ void WebHandler::setupRoutes() {
                 addrToNewRole[kv.key().c_str()] = kv.value().as<String>();
             }
 
-            // Collect existing OneWire sensors (non-MCP9600)
+            // Collect existing OneWire sensors
             std::map<String, TempSensor*> addrToSensor;
             for (auto& mp : tempMap) {
-                if (mp.second && !mp.second->hasMCP9600()) {
+                if (mp.second) {
                     String addr = TempSensor::addressToString(mp.second->getDeviceAddress());
                     addrToSensor[addr] = mp.second;
                 }
             }
 
-            // Remove all OneWire entries from tempMap (keep I2C entries)
+            // Remove all entries from tempMap before re-inserting under new roles
             std::vector<String> toRemove;
             for (auto& mp : tempMap) {
-                if (mp.second && !mp.second->hasMCP9600()) {
+                if (mp.second) {
                     toRemove.push_back(mp.first);
                 }
             }
@@ -1049,17 +1023,6 @@ void WebHandler::setupRoutes() {
                 if (desc.length() > 0 && tempMap.count(desc) == 0) {
                     tempMap[desc] = kv.second;
                 }
-            }
-        }
-
-        // Process I2C assignments: { "0x67": {"driver":"MCP9600","role":"LIQUID_TEMP"}, ... }
-        JsonObject i2c = data["i2c"];
-        if (!i2c.isNull()) {
-            for (JsonPair kv : i2c) {
-                String addr = kv.key().c_str();
-                String driver = kv.value()["driver"] | String("");
-                String role = kv.value()["role"] | String("");
-                _config->setI2CDevice(addr, driver, role);
             }
         }
 
@@ -1165,10 +1128,6 @@ void WebHandler::setupRoutes() {
                 doc["theme"] = proj->theme.length() > 0 ? proj->theme : "dark";
                 doc["displayPageIntervalSec"] = proj->displayPageIntervalSec;
                 doc["displayEnabled"] = proj->displayEnabled;
-                doc["max6675Clk"] = proj->max6675Clk;
-                doc["max6675Cs"] = proj->max6675Cs;
-                doc["max6675Do"] = proj->max6675Do;
-                doc["max6675Enabled"] = proj->max6675Enabled;
                 doc["systemName"] = proj->systemName.length() > 0 ? proj->systemName : "Goodman HP";
                 doc["mqttPrefix"] = proj->mqttPrefix.length() > 0 ? proj->mqttPrefix : "goodman";
                 doc["forceSafeMode"] = proj->forceSafeMode;
@@ -1886,20 +1845,6 @@ void WebHandler::setupRoutes() {
             proj->displayPageIntervalSec = dispInterval;
             proj->displayEnabled = dispEnabled;
             if (_displayConfigCb) _displayConfigCb(dispInterval, dispEnabled);
-        }
-
-        // MAX6675 SPI thermocouple pin config (requires reboot)
-        uint8_t m6Clk = data["max6675Clk"] | proj->max6675Clk;
-        uint8_t m6Cs = data["max6675Cs"] | proj->max6675Cs;
-        uint8_t m6Do = data["max6675Do"] | proj->max6675Do;
-        bool m6En = data["max6675Enabled"] | proj->max6675Enabled;
-        if (m6Clk != proj->max6675Clk || m6Cs != proj->max6675Cs ||
-            m6Do != proj->max6675Do || m6En != proj->max6675Enabled) {
-            proj->max6675Clk = m6Clk;
-            proj->max6675Cs = m6Cs;
-            proj->max6675Do = m6Do;
-            proj->max6675Enabled = m6En;
-            needsReboot = true;
         }
 
         // Force safe mode on next boot (one-shot)

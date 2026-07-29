@@ -4,8 +4,6 @@
 #include <Arduino.h>
 #include <map>
 #include <DallasTemperature.h>
-#include <Adafruit_MCP9600.h>
-#include <max6675.h>
 
 class TempSensor;
 typedef void (*TempSensorCallback)(TempSensor* sensor);
@@ -30,12 +28,6 @@ class TempSensor {
     void setValue(float value);
     void setPrevious(float previous) { _previous = previous; }
     void setValid(bool valid) { _valid = valid; }
-    void setMCP9600(Adafruit_MCP9600* mcp) { _mcp9600 = mcp; }
-    bool hasMCP9600() const { return _mcp9600 != nullptr; }
-    void setMAX6675(MAX6675* max) { _max6675 = max; }
-    bool hasMAX6675() const { return _max6675 != nullptr; }
-    void setI2CAddress(uint8_t addr) { _i2cAddress = addr; }
-    uint8_t getI2CAddress() const { return _i2cAddress; }
 
     // Callbacks
     void setUpdateCallback(TempSensorCallback callback) { _onUpdate = callback; }
@@ -68,13 +60,6 @@ class TempSensor {
     bool _valid;
     TempSensorCallback _onUpdate;
     TempSensorCallback _onChange;
-    Adafruit_MCP9600* _mcp9600;
-    uint8_t _i2cAddress;
-    uint8_t _mcp9600Failures;
-    static const uint8_t MCP9600_MAX_FAILURES = 5;
-    MAX6675* _max6675;
-    uint8_t _max6675Failures;
-    static const uint8_t MAX6675_MAX_FAILURES = 5;
 };
 
 #endif

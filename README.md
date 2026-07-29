@@ -19,7 +19,7 @@ ESP32-based controller for Goodman heatpumps with support for cooling, heating, 
 ## Features
 
 - **Relay control** — 4 output pins (FAN, Contactor, W-Heat, Reversing Valve) driven by 4 input signals (Low Pressure Switch, Defrost, Y-Cool, O-Heat)
-- **Temperature monitoring** — Up to 6 OneWire (Dallas DS18B20) sensors (compressor, suction, ambient, condenser, liquid, vapor) + liquid line thermocouple fallback with auto-detection priority: MAX6675 SPI > MAX31850K OneWire > MCP9600 I2C. OneWire sensors discovered on the bus are automatically merged with saved config on boot — new devices get default names and appear immediately without a config reset
+- **Temperature monitoring** — Up to 6 OneWire (Dallas DS18B20) sensors (compressor, suction, ambient, condenser, liquid, vapor). OneWire sensors discovered on the bus are automatically merged with saved config on boot — new devices get default names and appear immediately without a config reset
 - **Subcooling calculation** — Real-time subcooling diagnostic (CONDENSER_TEMP - LIQUID_TEMP) displayed on dashboard when both sensors are valid and compressor is running. Relevant for TXV systems to verify proper refrigerant charge
 - **Ambient temp fallback** — 3-tier failover chain for ambient temperature: local OneWire sensor → weather data (MQTT subscription or OpenWeatherMap HTTP API, or both simultaneously) → ESP32 internal die temp. Actively fails up to the best available source every cycle. Configurable staleness timeout, test failover button, dashboard source indicator
 - **Remote access** — REST API, WebSocket, MQTT (QoS 1), and CAN bus for monitoring and control
@@ -300,7 +300,7 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | `GoodmanHP` | Central controller with pin maps, temp sensors, and state machine |
 | `InputPin` | Digital/analog input with polling-based validation delay, confirmed-state debouncing, callbacks |
 | `OutPin` | Output relay with delay, PWM support, state tracking, hardware state validation |
-| `TempSensor` | Temperature sensor with callbacks; supports OneWire (DS18B20), I2C (MCP9600), and SPI (MAX6675). 6 default names: COMPRESSOR, SUCTION, AMBIENT, CONDENSER, LIQUID, VAPOR |
+| `TempSensor` | OneWire (DS18B20) temperature sensor with callbacks. 6 default names: COMPRESSOR, SUCTION, AMBIENT, CONDENSER, LIQUID, VAPOR |
 | `Config` | SD card and JSON configuration management |
 | `Logger` | Multi-output logging with tar.gz rotation, ring buffer, and WebSocket streaming |
 | `WebHandler` | AsyncWebServer (port 80) with REST API and WebSocket |
@@ -327,9 +327,6 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 | SDA | 8 | I/O | I2C data |
 | SCL | 9 | I/O | I2C clock |
 | OneWire | 21 | I/O | Temperature sensor bus |
-| MAX6675 CLK | 39 | Output | SPI thermocouple clock (software SPI) |
-| MAX6675 CS | 40 | Output | SPI thermocouple chip select |
-| MAX6675 DO | 41 | Input | SPI thermocouple data out |
 | CAN TX | 38 | Output | CAN bus transmit (TWAI) |
 | CAN RX | 14 | Input | CAN bus receive (TWAI) |
 
@@ -337,25 +334,8 @@ The `GoodmanHP` class is the central controller that manages all I/O pins and th
 
 | Device | Address | Description |
 |--------|---------|-------------|
-| MCP9600 | 0x67 | Type-K thermocouple amplifier (LIQUID_TEMP) |
 | SSD1306 | 0x3C | 128x64 OLED display (5-page auto-cycling status) |
-
-**SPI Devices (software SPI):**
-
-| Device | Description |
-|--------|-------------|
-| MAX6675 | Type-K thermocouple reader for LIQUID_TEMP (highest priority in auto-detection) |
-
-**MAX6675 Thermocouple Board Mounting:**
-
-The MAX6675 breakout board (32mm x 16mm) mounts to the inner ceiling of the top shell enclosure via a single M3 screw pillar. The terminal block protrudes through a rectangular cutout in the top shell.
-
-- **Mounting pillar**: 6mm OD, 6mm tall, M3 tap hole (2.5mm), attached to inner ceiling
-- **Pillar position**: 35mm from left outer edge, 28mm from top outer edge, offset 2mm toward bottom of board from center
-- **Terminal cutout**: 16mm x 14mm rectangular hole through the top shell at the top end of the board
-- **Countersink**: Shell thinned from 3mm to 1.5mm around the terminal opening, extending to the outer top edge for terminal block clearance
-- **Default SPI pins**: CLK=GPIO 39 (TCK), CS=GPIO 40 (TDO), DO=GPIO 41 (TDI) — freed JTAG header pins on ESP32-S3
-- **3D shell files**: Located in `shell/` — originals (3mm walls) and modified versions (3.5mm walls, flipped mating profile). See [3D Printed Shell](#3d-printed-shell) section below
+| ADS1115 | 0x48 | 16-bit ADC for CT clamp current sensing |
 
 ### 3D Printed Shell
 
@@ -627,8 +607,7 @@ This prompts for system name, MQTT prefix, WiFi, and MQTT credentials, then writ
       "28C7E8B200000076": { "description": "CONDENSER_TEMP", "name": "CONDENSER_TEMP" },
       "28DCC0B200000013": { "description": "COMPRESSOR_TEMP", "name": "COMPRESSOR_TEMP" },
       "2862D5B2000000A9": { "description": "SUCTION_TEMP", "name": "SUCTION_TEMP" }
-    },
-    "max6675": { "clk": 39, "cs": 40, "do": 41, "enabled": true }
+    }
   }
 }
 ```
@@ -648,10 +627,6 @@ This prompts for system name, MQTT prefix, WiFi, and MQTT credentials, then writ
 - `heatpump.defrost.minRuntimeMs` — Minimum Phase 3 runtime in ms before checking exit conditions (default: 180000 = 3 min)
 - `heatpump.defrost.exitTempF` — Condenser temp (°F) at which Phase 3 exits (default: 60.0)
 - `heatpump.defrost.heatRuntimeThresholdMs` — Accumulated HEAT runtime in ms before triggering defrost (default: 5400000 = 90 min, range: 1–90 min via config page)
-- `sensors.max6675.clk` — MAX6675 SPI clock pin (default: 39, requires reboot)
-- `sensors.max6675.cs` — MAX6675 SPI chip select pin (default: 40, requires reboot)
-- `sensors.max6675.do` — MAX6675 SPI data out pin (default: 41, requires reboot)
-- `sensors.max6675.enabled` — Enable MAX6675 thermocouple sensor (default: true, requires reboot)
 
 **Log file rotation:**
 - Active log: `/log.txt` (uncompressed)
@@ -1236,18 +1211,6 @@ When the fault clears:
 
 - **AsyncTCP watchdog** — The `CONFIG_ASYNC_TCP_USE_WDT=0` build flag is required in `platformio.ini`. Without it, AsyncTCP subscribes its task to the ESP-IDF task watchdog (5s timeout). When the MQTT broker is slow or unreachable, the async_tcp task cannot reset the watchdog in time, causing a panic and reboot. This flag prevents the async_tcp task from registering with the watchdog.
 
-## Known Issues
-
-### MCP9600 I2C Bus Crash
-
-Some MCP9600 thermocouple amplifier chips have a hardware bug where a bare I2C address probe (sending only the address byte with no register data via `beginTransmission`/`endTransmission`) crashes the chip and locks up the entire I2C bus. The chip remains unresponsive until power cycled — a software reboot is not sufficient to recover it.
-
-**Workaround implemented:** The firmware initializes the MCP9600 via its Adafruit driver (which performs a full Device ID register read at 0x20) *before* any I2C bus scan, and skips address 0x67 in all scan loops. The `/i2c/scan` web endpoint uses a full register read instead of a bare probe for 0x67. The Adafruit MCP9600 library itself already passes `begin(false)` internally to skip the bare probe — the issue was only with the generic I2C scan code.
-
-If the MCP9600 stops responding after flashing firmware that performed bare I2C scans, a full power cycle (unplug power, not just software reboot) will recover it.
-
-**Reference:** [Adafruit Forums — MCP9600 I2C issues](https://forums.adafruit.com/viewtopic.php?t=163742)
-
 ## Known Bugs
 
 All bug reports in [`docs/bugs/`](docs/bugs/).
@@ -1278,7 +1241,5 @@ Managed automatically by PlatformIO. Key libraries:
 - [AsyncMqttClient](https://github.com/marvinroger/async-mqtt-client) — MQTT client
 - [ArduinoJson](https://github.com/bblanchon/ArduinoJson) — JSON parsing/serialization
 - [ESP32-targz](https://github.com/tobozo/ESP32-targz) — tar.gz compression for log rotation
-- [Adafruit MCP9600](https://github.com/adafruit/Adafruit_MCP9600) — I2C thermocouple amplifier driver
-- [Adafruit MAX6675](https://github.com/adafruit/MAX6675-library) — SPI thermocouple reader driver
 - [SD](https://github.com/espressif/arduino-esp32/tree/master/libraries/SD) — Arduino SD card library (used for all file operations)
 - [SimpleFTPServer](https://github.com/xreef/SimpleFTPServer) — FTP server for SD card file uploads (STORAGE_SD mode)

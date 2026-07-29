@@ -22,7 +22,6 @@
 #include "TempHistory.h"
 #include "DisplayManager.h"
 #include "OtaUtils.h"
-#include <max6675.h>
 #include <Adafruit_ADS1X15.h>
 #include <HTTPClient.h>
 #include "CANBus.h"
@@ -195,15 +194,9 @@ OneWire oneWire(ONE_WIRE_BUS);
 // Pass our oneWire reference to Dallas Temperature.
 DallasTemperature sensors(&oneWire);
 
-// MCP9600 I2C thermocouple amplifier for LIQUID_TEMP
-Adafruit_MCP9600 mcp9600;
-
 // ADS1115 16-bit I2C ADC for CT clamp current sensing
 Adafruit_ADS1115 ads1115;
 bool ads1115Ready = false;
-
-// MAX6675 SPI thermocouple (software bit-bang SPI, no bus conflict)
-MAX6675* max6675Ptr = nullptr;
 
 
 typedef enum AC_STATE { OFF, COOL, HEAT, DEFROST, ERROR, LOW_TEMP } ACState;
@@ -250,10 +243,6 @@ ProjectInfo proj = {
   "dark",             // theme: dark default
   10,                 // displayPageIntervalSec: 10s default
   true,               // displayEnabled: on by default
-  39,                 // max6675Clk: GPIO 39
-  40,                 // max6675Cs: GPIO 40
-  41,                 // max6675Do: GPIO 41
-  true,               // max6675Enabled: on by default
   false,              // forceSafeMode: not forced
   "Goodman HP",       // systemName: default system name
   "goodman",          // mqttPrefix: default MQTT topic prefix
@@ -625,24 +614,41 @@ void setup() {
   }
 
   Wire.begin(_sdaPin, _sclPin);
-  Wire.setTimeOut(1000);  // 1s I2C bus timeout — prevents MCP9600 from hanging boot
+  Wire.setTimeOut(1000);  // 1s I2C bus timeout
 
-  // Initialize MCP9600 FIRST — bare I2C probe (beginTransmission/endTransmission
-  // with no data) crashes some MCP9600 chips, corrupting the I2C bus.
-  // See: https://forums.adafruit.com/viewtopic.php?t=163742
-  // Workaround: skip probe, call begin() directly which does a full register read.
-  // Wire timeout above prevents hang if chip locks the bus.
-  bool mcp9600Ready = false;
-  if (mcp9600.begin(0x67)) {
-    mcp9600.setADCresolution(MCP9600_ADCRESOLUTION_18);
-    mcp9600.setThermocoupleType(MCP9600_TYPE_K);
-    mcp9600.setFilterCoefficient(3);
-    mcp9600.enable(true);
-    mcp9600Ready = true;
-    Serial.println("MCP9600 thermocouple amplifier initialized at 0x67");
+  // Initialize ADS1115 ADC for CT clamp current sensing at 0x48
+  if (ads1115.begin(0x48)) {
+    ads1115Ready = true;
+    Serial.println("ADS1115 ADC initialized at 0x48");
   } else {
-    Serial.println("MCP9600 not found or hung at 0x67, LIQUID_TEMP unavailable");
-    // Attempt I2C bus recovery — toggle SCL to release stuck SDA
+    Serial.println("ADS1115 not found at 0x48, current sensing unavailable");
+  }
+
+  // Scan I2C bus for devices — skip 0x48 (ADS1115) to avoid re-probing
+  uint8_t i2cCount = ads1115Ready ? 1 : 0;
+  Serial.println("I2C scan starting...");
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    if (addr == 0x48) continue;  // ADS1115: already probed via driver
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("I2C device found at 0x%02X\r\n", addr);
+      i2cCount++;
+    }
+  }
+  if (ads1115Ready) Serial.println("I2C device found at 0x48 (ADS1115, probed via driver)");
+  if (i2cCount == 0) {
+    Serial.println("I2C scan: no devices found");
+  } else {
+    Serial.printf("I2C scan: %d device(s) found\r\n", i2cCount);
+  }
+
+  // Initialize OLED display (SSD1306 128x64 at 0x3C). If it fails, attempt
+  // I2C bus recovery (toggle SCL to release a stuck SDA) and retry once —
+  // the OLED is the only remaining I2C consumer, so this is the meaningful
+  // place for that recovery to live.
+  displayMgr.setController(&hpController);
+  if (!displayMgr.begin(0x3C)) {
+    Serial.println("OLED init failed, attempting I2C bus recovery");
     Wire.end();
     pinMode(_sclPin, OUTPUT);
     for (int i = 0; i < 16; i++) {
@@ -654,40 +660,9 @@ void setup() {
     pinMode(_sclPin, INPUT);
     Wire.begin(_sdaPin, _sclPin);
     Wire.setTimeOut(1000);
-    Serial.println("I2C bus recovery attempted (16 clock pulses)");
+    Serial.println("I2C bus recovery attempted (16 clock pulses), retrying OLED init");
+    displayMgr.begin(0x3C);
   }
-
-  // Initialize ADS1115 ADC for CT clamp current sensing at 0x48
-  if (ads1115.begin(0x48)) {
-    ads1115Ready = true;
-    Serial.println("ADS1115 ADC initialized at 0x48");
-  } else {
-    Serial.println("ADS1115 not found at 0x48, current sensing unavailable");
-  }
-
-  // Scan I2C bus for devices — skip 0x67 (MCP9600) and 0x48 (ADS1115) to avoid re-probing
-  uint8_t i2cCount = (mcp9600Ready ? 1 : 0) + (ads1115Ready ? 1 : 0);
-  Serial.println("I2C scan starting...");
-  for (uint8_t addr = 1; addr < 127; addr++) {
-    if (addr == 0x67) continue;  // MCP9600: bare probe crashes some chips
-    if (addr == 0x48) continue;  // ADS1115: already probed via driver
-    Wire.beginTransmission(addr);
-    if (Wire.endTransmission() == 0) {
-      Serial.printf("I2C device found at 0x%02X\r\n", addr);
-      i2cCount++;
-    }
-  }
-  if (mcp9600Ready) Serial.println("I2C device found at 0x67 (MCP9600, probed via driver)");
-  if (ads1115Ready) Serial.println("I2C device found at 0x48 (ADS1115, probed via driver)");
-  if (i2cCount == 0) {
-    Serial.println("I2C scan: no devices found");
-  } else {
-    Serial.printf("I2C scan: %d device(s) found\r\n", i2cCount);
-  }
-
-  // Initialize OLED display (SSD1306 128x64 at 0x3C)
-  displayMgr.setController(&hpController);
-  displayMgr.begin(0x3C);
 
   // Mount LittleFS for serving web pages from flash
   if (LittleFS.begin(true)) {
@@ -809,20 +784,6 @@ void setup() {
       // Apply display settings from config
       displayMgr.setPageInterval(proj.displayPageIntervalSec);
       displayMgr.setEnabled(proj.displayEnabled);
-      // Initialize MAX6675 SPI thermocouple if enabled
-      if (proj.max6675Enabled) {
-        max6675Ptr = new MAX6675(proj.max6675Clk, proj.max6675Cs, proj.max6675Do);
-        delay(500);  // MAX6675 needs time to stabilize after power-on
-        float testC = max6675Ptr->readCelsius();
-        if (isnan(testC)) {
-          Serial.println("MAX6675 not responding, disabling");
-          delete max6675Ptr;
-          max6675Ptr = nullptr;
-        } else {
-          Serial.printf("MAX6675 initialized (CLK=%d CS=%d DO=%d) test=%.1fC\n",
-                        proj.max6675Clk, proj.max6675Cs, proj.max6675Do, testC);
-        }
-      }
     }
   }
   Serial.println("SD Card is read.");
@@ -1038,36 +999,6 @@ void setup() {
 
     // Start GoodmanHP controller
     hpController.setDallasTemperature(&sensors);
-
-    // Add LIQUID_TEMP sensor: MAX6675 SPI > MAX31850K OneWire > MCP9600 I2C
-    // MAX6675 is preferred when detected — replaces any OneWire LIQUID_TEMP
-    TempSensorMap& postDiscoveryMap = hpController.getTempSensorMap();
-    if (max6675Ptr != nullptr) {
-      // Remove OneWire LIQUID_TEMP if it was auto-discovered (MAX6675 takes priority)
-      if (postDiscoveryMap.count("LIQUID_TEMP") > 0) {
-        Log.info("MAIN", "LIQUID_TEMP: replacing OneWire with MAX6675 SPI (higher priority)");
-        delete postDiscoveryMap["LIQUID_TEMP"];
-        postDiscoveryMap.erase("LIQUID_TEMP");
-      }
-      TempSensor* liquidSensor = new TempSensor("LIQUID_TEMP");
-      liquidSensor->setMAX6675(max6675Ptr);
-      liquidSensor->setUpdateCallback(tempSensorUpdateCallback);
-      liquidSensor->setChangeCallback(tempSensorChangeCallback);
-      hpController.addTempSensor("LIQUID_TEMP", liquidSensor);
-      Log.info("MAIN", "LIQUID_TEMP sensor added (MAX6675 SPI)");
-    } else if (postDiscoveryMap.count("LIQUID_TEMP") > 0) {
-      Log.info("MAIN", "LIQUID_TEMP found on OneWire bus (MAX31850K)");
-    } else if (mcp9600Ready) {
-      TempSensor* liquidSensor = new TempSensor("LIQUID_TEMP");
-      liquidSensor->setMCP9600(&mcp9600);
-      liquidSensor->setI2CAddress(0x67);
-      liquidSensor->setUpdateCallback(tempSensorUpdateCallback);
-      liquidSensor->setChangeCallback(tempSensorChangeCallback);
-      hpController.addTempSensor("LIQUID_TEMP", liquidSensor);
-      Log.info("MAIN", "LIQUID_TEMP sensor added (MCP9600 I2C fallback)");
-    } else {
-      Log.warn("MAIN", "No LIQUID_TEMP sensor found (no MAX6675, MAX31850K, or MCP9600)");
-    }
 
     hpController.setStateChangeCallback([](GoodmanHP::State, GoodmanHP::State) {
       mqttHandler.publishState();

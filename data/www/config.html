@@ -58,7 +58,7 @@ button:hover{background:#45a049;}
 <a href='#' class='reboot' onclick="if(confirm('Reboot device?')){var x=new XMLHttpRequest();x.open('POST','/reboot');x.onload=function(){alert(x.status===200?'Rebooting...':'Failed')};x.send()};return false">Reboot</a>
 </div></nav>
 <div class='sec-nav'><button class='sec-burger' onclick='this.nextElementSibling.classList.toggle("open")'>&#9776;</button><div class='sec-drop'>
-<a href='#s-sys'>System</a><a href='#s-look'>Appearance</a><a href='#s-auth'>Password</a><a href='#s-session'>Session</a><a href='#s-wifi'>WiFi</a><a href='#s-mqtt'>MQTT</a><a href='#s-tz'>Timezone</a><a href='#s-hp'>Heatpump</a><a href='#s-df'>Defrost</a><a href='#s-poll'>Polling</a><a href='#s-disp'>Display</a><a href='#s-tc'>MAX6675</a><a href='#s-log'>Logging</a><a href='#s-ranges'>Ranges</a><a href='#s-ftppw'>FTP Password</a><a href='#s-ftp'>FTP</a><a href='#s-sd'>SD Card</a>
+<a href='#s-sys'>System</a><a href='#s-look'>Appearance</a><a href='#s-auth'>Password</a><a href='#s-session'>Session</a><a href='#s-wifi'>WiFi</a><a href='#s-mqtt'>MQTT</a><a href='#s-tz'>Timezone</a><a href='#s-hp'>Heatpump</a><a href='#s-df'>Defrost</a><a href='#s-poll'>Polling</a><a href='#s-disp'>Display</a><a href='#s-log'>Logging</a><a href='#s-ranges'>Ranges</a><a href='#s-ftppw'>FTP Password</a><a href='#s-ftp'>FTP</a><a href='#s-sd'>SD Card</a>
 </div></div>
 <div class='container'>
 <h1>Configuration</h1>
@@ -315,12 +315,6 @@ button:hover{background:#45a049;}
 <label>Page Flip Interval (seconds, 3-60)</label><input type='number' min='3' max='60' step='1' id='displayPageIntervalSec'>
 <label><input type='checkbox' id='displayEnabled' style='width:auto;margin-right:6px;'>Display Enabled</label>
 </fieldset>
-<fieldset id='s-tc'><legend>MAX6675 Thermocouple <span class='tag tag-reboot'>reboot</span></legend>
-<label><input type='checkbox' id='max6675Enabled' style='width:auto;margin-right:6px;'>Enabled</label>
-<label>CLK Pin</label><select id='max6675Clk' onchange='syncMaxPins()'></select>
-<label>CS Pin</label><select id='max6675Cs' onchange='syncMaxPins()'></select>
-<label>DO Pin</label><select id='max6675Do' onchange='syncMaxPins()'></select>
-</fieldset>
 <fieldset id='s-log'><legend>Logging <span class='tag tag-live'>live</span></legend>
 <label>Max Log Size (MB)</label><input type='number' step='1' id='maxLogSizeMB'>
 <label>Max Old Log Count</label><input type='number' id='maxOldLogCount'>
@@ -361,7 +355,7 @@ button:hover{background:#45a049;}
 var _dirty=false;
 var _origValues={};
 window.addEventListener('beforeunload',function(e){if(_dirty){e.preventDefault();e.returnValue='';}});
-var fields=['systemName','mqttPrefix','wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','timezone','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','highAmbientHeatLockoutF','stateValidationSec','inputDelaySec','defrostColdMaxTemp','defrostWarmMinTemp','defrostColdRuntimeMin','defrostColdMinRuntimeSec','defrostColdExitTempF','defrostMidRuntimeMin','defrostMidMinRuntimeSec','defrostMidExitTempF','defrostWarmRuntimeMin','defrostWarmMinRuntimeSec','defrostWarmExitTempF','apFallbackMinutes','apPassword','ftpPassword','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','hpTonnage','compressorCtRatio','fanCtRatio','crankcaseCtRatio','compressorBurdenOhms','fanBurdenOhms','crankcaseBurdenOhms','crankcaseExpectedAmps','compressorOvercurrentAmps','fanOvercurrentAmps','overcurrentDelaySec','lockedRotorThreshold','lockedRotorTimeoutSec','weatherSource','weatherMqttTopic','weatherApiKey','weatherZipCode','weatherCountry','weatherStaleMinutes','weatherRefreshMinutes','internalTempOffsetF'];
+var fields=['systemName','mqttPrefix','wifiSSID','wifiPassword','mqttHost','mqttPort','mqttUser','mqttPassword','timezone','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','highAmbientHeatLockoutF','stateValidationSec','inputDelaySec','defrostColdMaxTemp','defrostWarmMinTemp','defrostColdRuntimeMin','defrostColdMinRuntimeSec','defrostColdExitTempF','defrostMidRuntimeMin','defrostMidMinRuntimeSec','defrostMidExitTempF','defrostWarmRuntimeMin','defrostWarmMinRuntimeSec','defrostWarmExitTempF','apFallbackMinutes','apPassword','ftpPassword','maxOldLogCount','tempHistoryIntervalSec','theme','displayPageIntervalSec','sessionTimeoutMinutes','pollIntervalSec','hpTonnage','compressorCtRatio','fanCtRatio','crankcaseCtRatio','compressorBurdenOhms','fanBurdenOhms','crankcaseBurdenOhms','crankcaseExpectedAmps','compressorOvercurrentAmps','fanOvercurrentAmps','overcurrentDelaySec','lockedRotorThreshold','lockedRotorTimeoutSec','weatherSource','weatherMqttTopic','weatherApiKey','weatherZipCode','weatherCountry','weatherStaleMinutes','weatherRefreshMinutes','internalTempOffsetF'];
 var tzData={
 'America':{'New York':'EST5EDT,M3.2.0,M11.1.0','Chicago':'CST6CDT,M3.2.0,M11.1.0','Denver':'MST7MDT,M3.2.0,M11.1.0','Los Angeles':'PST8PDT,M3.2.0,M11.1.0','Phoenix':'MST7','Anchorage':'AKST9AKDT,M3.2.0,M11.1.0','Honolulu':'HST10','Halifax':'AST4ADT,M3.2.0,M11.1.0','St Johns':'NST3:30NDT,M3.2.0,M11.1.0','Mexico City':'CST6CDT,M4.1.0,M10.5.0','Sao Paulo':'<-03>3','Buenos Aires':'<-03>3','Santiago':'<-04>4<-03>,M9.1.6/24,M4.1.6/24'},
 'Europe':{'London':'GMT0BST,M3.5.0/1,M10.5.0','Paris':'CET-1CEST,M3.5.0,M10.5.0','Berlin':'CET-1CEST,M3.5.0,M10.5.0','Moscow':'MSK-3','Istanbul':'<+03>-3','Athens':'EET-2EEST,M3.5.0/3,M10.5.0'},
@@ -380,11 +374,6 @@ fields.forEach(f=>{var e=document.getElementById(f);if(e&&f!=='timezone')e.value
 setTzFromPosix(d.timezone||'CST6CDT,M3.2.0,M11.1.0');
 document.getElementById('maxLogSizeMB').value=d.maxLogSize!=null?Math.round(d.maxLogSize/(1024*1024)):'';
 document.getElementById('displayEnabled').checked=d.displayEnabled!==false;
-document.getElementById('max6675Enabled').checked=d.max6675Enabled!==false;
-if(d.max6675Clk!=null)document.getElementById('max6675Clk').value=d.max6675Clk;
-if(d.max6675Cs!=null)document.getElementById('max6675Cs').value=d.max6675Cs;
-if(d.max6675Do!=null)document.getElementById('max6675Do').value=d.max6675Do;
-syncMaxPins();
 document.getElementById('lowTempEnableW').checked=d.lowTempEnableW!==false;
 document.getElementById('lowTempEnableAux').checked=d.lowTempEnableAux!==false;
 document.getElementById('scrollCompressor').checked=d.scrollCompressor!==false;
@@ -707,12 +696,11 @@ alert('Locked Rotor fault cleared');
 }
 function save(e){
 e.preventDefault();
-var d={};var numFields=['mqttPort','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','highAmbientHeatLockoutF','stateValidationSec','inputDelaySec','defrostColdMaxTemp','defrostWarmMinTemp','defrostColdRuntimeMin','defrostColdMinRuntimeSec','defrostColdExitTempF','defrostMidRuntimeMin','defrostMidMinRuntimeSec','defrostMidExitTempF','defrostWarmRuntimeMin','defrostWarmMinRuntimeSec','defrostWarmExitTempF','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','displayPageIntervalSec','max6675Clk','max6675Cs','max6675Do','sessionTimeoutMinutes','pollIntervalSec','hpTonnage','compressorCtRatio','fanCtRatio','crankcaseCtRatio','compressorBurdenOhms','fanBurdenOhms','crankcaseBurdenOhms','crankcaseExpectedAmps','compressorOvercurrentAmps','fanOvercurrentAmps','overcurrentDelaySec','lockedRotorThreshold','lockedRotorTimeoutSec','weatherStaleMinutes','weatherRefreshMinutes','internalTempOffsetF'];
+var d={};var numFields=['mqttPort','lowTempThreshold','highSuctionTempThreshold','rvShortCycleSec','cntShortCycleSec','highAmbientHeatLockoutF','stateValidationSec','inputDelaySec','defrostColdMaxTemp','defrostWarmMinTemp','defrostColdRuntimeMin','defrostColdMinRuntimeSec','defrostColdExitTempF','defrostMidRuntimeMin','defrostMidMinRuntimeSec','defrostMidExitTempF','defrostWarmRuntimeMin','defrostWarmMinRuntimeSec','defrostWarmExitTempF','apFallbackMinutes','maxOldLogCount','tempHistoryIntervalSec','displayPageIntervalSec','sessionTimeoutMinutes','pollIntervalSec','hpTonnage','compressorCtRatio','fanCtRatio','crankcaseCtRatio','compressorBurdenOhms','fanBurdenOhms','crankcaseBurdenOhms','crankcaseExpectedAmps','compressorOvercurrentAmps','fanOvercurrentAmps','overcurrentDelaySec','lockedRotorThreshold','lockedRotorTimeoutSec','weatherStaleMinutes','weatherRefreshMinutes','internalTempOffsetF'];
 fields.forEach(f=>{var e=document.getElementById(f);var v=e?e.value:'';d[f]=numFields.indexOf(f)>=0&&v!==''?Number(v):v;});
 var mbVal=document.getElementById('maxLogSizeMB').value;
 d.maxLogSize=mbVal?parseInt(mbVal)*1024*1024:'';
 d.displayEnabled=document.getElementById('displayEnabled').checked;
-d.max6675Enabled=document.getElementById('max6675Enabled').checked;
 d.lowTempEnableW=document.getElementById('lowTempEnableW').checked;
 d.lowTempEnableAux=document.getElementById('lowTempEnableAux').checked;
 d.scrollCompressor=document.getElementById('scrollCompressor').checked;
@@ -848,39 +836,6 @@ st.textContent=r.message||r.error||'Saved';
 st.style.color=r.error?'#e74c3c':'#27ae60';
 }).catch(e=>{st.textContent='Error: '+e;st.style.color='#e74c3c';});
 }
-var _maxPinIds=['max6675Clk','max6675Cs','max6675Do'];
-var _maxPins=[3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,38,39,40,41,42,43,44,45,46,47,48];
-var _jtagMap={39:'TCK',40:'TDO',41:'TDI',42:'TMS'};
-var _usedPins={};
-function _pinLabel(p){var s='GPIO '+p;if(_jtagMap[p])s+=' ('+_jtagMap[p]+')';if(_usedPins[p])s+=' ['+_usedPins[p]+']';return s;}
-function initMaxPins(){
-_maxPinIds.forEach(function(id){
-var sel=document.getElementById(id);
-var cur=sel.value;
-sel.innerHTML='';
-_maxPins.forEach(function(p){var o=document.createElement('option');o.value=p;o.textContent=_pinLabel(p);sel.appendChild(o);});
-if(cur)sel.value=cur;
-});
-}
-function syncMaxPins(){
-var vals={};
-_maxPinIds.forEach(function(id){vals[id]=document.getElementById(id).value;});
-_maxPinIds.forEach(function(id){
-var sel=document.getElementById(id);
-var others=_maxPinIds.filter(function(x){return x!==id;}).map(function(x){return vals[x];});
-for(var i=0;i<sel.options.length;i++){
-var v=sel.options[i].value;
-sel.options[i].disabled=others.indexOf(v)>=0||!!_usedPins[parseInt(v)];
-}
-});
-}
-initMaxPins();
-fetch('/pins?format=json').then(function(r){return r.json();}).then(function(d){
-var ins=d.inputs||[];for(var i=0;i<ins.length;i++)_usedPins[ins[i].pin]=ins[i].name;
-var outs=d.outputs||[];for(var i=0;i<outs.length;i++)_usedPins[outs[i].pin]=outs[i].name;
-_usedPins[8]='SDA';_usedPins[9]='SCL';_usedPins[10]='SD SS';_usedPins[11]='SD MOSI';_usedPins[12]='SD SCK';_usedPins[13]='SD MISO';_usedPins[19]='USB D-';_usedPins[20]='USB D+';_usedPins[21]='OneWire';
-initMaxPins();syncMaxPins();
-});
 function formatSD(){
 if(!window.confirm('This will erase logs and temp history from the SD card. Credentials and certs are preserved. Continue?'))return;
 var st=document.getElementById('sdFormatStatus');

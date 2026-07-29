@@ -172,14 +172,6 @@ String Config::generateRandomPassword(uint8_t length) {
     return result;
 }
 
-void Config::setI2CDevice(const String& addr, const String& driver, const String& role) {
-    if (driver.length() == 0) {
-        _i2cDevices.erase(addr);
-    } else {
-        _i2cDevices[addr] = {driver, role};
-    }
-}
-
 void Config::setAdminPassword(const String& plaintext) {
     _adminPasswordHash = plaintext;
 }
@@ -564,15 +556,6 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     proj.displayEnabled = doc["display"]["enabled"] | true;
     Serial.printf("Read display: interval=%us enabled=%d\n", proj.displayPageIntervalSec, proj.displayEnabled);
 
-    // Load MAX6675 SPI thermocouple settings
-    JsonObject max6675Obj = doc["sensors"]["max6675"];
-    proj.max6675Clk = max6675Obj["clk"] | 39;
-    proj.max6675Cs = max6675Obj["cs"] | 40;
-    proj.max6675Do = max6675Obj["do"] | 41;
-    proj.max6675Enabled = max6675Obj["enabled"] | true;
-    Serial.printf("Read MAX6675: clk=%d cs=%d do=%d enabled=%d\n",
-                  proj.max6675Clk, proj.max6675Cs, proj.max6675Do, proj.max6675Enabled);
-
     // Load safe mode flag
     proj.forceSafeMode = doc["safeMode"]["force"] | false;
 
@@ -627,19 +610,6 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
     String adminPwStr = (adminPw != nullptr && strlen(adminPw) > 0) ? String(adminPw) : "";
     _adminPasswordHash = decryptPassword(adminPwStr);
     Serial.printf("Admin password: %s\n", _adminPasswordHash.length() > 0 ? "set" : "not set");
-
-    // Load I2C device assignments
-    _i2cDevices.clear();
-    JsonObject i2cObj = doc["sensors"]["i2c"];
-    for (JsonPair kv : i2cObj) {
-        String addr = kv.key().c_str();
-        String driver = kv.value()["driver"] | String("");
-        String role = kv.value()["role"] | String("");
-        if (driver.length() > 0) {
-            _i2cDevices[addr] = {driver, role};
-            Serial.printf("I2C device %s: driver=%s role=%s\n", addr.c_str(), driver.c_str(), role.c_str());
-        }
-    }
 
     // Load sensor display ranges
     _sensorRanges.clear();
@@ -848,21 +818,6 @@ bool Config::saveConfiguration(const char* filename, TempSensorMap& config, Proj
         temp["name"] = mp.first;
     }
 
-    // Write I2C device assignments
-    JsonObject i2cObj = sensors["i2c"].to<JsonObject>();
-    for (auto& kv : _i2cDevices) {
-        JsonObject dev = i2cObj[kv.first].to<JsonObject>();
-        dev["driver"] = kv.second.driver;
-        dev["role"] = kv.second.role;
-    }
-
-    // Write MAX6675 SPI thermocouple settings
-    JsonObject max6675Obj = sensors["max6675"].to<JsonObject>();
-    max6675Obj["clk"] = proj.max6675Clk;
-    max6675Obj["cs"] = proj.max6675Cs;
-    max6675Obj["do"] = proj.max6675Do;
-    max6675Obj["enabled"] = proj.max6675Enabled;
-
     // Write sensor display ranges
     JsonObject rangesObj = sensors["ranges"].to<JsonObject>();
     for (auto& kv : _sensorRanges) {
@@ -1050,21 +1005,6 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
         temp["last-value"] = mp.second->getValue();
         temp["name"] = mp.first;
     }
-
-    // Write I2C device assignments
-    JsonObject i2cObj = sensors["i2c"].to<JsonObject>();
-    for (auto& kv : _i2cDevices) {
-        JsonObject dev = i2cObj[kv.first].to<JsonObject>();
-        dev["driver"] = kv.second.driver;
-        dev["role"] = kv.second.role;
-    }
-
-    // Write MAX6675 SPI thermocouple settings
-    JsonObject max6675Upd = sensors["max6675"].to<JsonObject>();
-    max6675Upd["clk"] = proj.max6675Clk;
-    max6675Upd["cs"] = proj.max6675Cs;
-    max6675Upd["do"] = proj.max6675Do;
-    max6675Upd["enabled"] = proj.max6675Enabled;
 
     // Write sensor display ranges
     JsonObject rangesUpd = sensors["ranges"].to<JsonObject>();

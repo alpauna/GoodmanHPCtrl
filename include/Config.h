@@ -9,12 +9,6 @@
 #include "mbedtls/base64.h"
 #include "mbedtls/gcm.h"
 
-struct I2CDeviceInfo {
-    String driver;  // e.g. "MCP9600"
-    String role;    // e.g. "LIQUID_TEMP"
-};
-typedef std::map<String, I2CDeviceInfo> I2CDeviceMap;
-
 struct SensorRange {
     float min;
     float max;
@@ -65,11 +59,6 @@ struct ProjectInfo {
     // Display settings
     uint32_t displayPageIntervalSec; // OLED page flip interval (3-60, default 10)
     bool displayEnabled;             // OLED display on/off (default true)
-    // MAX6675 SPI thermocouple settings
-    uint8_t max6675Clk;              // SPI CLK pin (default GPIO 39)
-    uint8_t max6675Cs;               // SPI CS pin (default GPIO 40)
-    uint8_t max6675Do;               // SPI DO/MISO pin (default GPIO 41)
-    bool max6675Enabled;             // Enable MAX6675 sensor (default true)
     // Safe mode
     bool forceSafeMode;              // One-shot flag: force safe mode on next boot (cleared after entering)
     // System identity
@@ -159,11 +148,6 @@ class Config {
     static String decryptPassword(const String& encrypted);
     static String generateRandomPassword(uint8_t length = 8);
 
-    // I2C device assignments
-    I2CDeviceMap& getI2CDevices() { return _i2cDevices; }
-    const I2CDeviceMap& getI2CDevices() const { return _i2cDevices; }
-    void setI2CDevice(const String& addr, const String& driver, const String& role);
-
     // Sensor display ranges (min/max for arc gauges)
     SensorRangeMap& getSensorRanges() { return _sensorRanges; }
     const SensorRangeMap& getSensorRanges() const { return _sensorRanges; }
@@ -189,9 +173,6 @@ class Config {
 
     // Callback for discovering temp sensors when saving new config
     TempSensorDiscoveryCallback _tempDiscoveryCb;
-
-    // I2C device assignments (persisted in sensors.i2c JSON section)
-    I2CDeviceMap _i2cDevices;
 
     // Sensor display ranges (persisted in sensors.ranges JSON section)
     SensorRangeMap _sensorRanges;

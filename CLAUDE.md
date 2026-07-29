@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Embedded HVAC controller for Goodman heatpumps (cooling, heating, defrost modes) running on ESP32. Controls 4 relay outputs (FAN, CNT, W, RV) based on 4 input signals (LPS, DFT, Y, O), up to 6 OneWire temperature sensors (COMPRESSOR, SUCTION, AMBIENT, CONDENSER, LIQUID, VAPOR), and 1 MCP9600 I2C thermocouple (LIQUID fallback). Provides a REST API, WebSocket, MQTT, and CAN bus interface for remote monitoring and control.
+Embedded HVAC controller for Goodman heatpumps (cooling, heating, defrost modes) running on ESP32. Controls 4 relay outputs (FAN, CNT, W, RV) based on 4 input signals (LPS, DFT, Y, O), and up to 6 OneWire temperature sensors (COMPRESSOR, SUCTION, AMBIENT, CONDENSER, LIQUID, VAPOR). Provides a REST API, WebSocket, MQTT, and CAN bus interface for remote monitoring and control.
 
 ## Build Commands
 
@@ -85,7 +85,7 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
 - **GoodmanHP** (`GoodmanHP.h/cpp`): Central controller managing input/output pin maps, temperature sensors, and heat pump state machine. Contains:
   - `std::map<String, InputPin*>` for input pins (LPS, DFT, Y, O)
   - `std::map<String, OutPin*>` for output pins (FAN, CNT, W, RV)
-  - `TempSensorMap` for temperature sensors (COMPRESSOR, SUCTION, AMBIENT, CONDENSER, LIQUID, VAPOR via OneWire; LIQUID also supported via MCP9600 I2C thermocouple fallback)
+  - `TempSensorMap` for temperature sensors (COMPRESSOR, SUCTION, AMBIENT, CONDENSER, LIQUID, VAPOR, all via OneWire)
   - Pin methods: `addInput()`, `addOutput()`, `getInput()`, `getOutput()`, `getInputMap()`, `getOutputMap()`
   - Temp methods: `addTempSensor()`, `getTempSensor()`, `getTempSensorMap()`, `clearTempSensors()`
   - State machine: OFF, COOL (Y+O active), HEAT (Y active only), DEFROST
@@ -129,10 +129,10 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
   - Public methods: `getHeatRuntimeMs()`, `setHeatRuntimeMs()`, `resetHeatRuntime()`, `isSoftwareDefrostActive()`, `restoreSoftwareDefrost()`, `isDefrostTransitionActive()`, `isDefrostCntPendingActive()`, `isDefrostExitingActive()`, `getDefrostTransitionRemainingMs()`, `getDefrostCntPendingRemainingMs()`, `isLPSFaultActive()`, `setLPSFaultCallback()`, `isLowTempActive()`, `isLowTempPendingEntry()`, `isLowTempPendingExit()`, `getLowTempPendingRemainingMs()`, `setLowTempThreshold()`, `getLowTempThreshold()`, `setColdMaxTempF()`, `getColdMaxTempF()`, `setWarmMinTempF()`, `getWarmMinTempF()`, `setDefrostBand()`, `getDefrostBand()`, `getActiveDefrostBand()`, `getActiveDefrostBandString()`, `getActiveRuntimeThresholdMs()`, `getActiveMinRuntimeMs()`, `getActiveExitTempF()`, `isStateValidating()`, `getStateValidationRemainingMs()`, `setStateValidationMs()`, `getStateValidationMs()`, `getSubcoolingF()`, `isSubcoolingValid()`, `setCANMode()`, `isCANMode()`, `setCANInputState()`, `getCANLastRxTick()`
 - **OutPin** (`OutPin.h/cpp`): Output relay control with configurable activation delay, PWM support, on/off counters, and callback on state change. Delay is implemented via a TaskScheduler task.
 - **InputPin** (`InputPin.h/cpp`): Digital/analog input with configurable pull-up/down, ISR-based interrupt detection, and confirmed-state debouncing. `isActive()` returns the debounced/validated state (not live GPIO). On pin change: ISR queues event → `_tGetInputs` (500ms) reads live GPIO and starts a configurable delay task (default 10s) → after delay, GPIO is re-read to validate the pin is still in the expected state. Mismatches are discarded as false triggers and logged as warnings. Both activation and deactivation go through the full delay. Configurable via `heatpump.inputDelay.ms` (0–60s, live). Methods: `readLiveState()` (bypass debounce), `setDelay(ms)`, `getDelay()`, `setPendingState()`.
-- **TempSensor** (`TempSensor.h/cpp`): Temperature sensor wrapper with encapsulated state and callbacks. Supports OneWire (via `update()`) and external sources like MCP9600 I2C thermocouple (via `updateValue()`):
+- **TempSensor** (`TempSensor.h/cpp`): Temperature sensor wrapper with encapsulated state and callbacks. All 6 roles are plain OneWire (DS18B20) sensors, read via `update(DallasTemperature*, threshold)`.
   - Properties: `description`, `deviceAddress`, `value`, `previous`, `valid`
   - Callbacks: `setUpdateCallback()`, `setChangeCallback()`
-  - Methods: `setMCP9600(Adafruit_MCP9600*)` assigns I2C thermocouple source; `update(DallasTemperature*, threshold)` reads from MCP9600 if set, otherwise from OneWire; `updateValue(float tempF, threshold)` accepts a raw Fahrenheit value directly. All fire change callback if delta exceeds threshold
+  - Methods: `updateValue(float tempF, threshold)` accepts a raw Fahrenheit value directly from a non-OneWire source — used by `GoodmanHP`'s ambient-temperature fallback chain (weather data / ESP32 internal die temp), not by `TempSensor` itself. Fires change callback if delta exceeds threshold
   - Static helpers:
     - `addressToString(uint8_t*)` — Convert DeviceAddress to hex string
     - `stringToAddress(String&, uint8_t*)` — Parse hex string to DeviceAddress
@@ -146,7 +146,7 @@ Global `operator new`/`delete` are overridden in `src/PSRAMAllocator.cpp` to rou
 Inputs: LPS=GPIO15, DFT=GPIO16, Y=GPIO17, O=GPIO18
 Outputs: FAN=GPIO4, CNT=GPIO5 (3s delay), W=GPIO6, RV=GPIO7
 OneWire bus: GPIO21
-I2C: SDA=GPIO8, SCL=GPIO9 — MCP9600 thermocouple amplifier at 0x67 (LIQUID_TEMP)
+I2C: SDA=GPIO8, SCL=GPIO9 — SSD1306 OLED at 0x3C, ADS1115 current-sensing ADC at 0x48
 CAN bus: TX=GPIO38, RX=GPIO14 — ESP32 TWAI at 250 kbps via SN65HVD230DR transceiver (enabled via `can.enabled` config)
 
 ### Networking
