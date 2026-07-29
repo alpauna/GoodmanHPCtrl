@@ -135,7 +135,11 @@ bodge wire that bypasses `H3` entirely:
   (`39`/`40`/`41`) freed by tonight's MAX6675 removal (formerly
   CLK/CS/DO). Not a strapping pin, not PSRAM/flash-reserved, and already
   proven safe on this exact board — it carried real SPI traffic for
-  months without any boot-mode issues.
+  months without any boot-mode issues. No new solder point needed here:
+  the main board schematic already has a populated JTAG debug header
+  (`3.3V`/`MTDO`/`MTDI`/`MTCK`/`MTMS`) that breaks `GPIO39`/`MTCK` out to
+  a proper pin — a single-pin female header socket onto that connector's
+  `MTCK` position is the whole connection on this end.
 - **Wiring**: `GPIO39` as `OUTPUT_OPEN_DRAIN`, configured once in
   `setup()`. `digitalWrite(HIGH)` releases the pin (high-Z), letting
   `R3`'s existing 100kΩ pull-up hold `RESET#`/`SYNC#` at its normal idle
