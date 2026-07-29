@@ -157,12 +157,48 @@ bodge wire that bypasses `H3` entirely:
 matching the daughter board's own 2-pin `ZX`/`AGND` header. `ZX` originates
 on the triacs page at `U33` (`AT3H4B-CuH-S`), an opto-isolated zero-cross
 detector sensing the 24VAC line directly (isolated ground domain
-`E-GND`), with its output pulled up to 3.3V through `R28` (33kΩ) — a
-clean, isolated 3.3V logic-level square wave. **Confirmed destination**:
-this signal does *not* go to an ESP32 GPIO — it's wired straight into
-`AIN2P` on the daughter board's ADC (`AIN2N` tied to `AGND`), so the
-ADS131M04 samples it as a 4th channel in the same synchronized frame as
-the current channels. No interrupt, no GPIO, no separate timing domain.
+`E-GND`), with its output pulled up to 3.3V through `R28` (33kΩ) —
+**inverse logic**: the phototransistor conducts and pulls `ZX` toward
+ground whenever there's enough AC amplitude to drive it, releasing back
+toward the 3.3V rail only in the brief window around each zero crossing
+(confirmed on scope: narrow ~120Hz upward pulses on an otherwise-low
+baseline, matching two release windows per 60Hz cycle). Destination:
+wired into `AIN2P` on the daughter board's ADC (`AIN2N` tied to `AGND`),
+so the ADS131M04 samples it as a 4th channel in the same synchronized
+frame as the current channels. No interrupt, no GPIO, no separate timing
+domain.
+
+**Needs a voltage divider — not a direct connection.** Originally assumed
+to be a "clean 3.3V logic signal" safe to feed straight into `AIN2P`; live
+scope measurement (right at the ADC pin) showed peaks up to `+2.94V`,
+which is nearly 2.5x the ADS131M04's `±1.2V` full-scale at gain=1. Overdriving
+the front-end that far doesn't just clip cleanly — it produced an
+apparent full-negative-scale reading on every cycle in addition to the
+expected positive clip, even though the real analog signal (confirmed on
+two independent scope captures, at two different drive amplitudes) never
+goes negative at all. Likely modulator/filter saturation from the severe
+overdrive, not a wiring fault.
+
+Fix (divider only, not a ground-reference rework — see reasoning below):
+tap a divider off the existing `ZX` node, after `R28`, before `AIN2P`:
+- `R_top = 220kΩ` from `ZX` to a new tap point, `R_bottom = 110kΩ` from
+  the tap point to ground — a clean 1:3 ratio, `3.3V × 1/3 = 1.1V` at the
+  ADC even at the theoretical full-rail worst case (worse than the 2.94V
+  actually measured), leaving ~8% headroom under the 1.2V ceiling.
+- Total divider impedance (330kΩ) is deliberately ~10x `R28`'s 33kΩ, so
+  it doesn't meaningfully load the existing pull-up (~10% reduction in
+  achieved high level, acceptable).
+- **Considered and rejected**: also moving the phototransistor's ground
+  reference from `COM`/`GND` to `AGND` directly (eliminating even the
+  small offset `FB1`, ~0.1-0.16Ω, introduces between `COM` and `AGND`).
+  Rejected because it would require reworking both boards for a benefit
+  that doesn't matter here — this channel's job is detecting *when* an
+  edge happens (phase-angle timing), not measuring absolute voltage, and
+  a few tens of millivolts of offset doesn't shift edge-crossing timing
+  on a signal swinging most of a volt. Worth revisiting only if testing
+  turns up something that specifically points to needing it.
+- Not yet installed — divider only, existing `R28`/opto/ground wiring
+  unchanged.
 
 ## Firmware architecture (proposed)
 
