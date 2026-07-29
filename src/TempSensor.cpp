@@ -40,6 +40,14 @@ void TempSensor::setDeviceAddress(uint8_t* address) {
     }
 }
 
+bool TempSensor::hasAddress() const {
+    if (_deviceAddress == nullptr) return false;
+    for (uint8_t i = 0; i < sizeof(DeviceAddress); i++) {
+        if (_deviceAddress[i] != 0) return true;
+    }
+    return false;
+}
+
 void TempSensor::setValue(float value) {
     _previous = _value;
     _value = value;
@@ -49,6 +57,14 @@ void TempSensor::setValue(float value) {
 void TempSensor::update(DallasTemperature* sensors, float threshold) {
     // OneWire DallasTemperature path
     if (sensors == nullptr || _deviceAddress == nullptr) {
+        return;
+    }
+
+    // All-zero address: never assigned a real device (e.g. an orphaned config
+    // entry). Treat as permanently disconnected rather than sending a MATCH
+    // ROM for an address that can never belong to real hardware.
+    if (!hasAddress()) {
+        _valid = false;
         return;
     }
 

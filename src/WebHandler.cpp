@@ -1017,8 +1017,15 @@ void WebHandler::setupRoutes() {
                 }
             }
 
-            // Re-insert any unassigned sensors with their original description
+            // Re-insert any unassigned sensors with their original description.
+            // Drop (and free) any orphan with no real device address instead —
+            // it can never read anything, so there's no reason to keep
+            // resurrecting it on every save.
             for (auto& kv : addrToSensor) {
+                if (!kv.second->hasAddress()) {
+                    delete kv.second;
+                    continue;
+                }
                 String desc = kv.second->getDescription();
                 if (desc.length() > 0 && tempMap.count(desc) == 0) {
                     tempMap[desc] = kv.second;

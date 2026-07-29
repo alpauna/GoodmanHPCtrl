@@ -21,6 +21,11 @@ class TempSensor {
     float getValue() const { return _value; }
     float getPrevious() const { return _previous; }
     bool isValid() const { return _valid; }
+    // False for an all-zero device address — family code 0x00 is never a real
+    // Dallas/Maxim 1-Wire device, so this can only be a placeholder that was
+    // never assigned a physical sensor (e.g. an orphaned config entry left
+    // over from a since-removed non-OneWire source).
+    bool hasAddress() const;
 
     // Setters
     void setDescription(const String& description) { _description = description; }
