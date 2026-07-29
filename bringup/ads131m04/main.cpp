@@ -24,6 +24,13 @@ static const int PIN_SCLK = 1;   // ESP32 SCK  -> ADC SCLK
 static const int PIN_CS   = 45;  // ESP32 GPIO -> ADC CS# (active low, manual toggle)
 static const int PIN_DRDY = 46;  // ADC DRDY# -> ESP32 GPIO (active low, push-pull, no pull-up needed)
 
+// RESET#/SYNC# bodge wire (not on H3 -- H3 is a fixed 7-pin connector).
+// GPIO39 is one of the 3 pins freed by tonight's MAX6675 removal. Wired
+// open-drain: R3 (100k, on the daughter board) pulls this high/idle by
+// default, this pin only ever drives it low to assert a reset. See
+// "RESET# bodge wire" in the design doc.
+static const int PIN_RESET = 39;
+
 // Conservative bring-up clock. ADS131M04 supports much faster (see
 // datasheet timing table); no reason to push it until basic comms work.
 static const uint32_t SPI_HZ = 1000000;
@@ -88,6 +95,26 @@ static uint32_t readRegister(uint8_t addr) {
     return resp[0];
 }
 
+// Pulses RESET#/SYNC# low long enough to force a real device reset, not a
+// SYNC pulse -- datasheet minimum is 2048 tCLKIN (~250us at 8.192MHz);
+// 10ms gives 40x margin. Re-reads ID/STATUS afterward so a bodge-wire test
+// can confirm the ADC actually came back.
+static void forceReset() {
+    Serial.println("Asserting RESET# low for 10ms...");
+    digitalWrite(PIN_RESET, LOW);
+    delay(10);
+    digitalWrite(PIN_RESET, HIGH);  // open-drain release; R3 pulls it back up
+    delay(10);  // tPOR-equivalent settling, same margin as cold boot
+
+    uint32_t id = readRegister(0x00);
+    uint32_t status = readRegister(0x01);
+    Serial.printf("Post-reset ID register:     0x%06lX\n", (unsigned long)id);
+    Serial.printf("Post-reset STATUS register: 0x%06lX\n", (unsigned long)status);
+    Serial.println("Compare against the pre-reset values printed at boot --");
+    Serial.println("should read the same reset-default STATUS, and DRDY#");
+    Serial.println("toggling below should resume within a second or two.");
+}
+
 // ADC data is 24-bit two's complement, left-justified in the 24-bit word
 // (same left-justified convention as commands -- see datasheet section
 // referenced above). Sign-extend from bit 23 to get a real signed value.
@@ -112,6 +139,11 @@ void setup() {
     digitalWrite(PIN_CS, HIGH);
     pinMode(PIN_DRDY, INPUT);
 
+    // Open-drain: HIGH releases the pin (R3 pulls RESET#/SYNC# up), LOW
+    // actively asserts it. Set HIGH first so there's no glitch-low moment.
+    pinMode(PIN_RESET, OUTPUT_OPEN_DRAIN);
+    digitalWrite(PIN_RESET, HIGH);
+
     SPI.begin(PIN_SCLK, PIN_DOUT, PIN_DIN, PIN_CS);
 
     delay(10);  // let the ADC finish its power-on reset before talking to it
@@ -126,10 +158,14 @@ void setup() {
     Serial.println("with nothing connected on AIN0-3/ZX.");
 
     lastDrdyState = digitalRead(PIN_DRDY);
-    Serial.println("Watching DRDY# for toggling...");
+    Serial.println("Watching DRDY# for toggling... (send 'r' to force a RESET# pulse)");
 }
 
 void loop() {
+    if (Serial.available() && Serial.read() == 'r') {
+        forceReset();
+    }
+
     int s = digitalRead(PIN_DRDY);
     if (s != lastDrdyState) {
         drdyToggleCount++;

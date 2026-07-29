@@ -121,6 +121,34 @@ No pin sharing on this bus: `SW1` → `RESET`/`CHIP_PU`, `SW2` → `GPIO0`
 this board) — both confirmed unrelated to `GPIO1`/`GPIO2`/`GPIO45`/
 `GPIO46`/`GPIO42`. All 5 signal pins on `H3` are dedicated to this bus.
 
+### RESET# bodge wire
+
+`H3` is a fixed 7-position connector already on the fabricated main
+board — adding an 8th conductor for `RESET#`/`SYNC#` isn't possible
+through it as-is. Instead of waiting for a board respin, run a separate
+bodge wire that bypasses `H3` entirely:
+
+- **Tap point (daughter board)**: `R3`'s non-3.3V pad — the side tied to
+  the `RESET#`/`SYNC#` net and `U3` pin 10 (`SYNC#/RESET#`). Easier to
+  solder to than the QFN pin directly, and doesn't disturb `R3` itself.
+- **Destination (main board)**: `GPIO39` — one of the three pins
+  (`39`/`40`/`41`) freed by tonight's MAX6675 removal (formerly
+  CLK/CS/DO). Not a strapping pin, not PSRAM/flash-reserved, and already
+  proven safe on this exact board — it carried real SPI traffic for
+  months without any boot-mode issues.
+- **Wiring**: `GPIO39` as `OUTPUT_OPEN_DRAIN`, configured once in
+  `setup()`. `digitalWrite(HIGH)` releases the pin (high-Z), letting
+  `R3`'s existing 100kΩ pull-up hold `RESET#`/`SYNC#` at its normal idle
+  state — this is the default/safe state, including before `setup()`
+  ever runs. `digitalWrite(LOW)` actively pulls `RESET#`/`SYNC#` low to
+  assert a hardware reset. `R3` stays in place; nothing on the daughter
+  board changes.
+- **Not yet done**: this is a documented plan, not yet wired. Bring-up
+  sketch support (`bringup/ads131m04/main.cpp`) is ready — send `r` over
+  Serial to pulse `GPIO39` low and confirm the ADC recovers (`ID`/`STATUS`
+  re-read correctly, `DRDY#` resumes toggling) — so it's testable as soon
+  as the bodge wire is soldered.
+
 **`U43` (`ZX-PM2.54-1-2PY`, 2-pin: `ZX`/`AGND`)** — separate from `H3`,
 matching the daughter board's own 2-pin `ZX`/`AGND` header. `ZX` originates
 on the triacs page at `U33` (`AT3H4B-CuH-S`), an opto-isolated zero-cross
@@ -316,11 +344,19 @@ scaled-voltage channel:
    all. See "Zero-cross synchronized windows" above for the firmware
    implication (software edge-detection on a sampled channel, not a
    hardware interrupt).
-2. ~~**`RESET#`/`SYNC#` wiring**~~ — **resolved**: not part of `H3`'s 7
-   pins, pulled up to 3.3V via `R3` (100kΩ) on the daughter board only —
-   never reaches the ESP32. No software control over the physical pin;
-   an in-field reset would need a power cycle or the ADS131M0x's
-   SPI-based RESET command.
+2. ~~**`RESET#`/`SYNC#` wiring**~~ — **re-opened, then re-resolved**:
+   originally decided not worth wiring up (see "Main-board interconnect"
+   below for why a hardware reset line is worth having — the short
+   version: the SPI `RESET` command depends on the SPI link itself still
+   being coherent, which is exactly what can't be assumed if the ADC's
+   frame sync gets corrupted; a hardware pin doesn't have that
+   dependency, and it's the same lesson BUG-015 already taught about the
+   old I2C ADS1115 having no recovery path short of physically reseating
+   the board). Decision: **bodge wire to `GPIO39`**, not a new `H3`
+   connector pin — `H3` is a fixed 7-position part (`PM254V-11-07-H85`)
+   on the already-fabricated main board, so an 8th pin means a new PCB
+   revision, not something addable through the existing connector. See
+   "RESET# bodge wire" below for the concrete plan.
 3. ~~**ESP32 pin assignment**~~ — **resolved**, confirmed pin-for-pin off
    the live schematic (not inferred from PDF text): GPIO2 (DIN), GPIO42
    /`MTMS` (DOUT), GPIO1 (SCLK), GPIO46 (DRDY#), GPIO45 (CS#). No pin
