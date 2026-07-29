@@ -458,12 +458,12 @@ actually connecting the daughter board.
    crystal all checked out, `DOUT` open was the only thing left). Reflowing
    the chip fixed it — `ID`/`STATUS` now read non-zero and `DRDY#` toggles
    normally. Run it with `pio run -e ads131m04_bringup -t upload -t monitor`.
-3. **Then verify each channel is sampling something sane**: `AIN0`
-   (compressor), `AIN1` (fan), `AIN3` (heater) against a clamp meter, same
-   verification method used tonight for the ADS1115 calibration work —
-   and `AIN2` (zero-cross reference) should show a clean signal that
-   correlates with the actual line phase (sign changes roughly every
-   8.3ms at 60Hz).
+3. **Then verify each channel is sampling something sane**: `AIN2`
+   (zero-cross reference) — **done**, see "RESET# bodge wire" era work
+   below and the `ZX` divider fix. `AIN0` (compressor), `AIN1` (fan),
+   `AIN3` (heater) against a clamp meter, same verification method used
+   for the ADS1115 calibration work — **blocked on new CT clamps**, not
+   yet done.
 4. **No `SPICurrentADC`/`CurrentSensor` integration yet** — this pass is
    pure hardware bring-up (does the SPI bus work, do the channels read
    plausible values), not writing the production driver class described
@@ -478,3 +478,51 @@ actually connecting the daughter board.
    the bring-up sketch can't tell "connector wiggled" from "still fine,"
    that's a sign CRC/`DRDY#` watchdog logic needs to be added before the
    real driver is written, not after.
+
+## Next PCB revision requirements
+
+The current daughter board is bench-verified working (`AIN2`/`ZX` confirmed
+correct, `RESET#` confirmed working end-to-end), but only after several
+rounds of hand-rework: a cold `DOUT` solder joint from the original
+assembly (see step 2 above), a lifted via while cutting the `ZX` trace for
+the divider, and two bodge wires (`RESET#`, the `ZX` divider) that were
+never part of the original layout. Rather than continue patching this
+board, fold everything learned into a clean revision:
+
+1. **`RESET#`/`SYNC#` as a real connector pin**, not a bodge wire to the
+   main board's JTAG header. Either expand `H3`/`H1` to 8 pins, or add a
+   dedicated pin the way `ZX`/`AGND` already gets its own 2-pin `U43`/`U2`
+   header — either is better than routing a signal through a debug header
+   that happens to expose the right GPIO. Main-board side: `GPIO39`
+   (`MTCK`), confirmed safe and unused after the MAX6675 removal.
+2. **`ZX` voltage divider built into the layout**, not spliced onto the
+   trace afterward. Confirmed working values: `220kΩ` (top, from `ZX`) /
+   `100kΩ` (bottom, to local `AGND`) — a ~1:3.2 ratio, giving comfortable
+   headroom under the ADS131M04's `±1.2V` full-scale even at the
+   3.3V-rail worst case, without meaningfully loading `U33`'s `R28`
+   pull-up (divider impedance ~320kΩ, ~10x `R28`'s 33kΩ). Reference
+   `R_bottom` to the same local `AGND` net `AIN2N` already uses, not
+   `COM`/`GND` — keeps the whole `ZX` chain in one ground domain without
+   needing the bigger (rejected, see "RESET# bodge wire" era discussion)
+   rework of moving the phototransistor's own ground reference.
+3. **Via/pad robustness in the `ZX`/`AGND` area** — this specific area
+   is where a via got lifted during the divider rework on the current
+   board. Worth reviewing trace/via sizing and pad-to-trace transitions
+   here specifically, not just as a generic design rule.
+4. **CRC + `DRDY#` watchdog in the real driver** (not a layout change,
+   but a requirement that should ship with this revision rather than
+   be an afterthought) — per open question #6 above and the BUG-015
+   failure class: enable CRC on read/write, reject frames that fail it,
+   and watch that `DRDY#` keeps toggling at the expected cadence rather
+   than just toggling once at bring-up. A marginal connection on this
+   board already caused one silent-looking failure (`DOUT` open, caught
+   by chance because nothing responded at all rather than responding
+   with stale data) — don't rely on that being obvious every time.
+5. **Not required, but worth a note**: the elevated `DRDY#` toggle rate
+   (~1580/s vs. the ~110/s baseline) observed after fixing the lifted
+   via hasn't been explained — current working theory is noise pickup
+   on the open (no CT clamp yet) analog channels from the new bodge
+   wiring, worth confirming once real CT clamps are connected. If it
+   turns out to be a real `DRDY#`-line signal integrity issue rather
+   than open-channel noise, that's relevant input for this revision's
+   routing too.
