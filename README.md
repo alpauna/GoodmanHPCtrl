@@ -1211,6 +1211,57 @@ When the fault clears:
 
 - **AsyncTCP watchdog** — The `CONFIG_ASYNC_TCP_USE_WDT=0` build flag is required in `platformio.ini`. Without it, AsyncTCP subscribes its task to the ESP-IDF task watchdog (5s timeout). When the MQTT broker is slow or unreachable, the async_tcp task cannot reset the watchdog in time, causing a panic and reboot. This flag prevents the async_tcp task from registering with the watchdog.
 
+## Major Code Cleanups
+
+Removals of significant, previously-working subsystems, kept here since
+"why isn't X here anymore" is a different question than "what's broken"
+(the [Known Bugs](#known-bugs) section below).
+
+### HTTPS server removed
+
+The device ran a second, independently-maintained ESP-IDF
+`esp_https_server` implementation of `/config` and `/update` alongside the
+primary AsyncWebServer-based `WebHandler` — duplicated logic, duplicated
+attack surface, self-signed cert. Removed because deployment already runs
+behind an HTTPS-terminating reverse proxy (Pangolin, or equivalent — Caddy,
+nginx, Cloudflare Tunnel, Tailscale Funnel), which talks plain HTTP to the
+origin regardless of what the device itself offers — so the on-device
+HTTPS was providing no real protection while costing real maintenance.
+See [Network Access](#network-access) for the current plain-HTTP-behind-a-proxy
+model and the operational requirement that follows from it.
+
+### MAX6675 / MAX31850K / MCP9600 thermocouple support removed
+
+`LIQUID_TEMP` had a 3-tier thermocouple auto-detect fallback chain
+(`MAX6675 SPI > MAX31850K OneWire > MCP9600 I2C`) that existed on the
+assumption that R-32 refrigerant temperatures at the liquid-line
+measurement point could exceed the OneWire DS18B20 sensor's +125°C rating.
+That assumption doesn't hold: **R-32's critical temperature is ~78°C
+(172°F)** — above that it cannot exist as a liquid at any pressure, so the
+liquid line can never physically read above that ceiling while there's
+still liquid refrigerant there to measure, regardless of fault severity.
+DS18B20 has ~85°F of margin over a limit R-32 cannot cross. `LIQUID_TEMP`
+is now a plain 6th OneWire sensor, identical to the other 5 roles — plain
+1-Wire DS18B20 sensors are sufficient for every temperature role on this
+board; no thermocouple fallback is needed anywhere.
+
+Removing it also measurably reduced main-loop CPU load — the MCP9600 I2C
+read path (small in byte count, but MCP9600 can clock-stretch the I2C bus
+while mid-conversion, and the ESP32 `Wire` driver blocks the calling task
+for the full stretch) was costing significantly more than its nominal
+transaction size suggested:
+
+| | `cpuLoad1` | `loopItersPerSec` |
+|---|---|---|
+| Before (MCP9600/MAX6675 active) | ~42% | ~387 |
+| After (removed) | ~18% | ~1000 |
+
+MAX6675's software-SPI bit-bang read was checked directly against its
+library source and confirmed negligible on its own (~330µs once per 10s,
+a 0.003% duty cycle) — the CPU load drop is attributable to the MCP9600
+I2C path specifically, not MAX6675, and not any change to the ADS1115
+current-sensing ADC (unchanged, still I2C, unrelated to this cleanup).
+
 ## Known Bugs
 
 All bug reports in [`docs/bugs/`](docs/bugs/).
