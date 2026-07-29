@@ -59,6 +59,8 @@ select.dup{border-color:#e74c3c;background:#ffebee;}
 .msg.err{display:block;background:#ffcdd2;color:#c62828;}
 .info-text{font-size:11px;color:var(--text-muted);margin:4px 0;}
 .addr{font-family:monospace;font-size:12px;color:#4CAF50;}
+.adv-section{display:none;margin-top:8px;}
+.adv-section.show{display:block;}
 </style></head><body>
 <nav><span class='brand'>Goodman HP</span>
 <button class='hamburger' onclick='this.nextElementSibling.classList.toggle("open")'><span></span><span></span><span></span></button>
@@ -145,8 +147,68 @@ This will auto shut off after <span class='countdown' id='countdown'>30:00</span
 <tr><td class='pin'>GPIO 19</td><td>USB JTAG</td><td>D-</td></tr>
 <tr><td class='pin'>GPIO 20</td><td>USB JTAG</td><td>D+</td></tr>
 <tr><td class='pin'>GPIO 21</td><td>OneWire</td><td>Data</td></tr>
+<tr><td class='pin'>GPIO 1</td><td>SPI Current Sensor <span class='v-off'>(bring-up only)</span></td><td>SCLK</td></tr>
+<tr><td class='pin'>GPIO 2</td><td>SPI Current Sensor <span class='v-off'>(bring-up only)</span></td><td>DIN</td></tr>
+<tr><td class='pin'>GPIO 42</td><td>SPI Current Sensor <span class='v-off'>(bring-up only)</span></td><td>DOUT (also JTAG MTMS)</td></tr>
+<tr><td class='pin'>GPIO 45</td><td>SPI Current Sensor <span class='v-off'>(bring-up only)</span></td><td>CS# (also VDD_SPI strap)</td></tr>
+<tr><td class='pin'>GPIO 46</td><td>SPI Current Sensor <span class='v-off'>(bring-up only)</span></td><td>DRDY# (also boot-mode strap)</td></tr>
 </tbody>
 </table>
+<div class='info-text'>SPI Current Sensor pins (ADS131M04 daughter board) are wired and verified on the bench via a standalone bring-up sketch (<code>bringup/ads131m04/</code>) — not yet integrated into this firmware.</div>
+
+<h2>Advanced Pin Info <button class='btn-refresh' id='advToggleBtn' onclick='toggleAdv()'>Show</button></h2>
+<div id='advSection' class='adv-section'>
+
+<div id='strapWarnBox' class='warn-box active' style='margin-bottom:16px'>
+<b>GPIO45/46 double-booked:</b> both are ESP32-S3 hardware strapping pins
+(<code>VDD_SPI</code> voltage select and boot-mode/ROM-log select) sampled
+at reset, and both are also wired to the SPI current sensor's <code>CS#</code>
+and <code>DRDY#</code>. Currently harmless (bring-up firmware only, and the
+daughter board idles them correctly at boot), but this needs re-verifying
+once the real driver is integrated into this firmware — confirm the
+daughter board never pulls either line to a level that would force an
+unintended boot mode during power-on. <span class='v-off'>Checking eFuse state...</span>
+</div>
+
+<h3 style='font-size:13px;margin:12px 0 6px;color:var(--text)'>Chip Info</h3>
+<table>
+<thead><tr><th>Field</th><th>Value</th></tr></thead>
+<tbody id='chipInfoBody'><tr><td colspan='2' class='v-off'>Loading...</td></tr></tbody>
+</table>
+
+<h3 style='font-size:13px;margin:12px 0 6px;color:var(--text)'>Protected / Special-Purpose Pins</h3>
+<table>
+<thead><tr><th>GPIO</th><th>Function</th><th>eFuse State</th><th>Used For</th></tr></thead>
+<tbody id='protectedBody'>
+<tr><td class='pin'>0</td><td>Strapping</td><td class='v-off'>--</td><td>Boot mode select — unused by app</td></tr>
+<tr><td class='pin'>3</td><td>Strapping</td><td id='prot_3' class='v-off'>--</td><td>JTAG signal source select — <b>used for AUX output</b></td></tr>
+<tr><td class='pin'>19</td><td>USB</td><td id='prot_19' class='v-off'>--</td><td>USB_D- (USB-JTAG) — unused by app</td></tr>
+<tr><td class='pin'>20</td><td>USB</td><td id='prot_20' class='v-off'>--</td><td>USB_D+ (USB-JTAG) — unused by app</td></tr>
+<tr><td class='pin'>26-32</td><td>SPI Flash</td><td class='v-off'>--</td><td>QIO flash — do not use</td></tr>
+<tr><td class='pin'>33-37</td><td>Octal PSRAM</td><td class='v-off'>--</td><td>OPI PSRAM — do not use</td></tr>
+<tr><td class='pin'>39-41</td><td>JTAG</td><td id='prot_39' class='v-off'>--</td><td>MAX6675 SPI CLK/CS/DO (configurable)</td></tr>
+<tr><td class='pin'>42</td><td>JTAG</td><td class='v-off'>--</td><td>MTMS — SPI current sensor DOUT (bring-up only)</td></tr>
+<tr><td class='pin'>43</td><td>UART</td><td class='v-off'>--</td><td>U0TXD — serial console</td></tr>
+<tr><td class='pin'>44</td><td>UART</td><td class='v-off'>--</td><td>U0RXD — serial console</td></tr>
+<tr><td class='pin'>45</td><td>Strapping</td><td id='prot_45' class='v-off'>--</td><td>VDD_SPI voltage — SPI current sensor CS# (bring-up only)</td></tr>
+<tr><td class='pin'>46</td><td>Strapping</td><td class='v-off'>--</td><td>Boot mode / ROM log — SPI current sensor DRDY# (bring-up only)</td></tr>
+</tbody>
+</table>
+
+<h3 style='font-size:13px;margin:12px 0 6px;color:var(--text)'>eFuse-Changeable Pins</h3>
+<div class='info-text'>Burning these eFuses is <b>permanent</b> and reassigns pin behavior. None of these have been burned on this board.</div>
+<table>
+<thead><tr><th>GPIO</th><th>Current Use</th><th>eFuse</th><th>Effect</th><th>Status</th></tr></thead>
+<tbody id='efusePinBody'><tr><td colspan='5' class='v-off'>Loading...</td></tr></tbody>
+</table>
+
+<h3 style='font-size:13px;margin:12px 0 6px;color:var(--text)'>Burned eFuses</h3>
+<table>
+<thead><tr><th>eFuse</th><th>Value</th><th>Description</th></tr></thead>
+<tbody id='efuseBody'><tr><td colspan='3' class='v-off'>Loading...</td></tr></tbody>
+</table>
+
+</div>
 
 <div style='margin:12px 0'>
 <button class='btn-save' id='saveBtn' onclick='saveAssignments()'>Save Assignments</button>
@@ -568,11 +630,20 @@ function refresh(){
 
     // Current sensors
     var cur=d.current||{};
+    var curMv=d.currentMv||{};
     var curEl=document.getElementById('currentReadings');
     if(curEl){
       var ch='';
-      if(cur.COMPRESSOR_CURRENT!==undefined) ch+='<span class="cur-val">Comp: '+parseFloat(cur.COMPRESSOR_CURRENT).toFixed(1)+' A</span> ';
-      if(cur.FAN_CURRENT!==undefined) ch+='<span class="cur-val">Fan: '+parseFloat(cur.FAN_CURRENT).toFixed(1)+' A</span>';
+      if(cur.COMPRESSOR_CURRENT!==undefined){
+        ch+='<span class="cur-val">Comp: '+parseFloat(cur.COMPRESSOR_CURRENT).toFixed(1)+' A';
+        if(curMv.COMPRESSOR_CURRENT!==undefined) ch+=' <span class="v-off">('+parseFloat(curMv.COMPRESSOR_CURRENT).toFixed(1)+' mV RMS)</span>';
+        ch+='</span> ';
+      }
+      if(cur.FAN_CURRENT!==undefined){
+        ch+='<span class="cur-val">Fan: '+parseFloat(cur.FAN_CURRENT).toFixed(1)+' A';
+        if(curMv.FAN_CURRENT!==undefined) ch+=' <span class="v-off">('+parseFloat(curMv.FAN_CURRENT).toFixed(1)+' mV RMS)</span>';
+        ch+='</span>';
+      }
       curEl.innerHTML=ch||'<span style="color:var(--text-muted)">No current sensors</span>';
     }
 
@@ -583,6 +654,116 @@ function refresh(){
     document.getElementById('footer').textContent='Connection error';
   });
 }
+
+function toggleAdv(){
+  var sec=document.getElementById('advSection');
+  var show=!sec.classList.contains('show');
+  sec.classList.toggle('show',show);
+  document.getElementById('advToggleBtn').textContent=show?'Hide':'Show';
+  localStorage.setItem('pins-adv',show?'1':'0');
+  if(show&&!_efuseLoaded) loadEfuse();
+}
+
+var _efuseLoaded=false;
+function loadEfuse(){
+  var hdr=authHeader||getAuth();
+  if(!hdr) return;
+  fetch('/efuse',{headers:{'Authorization':hdr}}).then(function(r){return r.json();}).then(function(e){
+    _efuseLoaded=true;
+    authHeader=hdr;
+
+    var c=e.chip||{};
+    var ch='';
+    ch+='<tr><td>MAC</td><td class="v">'+(c.mac||'--')+'</td></tr>';
+    ch+='<tr><td>Model</td><td class="v">'+(c.model||'--')+' rev '+(c.revision!==undefined?c.revision:'--')+'</td></tr>';
+    ch+='<tr><td>Cores</td><td class="v">'+(c.cores!==undefined?c.cores:'--')+'</td></tr>';
+    ch+='<tr><td>CPU Freq</td><td class="v">'+(c.cpuFreqMHz!==undefined?c.cpuFreqMHz+' MHz':'--')+'</td></tr>';
+    ch+='<tr><td>Flash</td><td class="v">'+(c.flashSizeMB!==undefined?c.flashSizeMB+' MB':'--')+'</td></tr>';
+    ch+='<tr><td>PSRAM</td><td class="v">'+(c.psramSizeMB!==undefined?c.psramSizeMB+' MB':'--')+'</td></tr>';
+    document.getElementById('chipInfoBody').innerHTML=ch;
+
+    var pinRows=[
+      {gpio:'19, 20',use:'USB D-/D+',efuse:'DIS_USB_JTAG',effect:'Frees GPIO19/20 from USB-JTAG',field:'DIS_USB_JTAG'},
+      {gpio:'19, 20',use:'USB Serial JTAG',efuse:'DIS_USB_SERIAL_JTAG',effect:'Disables USB serial JTAG on GPIO19/20',field:'DIS_USB_SERIAL_JTAG'},
+      {gpio:'19, 20',use:'USB D-/D+',efuse:'USB_EXCHG_PINS',effect:'Swaps USB D- and D+ pin assignment',field:'USB_EXCHG_PINS'},
+      {gpio:'39-42',use:'JTAG pads',efuse:'DIS_PAD_JTAG',effect:'Permanently disables pad JTAG',field:'DIS_PAD_JTAG'},
+      {gpio:'39-42',use:'JTAG pads',efuse:'SOFT_DIS_JTAG',effect:'Software-disables JTAG (reversible via HMAC)',field:'SOFT_DIS_JTAG'},
+      {gpio:'3',use:'Strapping (JTAG), AUX output',efuse:'STRAP_JTAG_SEL',effect:'Enables GPIO3 strapping for JTAG source select',field:'STRAP_JTAG_SEL'},
+      {gpio:'45',use:'VDD_SPI strapping, SPI current sensor CS#',efuse:'VDD_SPI_FORCE',effect:'Forces VDD_SPI from eFuse, frees GPIO45',field:'VDD_SPI_FORCE'}
+    ];
+    var ph='';
+    for(var i=0;i<pinRows.length;i++){
+      var r=pinRows[i],burned=e[r.field];
+      ph+='<tr><td class="pin">'+r.gpio+'</td><td>'+r.use+'</td><td class="addr">'+r.efuse+'</td><td>'+r.effect+'</td><td class="v '+(burned?'v-on':'v-off')+'">'+(burned?'BURNED':'NOT SET')+'</td></tr>';
+    }
+    document.getElementById('efusePinBody').innerHTML=ph;
+
+    var secRows=[
+      {name:'DIS_USB_JTAG',desc:'Disable USB-JTAG debug'},
+      {name:'DIS_USB_SERIAL_JTAG',desc:'Disable USB serial JTAG'},
+      {name:'DIS_PAD_JTAG',desc:'Permanently disable pad JTAG (GPIO39-42)'},
+      {name:'SOFT_DIS_JTAG',desc:'Software-disable JTAG (can reenable via HMAC)'},
+      {name:'USB_EXCHG_PINS',desc:'Swap USB D-/D+ pins'},
+      {name:'USB_EXT_PHY_ENABLE',desc:'Enable external USB PHY'},
+      {name:'USB_PHY_SEL',desc:'USB PHY selection'},
+      {name:'STRAP_JTAG_SEL',desc:'Enable JTAG selection via GPIO3 strapping'},
+      {name:'VDD_SPI_XPD',desc:'VDD_SPI regulator power up'},
+      {name:'VDD_SPI_TIEH',desc:'VDD_SPI voltage: 0=1.8V, 1=3.3V'},
+      {name:'VDD_SPI_FORCE',desc:'Force VDD_SPI from eFuse (frees GPIO45)'},
+      {name:'PIN_POWER_SELECTION',desc:'GPIO33-37 power source: 0=VDD_SPI, 1=VDD3P3_CPU'},
+      {name:'DIS_USB',desc:'Disable USB OTG'},
+      {name:'DIS_DOWNLOAD_MODE',desc:'Disable UART download mode'},
+      {name:'DIS_DIRECT_BOOT',desc:'Disable direct boot from flash'},
+      {name:'SECURE_BOOT_EN',desc:'Enable secure boot'},
+      {name:'SPI_BOOT_CRYPT_CNT',desc:'Flash encryption counter (3 bits)'},
+      {name:'UART_PRINT_CONTROL',desc:'UART boot log: 0=on, 1=on if GPIO46 low, 2=on if GPIO46 high, 3=off'}
+    ];
+    var sh='';
+    for(var i=0;i<secRows.length;i++){
+      var r=secRows[i],v=e[r.name];
+      var isSet=(typeof v==='boolean')?v:(v>0);
+      sh+='<tr><td class="addr">'+r.name+'</td><td class="v '+(isSet?'v-on':'v-off')+'">'+(typeof v==='boolean'?(v?'BURNED':'NOT SET'):v)+'</td><td>'+r.desc+'</td></tr>';
+    }
+    document.getElementById('efuseBody').innerHTML=sh;
+
+    var p3=document.getElementById('prot_3');
+    if(p3){if(e.STRAP_JTAG_SEL){p3.className='v v-on';p3.textContent='JTAG SEL ACTIVE';}else{p3.className='v-off';p3.textContent='Default';}}
+    var p19=document.getElementById('prot_19'),p20=document.getElementById('prot_20');
+    if(p19&&p20){
+      var usbFreed=e.DIS_USB_JTAG&&e.DIS_USB_SERIAL_JTAG;
+      if(usbFreed){p19.className=p20.className='v v-on';p19.textContent=p20.textContent='FREED (JTAG off)';}
+      else if(e.DIS_USB_JTAG){p19.className=p20.className='v';p19.textContent=p20.textContent='USB-JTAG off';}
+      else if(e.DIS_USB_SERIAL_JTAG){p19.className=p20.className='v';p19.textContent=p20.textContent='Serial JTAG off';}
+      else{p19.className=p20.className='v-off';p19.textContent=p20.textContent='Default';}
+      if(e.USB_EXCHG_PINS){p19.textContent+=' (swapped)';p20.textContent+=' (swapped)';}
+    }
+    var p39=document.getElementById('prot_39');
+    if(p39){if(e.DIS_PAD_JTAG){p39.className='v v-on';p39.textContent='FREED (JTAG off)';}else if(e.SOFT_DIS_JTAG){p39.className='v';p39.textContent='Soft disabled';}else{p39.className='v-off';p39.textContent='Default';}}
+    var p45=document.getElementById('prot_45');
+    if(p45){if(e.VDD_SPI_FORCE){p45.className='v v-on';p45.textContent='FREED (VDD '+(e.VDD_SPI_TIEH?'3.3V':'1.8V')+')';}else{p45.className='v-off';p45.textContent='Default';}}
+
+    var sw=document.getElementById('strapWarnBox');
+    if(sw){
+      if(e.VDD_SPI_FORCE){
+        sw.className='warn-box active';
+        sw.style.background='#e8f5e9';sw.style.color='#2e7d32';sw.style.borderColor='#66bb6a';
+        sw.innerHTML="<b>GPIO45 is already freed:</b> <code>VDD_SPI_FORCE</code> is burned on this board, so GPIO45 is not sampled as a strap at reset — safe to use for the SPI current sensor's CS# as-is. <b>GPIO46</b> (DRDY#) has no equivalent eFuse here and is still an active boot-mode/ROM-log strap — still worth re-verifying once the real driver is integrated, to confirm the daughter board never pulls it to a level that forces an unintended boot mode.";
+      } else {
+        sw.className='warn-box active';
+        sw.innerHTML="<b>GPIO45/46 double-booked:</b> both are ESP32-S3 hardware strapping pins (<code>VDD_SPI</code> voltage select and boot-mode/ROM-log select) sampled at reset, and both are also wired to the SPI current sensor's <code>CS#</code> and <code>DRDY#</code>. Neither is freed via eFuse on this board — worth re-verifying once the real driver is integrated into this firmware, to confirm the daughter board never pulls either line to a level that forces an unintended boot mode during power-on.";
+      }
+    }
+  }).catch(function(e){
+    document.getElementById('chipInfoBody').innerHTML='<tr><td colspan="2" class="v-off">Failed to load</td></tr>';
+  });
+}
+(function(){
+  if(localStorage.getItem('pins-adv')==='1'){
+    document.getElementById('advSection').classList.add('show');
+    document.getElementById('advToggleBtn').textContent='Hide';
+    loadEfuse();
+  }
+})();
 
 var _pollTimer;
 function startPolling(ms){if(_pollTimer)clearInterval(_pollTimer);_pollTimer=setInterval(refresh,ms);}

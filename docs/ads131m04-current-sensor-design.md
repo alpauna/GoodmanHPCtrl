@@ -366,17 +366,22 @@ scaled-voltage channel:
 ## Next steps
 
 Main board is now healthy (D1 replaced, power supply confirmed stable,
-firmware flashed, WiFi/MQTT/config verified) — this is what unblocks
-actually connecting the daughter board. Test plan for the next session:
+firmware flashed, WiFi/MQTT/config verified) — this is what unblocked
+actually connecting the daughter board.
 
-1. **Physically connect the daughter board** to `H3` (7-pin: GND, 3.3V,
-   GPIO2/DIN, GPIO42/DOUT, GPIO1/SCLK, GPIO46/DRDY#, GPIO45/CS#) and `U43`
-   (2-pin: `ZX`/`AGND`).
-2. **Minimal SPI bring-up sketch first** — nothing else. Read the
-   ADS131M04's `ID`/`STATUS` register (`RREG` command, see "SPI protocol"
-   above) over SPI and confirm a sane response, and confirm `DRDY#`
-   actually toggles once conversions start. Don't skip straight to full
-   current sensing — confirm the bus talks at all first.
+1. ~~**Physically connect the daughter board**~~ — **done**: connected to
+   `H3` (7-pin: GND, 3.3V, GPIO2/DIN, GPIO42/DOUT, GPIO1/SCLK, GPIO46/DRDY#,
+   GPIO45/CS#) and `U43` (2-pin: `ZX`/`AGND`).
+2. ~~**Minimal SPI bring-up sketch first**~~ — **done**, `bringup/ads131m04/main.cpp`
+   (standalone PlatformIO environment `ads131m04_bringup`, fully separate
+   binary from the main firmware — see `platformio.ini`). First pass came
+   back with `ID`/`STATUS` reading `0x000000` and `DRDY#` stuck low despite
+   `CS#` and `SCLK` both scoping clean at the ADC — traced with a scope,
+   pin by pin, to a bad solder joint on `DOUT` (`U3` pin 12 → `H3` pin 4 is
+   a direct, unbuffered trace per the schematic, so once `CS#`/`SCLK`/the
+   crystal all checked out, `DOUT` open was the only thing left). Reflowing
+   the chip fixed it — `ID`/`STATUS` now read non-zero and `DRDY#` toggles
+   normally. Run it with `pio run -e ads131m04_bringup -t upload -t monitor`.
 3. **Then verify each channel is sampling something sane**: `AIN0`
    (compressor), `AIN1` (fan), `AIN3` (heater) against a clamp meter, same
    verification method used tonight for the ADS1115 calibration work —

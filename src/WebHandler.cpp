@@ -6,6 +6,8 @@
 #include "TempHistory.h"
 #include "OtaUtils.h"
 #include <HTTPClient.h>
+#include "esp_efuse.h"
+#include "esp_efuse_table.h"
 
 extern const char compile_date[];
 
@@ -787,9 +789,13 @@ void WebHandler::setupRoutes() {
 
             // Current sensors
             JsonObject currentObj = doc["current"].to<JsonObject>();
+            JsonObject currentMvObj = doc["currentMv"].to<JsonObject>();
             for (const auto& m : _hpController->getCurrentSensorMap()) {
-                if (m.second != nullptr && m.second->isValid())
+                if (m.second != nullptr && m.second->isValid()) {
                     currentObj[m.first] = serialized(String(m.second->getRMSAmps(), 1));
+                    // Raw ADC RMS reading (pre-ctRatio) — for calibration/diagnostics on the Pins page
+                    currentMvObj[m.first] = serialized(String(m.second->getRMSMillivolts(), 1));
+                }
             }
 
             JsonArray inputs = doc["inputs"].to<JsonArray>();
@@ -824,6 +830,53 @@ void WebHandler::setupRoutes() {
             return;
         }
         serveFile(request, "/pins.html");
+    });
+
+    // eFuse + chip-identity reference for the Pins page's "Advanced Pin Info"
+    // section. Read-only OTP fuse bits — same field set validated against
+    // this exact chip/qio_opi build config in the sibling AThermostat project.
+    _server.on("/efuse", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!checkAuth(request)) return;
+        JsonDocument doc;
+
+        JsonObject chip = doc["chip"].to<JsonObject>();
+        chip["mac"] = String((uint32_t)(ESP.getEfuseMac() >> 32), HEX) + String((uint32_t)ESP.getEfuseMac(), HEX);
+        chip["revision"] = ESP.getChipRevision();
+        chip["model"] = ESP.getChipModel();
+        chip["cores"] = ESP.getChipCores();
+        chip["cpuFreqMHz"] = ESP.getCpuFreqMHz();
+        chip["flashSizeMB"] = ESP.getFlashChipSize() / (1024 * 1024);
+        chip["psramSizeMB"] = ESP.getPsramSize() / (1024 * 1024);
+
+        doc["DIS_USB_JTAG"] = esp_efuse_read_field_bit(ESP_EFUSE_DIS_USB_JTAG);
+        doc["DIS_USB_SERIAL_JTAG"] = esp_efuse_read_field_bit(ESP_EFUSE_DIS_USB_SERIAL_JTAG);
+        doc["DIS_PAD_JTAG"] = esp_efuse_read_field_bit(ESP_EFUSE_HARD_DIS_JTAG);
+        doc["SOFT_DIS_JTAG"] = esp_efuse_read_field_bit(ESP_EFUSE_SOFT_DIS_JTAG);
+        doc["USB_EXCHG_PINS"] = esp_efuse_read_field_bit(ESP_EFUSE_USB_EXCHG_PINS);
+        doc["USB_EXT_PHY_ENABLE"] = esp_efuse_read_field_bit(ESP_EFUSE_USB_EXT_PHY_ENABLE);
+        doc["USB_PHY_SEL"] = esp_efuse_read_field_bit(ESP_EFUSE_USB_PHY_SEL);
+        doc["STRAP_JTAG_SEL"] = esp_efuse_read_field_bit(ESP_EFUSE_STRAP_JTAG_SEL);
+        doc["VDD_SPI_XPD"] = esp_efuse_read_field_bit(ESP_EFUSE_VDD_SPI_XPD);
+        doc["VDD_SPI_TIEH"] = esp_efuse_read_field_bit(ESP_EFUSE_VDD_SPI_TIEH);
+        doc["VDD_SPI_FORCE"] = esp_efuse_read_field_bit(ESP_EFUSE_VDD_SPI_FORCE);
+        doc["DIS_DOWNLOAD_MODE"] = esp_efuse_read_field_bit(ESP_EFUSE_DIS_DOWNLOAD_MODE);
+        doc["DIS_USB"] = esp_efuse_read_field_bit(ESP_EFUSE_DIS_USB);
+        doc["SECURE_BOOT_EN"] = esp_efuse_read_field_bit(ESP_EFUSE_SECURE_BOOT_EN);
+        doc["DIS_DIRECT_BOOT"] = esp_efuse_read_field_bit(ESP_EFUSE_DIS_DIRECT_BOOT);
+
+        uint8_t spiCryptCnt = 0;
+        esp_efuse_read_field_blob(ESP_EFUSE_SPI_BOOT_CRYPT_CNT, &spiCryptCnt, 3);
+        doc["SPI_BOOT_CRYPT_CNT"] = spiCryptCnt;
+
+        uint8_t uartPrint = 0;
+        esp_efuse_read_field_blob(ESP_EFUSE_UART_PRINT_CONTROL, &uartPrint, 2);
+        doc["UART_PRINT_CONTROL"] = uartPrint;
+
+        doc["PIN_POWER_SELECTION"] = esp_efuse_read_field_bit(ESP_EFUSE_PIN_POWER_SELECTION);
+
+        String json;
+        serializeJson(doc, json);
+        request->send(200, "application/json", json);
     });
 
     auto* pinsPostHandler = new AsyncCallbackJsonWebHandler("/pins", [this](AsyncWebServerRequest *request, JsonVariant &json) {

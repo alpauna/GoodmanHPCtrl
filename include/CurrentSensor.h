@@ -31,6 +31,7 @@ class CurrentSensor {
     uint8_t getChannel() const { return _channel; }
     float getRMSAmps() const { return _rmsAmps; }
     float getPeakAmps() const { return _peakAmps; }
+    float getRMSMillivolts() const { return _rmsMillivolts; }
     float getPrevious() const { return _previous; }
     bool isValid() const { return _valid; }
     bool isOvercurrent() const { return _overcurrent; }
@@ -60,6 +61,7 @@ class CurrentSensor {
     float _ctRatio;           // CT clamp ratio (30.0 for SCT-013-030)
     float _rmsAmps;
     float _peakAmps;
+    float _rmsMillivolts;     // Raw ADC RMS reading before ctRatio scaling — for calibration/diagnostics
     float _previous;
     bool _valid;
 

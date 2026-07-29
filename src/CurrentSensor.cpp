@@ -7,6 +7,7 @@ CurrentSensor::CurrentSensor(const String& name, uint8_t channel, float ctRatio)
     , _ctRatio(ctRatio)
     , _rmsAmps(0.0f)
     , _peakAmps(0.0f)
+    , _rmsMillivolts(0.0f)
     , _previous(0.0f)
     , _valid(false)
     , _overcurrentThreshold(0.0f)
@@ -106,6 +107,7 @@ bool CurrentSensor::tick(Adafruit_ADS1115* ads) {
     // Convert voltage RMS to current: I = V * ctRatio
     // For SCT-013-030: 1V output = 30A, so ctRatio = 30.0
     _previous = _rmsAmps;
+    _rmsMillivolts = vRMS * 1000.0f;
     _rmsAmps = vRMS * _ctRatio;
     _peakAmps = _peakAccum * _ctRatio;
     _valid = true;
