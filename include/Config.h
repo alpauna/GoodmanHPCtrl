@@ -66,7 +66,7 @@ struct ProjectInfo {
     String mqttPrefix;               // MQTT topic prefix (default "goodman"), topics: prefix/temps, prefix/state, etc.
     uint32_t sessionTimeoutMinutes;  // Session timeout in minutes (0=disabled/Basic Auth, default 0)
     uint8_t pollIntervalSec;         // Dashboard/pins polling interval in seconds (1-10, default 2)
-    // Current monitoring (ADS1115 CT clamp)
+    // Current monitoring (ADS131M04 CT clamp, SPI, simultaneous 4-channel)
     float compressorOvercurrentAmps; // Compressor overcurrent threshold in amps (0 = disabled)
     float fanOvercurrentAmps;        // Fan overcurrent threshold in amps (0 = disabled)
     uint32_t overcurrentDelayMs;     // How long overcurrent must persist before fault (default 5000)
@@ -80,6 +80,7 @@ struct ProjectInfo {
     float compressorBurdenOhms;      // Burden resistor for SCT-013-000 (0 = voltage-output CT, no burden)
     float fanBurdenOhms;             // Burden resistor for SCT-013-000 (0 = voltage-output CT, no burden)
     float crankcaseBurdenOhms;       // Burden resistor for SCT-013-000 (0 = voltage-output CT, no burden)
+    uint8_t adcOsr;                  // ADS131M04 CLOCK register OSR[2:0] (0-7 -> 128..16256 SPS, default 3 = 1024/4kSPS). Reboot to apply.
     // Weather ambient temperature fallback
     String weatherSource;            // "none", "mqtt", or "http" (default "none")
     String weatherMqttTopic;         // MQTT topic for weather temp (e.g., "homeassistant/sensor/outdoor_temp/state")

@@ -1,4 +1,5 @@
 #include "CurrentSensor.h"
+#include "SPICurrentADC.h"
 #include "Logger.h"
 
 CurrentSensor::CurrentSensor(const String& name, uint8_t channel, float ctRatio)
@@ -19,99 +20,178 @@ CurrentSensor::CurrentSensor(const String& name, uint8_t channel, float ctRatio)
     , _lockedRotorTimeoutMs(5000)
     , _cntActivateTick(0)
     , _cntJustActivated(false)
+    , _windowActive(false)
+    , _windowStartMs(0)
+    , _windowStartEdgeCount(0)
+    , _sumV(0.0f)
+    , _sumSquares(0.0f)
+    , _peakAccum(0.0f)
+    , _nonZeroCount(0)
+    , _sampleCount(0)
+    , _windowJustCompleted(false)
+    , _ownHavePrev(false)
+    , _ownPrevSign(0)
+    , _ownPrevRaw(0)
+    , _ownPrevTimeUs(0)
+    , _phaseSumDeg(0.0f)
+    , _phaseSampleCount(0)
+    , _powerFactor(0.0f)
+    , _phaseAngleDeg(0.0f)
+    , _pfValid(false)
+    , _lastFinalizedRmsAmps(-1.0f)
+    , _lastFinalizedPeakAmps(-1.0f)
+    , _frozenWindowCount(0)
+    , _staleMarked(false)
+    , _lastAllZeroLogMs(0)
+    , _adc(nullptr)
 {
 }
 
-void CurrentSensor::startConversion(Adafruit_ADS1115* ads) {
-    uint16_t mux = (_channel == 0) ? ADS1X15_REG_CONFIG_MUX_DIFF_0_1
-                                    : ADS1X15_REG_CONFIG_MUX_DIFF_2_3;
-    ads->startADCReading(mux, /*continuous=*/false);
-}
-
-void CurrentSensor::beginSample(Adafruit_ADS1115* ads) {
-    if (ads == nullptr) {
-        _valid = false;
-        return;
-    }
-
-    // Set gain for ±2.048V range (1 bit = 0.0625mV)
-    // SCT-013-030 outputs 0-1V AC for 0-30A
-    ads->setGain(GAIN_TWO);
-
-    // 128 SPS (the ADS1115 library default) — verified against a clamp meter
-    // to read meaningfully more accurately than 860 SPS, which widens the
-    // ADC's internal filter bandwidth and lets more line noise/harmonics
-    // through into each sample. At ~7.8ms/sample this can no longer block
-    // the main loop (see BUG-014) because sampling is spread across many
-    // non-blocking tick() calls instead of one 60-sample busy-wait loop.
-    ads->setDataRate(RATE_ADS1115_128SPS);
-
+void CurrentSensor::beginWindow() {
     _sumV = 0.0f;
     _sumSquares = 0.0f;
     _peakAccum = 0.0f;
     _nonZeroCount = 0;
-    _sampleIndex = 0;
-    startConversion(ads);
-    _sampleState = SampleState::CONVERTING;
+    _sampleCount = 0;
+    _phaseSumDeg = 0.0f;
+    _phaseSampleCount = 0;
+    _windowStartMs = millis();
+    _windowStartEdgeCount = (_adc != nullptr) ? _adc->getZxEdgeCount() : 0;
+    _windowActive = true;
 }
 
-bool CurrentSensor::tick(Adafruit_ADS1115* ads) {
-    if (_sampleState != SampleState::CONVERTING) return false;
-    if (ads == nullptr) {
-        _valid = false;
-        _sampleState = SampleState::IDLE;
-        return true;
-    }
-    if (!ads->conversionComplete()) return false;  // not ready — check again next tick
-
-    int16_t raw = ads->getLastConversionResults();
-    // Convert to voltage: at GAIN_TWO, 1 bit = 0.0625mV = 0.0000625V
-    float voltage = raw * 0.0000625f;
+void CurrentSensor::accumulateSample(int32_t rawCounts, uint64_t /*sampleTimeUs*/) {
+    float voltage = (float)rawCounts * SPICurrentADC::LSB_VOLTS;
     _sumV += voltage;
     _sumSquares += voltage * voltage;
     float absV = fabsf(voltage);
     if (absV > _peakAccum) _peakAccum = absV;
-    if (raw != 0) _nonZeroCount++;
-    _sampleIndex++;
+    if (rawCounts != 0) _nonZeroCount++;
+    _sampleCount++;
+}
 
-    // Sample ~60 readings over ~3 full 60Hz cycles (~470ms at 128 SPS, spread
-    // non-blocking). Increased from 20 to 60 to avoid "sample bunching" near
-    // a zero crossing (caused by I2C jitter from WiFi/AsyncTCP/log flush
-    // interrupts) that previously produced spurious 0.00A readings on the
-    // FAN channel.
-    if (_sampleIndex < NUM_RMS_SAMPLES) {
-        startConversion(ads);
-        return false;
+void CurrentSensor::detectOwnZeroCross(int32_t rawCounts, uint64_t sampleTimeUs) {
+    bool posNow = rawCounts > OWN_ZC_DEADBAND;
+    bool negNow = rawCounts < -OWN_ZC_DEADBAND;
+
+    if (_ownHavePrev && posNow && _ownPrevSign <= 0 && rawCounts != _ownPrevRaw) {
+        // Rising zero-cross between the previous and current sample —
+        // interpolate the crossing instant for phase resolution.
+        float frac = (float)(0 - _ownPrevRaw) / (float)(rawCounts - _ownPrevRaw);
+        frac = constrain(frac, 0.0f, 1.0f);
+        uint64_t tCross = _ownPrevTimeUs + (uint64_t)(frac * (float)(sampleTimeUs - _ownPrevTimeUs));
+
+        if (_adc != nullptr && _adc->isLineFrequencyValid()) {
+            uint64_t zxEdge = _adc->getLastZxEdgeUs();
+            float periodUs = _adc->getLinePeriodUs();
+            if (periodUs > 0.0f) {
+                float halfPeriod = periodUs / 2.0f;
+                float delta = (float)((int64_t)tCross - (int64_t)zxEdge);
+                while (delta > halfPeriod) delta -= periodUs;
+                while (delta < -halfPeriod) delta += periodUs;
+                float phaseDeg = delta / periodUs * 360.0f;
+                _phaseSumDeg += phaseDeg;
+                _phaseSampleCount++;
+            }
+        }
     }
 
-    _sampleState = SampleState::IDLE;
+    if (posNow) _ownPrevSign = 1;
+    else if (negNow) _ownPrevSign = -1;
+    _ownPrevRaw = rawCounts;
+    _ownPrevTimeUs = sampleTimeUs;
+    _ownHavePrev = true;
+}
 
-    // Reject "all zeros" reads (I2C NACK / bus contention signature) — mark
-    // sample invalid instead of publishing a fake 0.00A that would trigger
-    // spurious FAN_FAULT warnings.
+void CurrentSensor::pushSample(int32_t rawCounts, uint64_t sampleTimeUs) {
+    if (_staleMarked) return;  // latched fault — don't resume publishing without a reboot
+
+    if (!_windowActive) beginWindow();
+
+    accumulateSample(rawCounts, sampleTimeUs);
+    detectOwnZeroCross(rawCounts, sampleTimeUs);
+
+    uint32_t edgesNow = (_adc != nullptr) ? _adc->getZxEdgeCount() : 0;
+    bool doneByEdges = (_adc != nullptr) && (edgesNow - _windowStartEdgeCount >= ZX_EDGES_PER_WINDOW);
+    bool doneByTimeout = (millis() - _windowStartMs) >= WINDOW_TIMEOUT_MS;
+
+    if (doneByEdges || doneByTimeout) {
+        finalizeWindow();
+        beginWindow();
+    }
+}
+
+void CurrentSensor::finalizeWindow() {
+    _windowActive = false;
+
+    // Reject "all zeros" reads (dead channel / bus contention signature, or
+    // simply nothing clamped on / no ZX reference yet) — mark invalid
+    // instead of publishing a fake 0.00A. Rate-limited: see
+    // ALL_ZERO_LOG_INTERVAL_MS comment in the header.
     if (_nonZeroCount == 0) {
         _valid = false;
-        Log.warn("CURRENT", "%s read invalid: all-zero samples (I2C contention?)", _name.c_str());
-        return true;
+        uint32_t now = millis();
+        if (now - _lastAllZeroLogMs >= ALL_ZERO_LOG_INTERVAL_MS) {
+            _lastAllZeroLogMs = now;
+            Log.warn("CURRENT", "%s read invalid: all-zero samples", _name.c_str());
+        }
+        _windowJustCompleted = true;
+        return;
     }
 
-    // Proper AC-RMS: subtract DC mean before squaring. The prior implementation
-    // (sqrt(mean(v^2))) is only correct if the differential is perfectly
-    // centered on 0V; ADS1115 offset drift + non-symmetric sample windows
-    // caused occasional near-zero RMS on the FAN channel.
-    float mean = _sumV / NUM_RMS_SAMPLES;
-    float variance = _sumSquares / NUM_RMS_SAMPLES - mean * mean;
+    // Proper AC-RMS: subtract DC mean before squaring.
+    float n = (float)_sampleCount;
+    float mean = _sumV / n;
+    float variance = _sumSquares / n - mean * mean;
     if (variance < 0.0f) variance = 0.0f;  // guard against FP round-off
     float vRMS = sqrtf(variance);
 
-    // Convert voltage RMS to current: I = V * ctRatio
-    // For SCT-013-030: 1V output = 30A, so ctRatio = 30.0
     _previous = _rmsAmps;
     _rmsMillivolts = vRMS * 1000.0f;
     _rmsAmps = vRMS * _ctRatio;
     _peakAmps = _peakAccum * _ctRatio;
     _valid = true;
-    return true;
+
+    // Power factor: average phase angle observed this window, only if the
+    // ADC has a locked line-frequency reference and this channel actually
+    // crossed zero at least once.
+    if (_phaseSampleCount > 0 && _adc != nullptr && _adc->isLineFrequencyValid()) {
+        _phaseAngleDeg = _phaseSumDeg / (float)_phaseSampleCount;
+        _powerFactor = cosf(radians(_phaseAngleDeg));
+        _pfValid = true;
+    } else {
+        _pfValid = false;
+    }
+
+    // Frozen-value guard — a stuck channel behind an otherwise-live bus
+    // produces bit-identical finalized readings every window, since the
+    // raw samples feeding the math never change.
+    if (_rmsAmps == _lastFinalizedRmsAmps && _peakAmps == _lastFinalizedPeakAmps) {
+        _frozenWindowCount++;
+    } else {
+        _frozenWindowCount = 0;
+    }
+    _lastFinalizedRmsAmps = _rmsAmps;
+    _lastFinalizedPeakAmps = _peakAmps;
+    if (_frozenWindowCount >= FROZEN_WINDOWS_REQUIRED) {
+        Log.warn("CURRENT", "%s read invalid: frozen value (SPI channel stuck?)", _name.c_str());
+        _staleMarked = true;
+        _valid = false;
+    }
+
+    _windowJustCompleted = true;
+}
+
+bool CurrentSensor::consumeWindowCompleted() {
+    bool result = _windowJustCompleted;
+    _windowJustCompleted = false;
+    return result;
+}
+
+void CurrentSensor::markStale() {
+    _staleMarked = true;
+    _valid = false;
+    _pfValid = false;
 }
 
 void CurrentSensor::checkProtections() {

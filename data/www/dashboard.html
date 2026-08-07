@@ -87,6 +87,7 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <span class='pill ok' id='fStateHold'>State Check Hold</span>
 <span class='pill ok' id='fOvercurrentP'>OC Ok</span>
 <span class='pill ok' id='fLockedRotorP'>LR Ok</span>
+<span class='pill ok' id='fCurrentAdc'>Current ADC Ok</span>
 </div>
 </div>
 
@@ -121,9 +122,10 @@ nav .brand{font-weight:bold;font-size:16px;margin-right:auto;color:#fff;}
 <div class='card'>
 <h3>Current Monitoring</h3>
 <div class='grid'>
-<div class='indicator'><span class='label'>Compressor</span><span class='val' id='vCompAmps'>-- A</span></div>
-<div class='indicator'><span class='label'>Fan</span><span class='val' id='vFanAmps'>-- A</span></div>
+<div class='indicator'><span class='label'>Compressor</span><span class='val' id='vCompAmps'>-- A</span><span class='val' id='vCompPF' style='margin-left:6px;opacity:.7'>PF --</span></div>
+<div class='indicator'><span class='label'>Fan</span><span class='val' id='vFanAmps'>-- A</span><span class='val' id='vFanPF' style='margin-left:6px;opacity:.7'>PF --</span></div>
 <div class='indicator' style='grid-column:1/3'><span class='label'>Crankcase Heater</span><span class='val' id='vCcAmps'>-- A</span><span class='pill ok' id='fCcHeater' style='margin-left:8px;font-size:11px'>--</span></div>
+<div class='indicator' style='grid-column:1/3'><span class='label'>Line Freq</span><span class='val' id='vLineFreq'>-- Hz</span></div>
 </div>
 <div class='fault-row' style='margin-top:8px'>
 <span class='pill ok' id='fOvercurrent'>Current Ok</span>
@@ -298,8 +300,13 @@ function update(d){
 
   // Current monitoring
   var cur=d.current||{};
+  var pf=d.powerFactor||{};
   setText('vCompAmps',cur.COMPRESSOR_CURRENT!==undefined?parseFloat(cur.COMPRESSOR_CURRENT).toFixed(1)+' A':'-- A');
   setText('vFanAmps',cur.FAN_CURRENT!==undefined?parseFloat(cur.FAN_CURRENT).toFixed(1)+' A':'-- A');
+  setText('vCompPF',pf.COMPRESSOR_CURRENT!==undefined?'PF '+parseFloat(pf.COMPRESSOR_CURRENT).toFixed(2):'PF --');
+  setText('vFanPF',pf.FAN_CURRENT!==undefined?'PF '+parseFloat(pf.FAN_CURRENT).toFixed(2):'PF --');
+  setText('vLineFreq',d.lineFrequencyHz!==undefined?parseFloat(d.lineFrequencyHz).toFixed(2)+' Hz':'-- Hz');
+  var adcEl=document.getElementById('fCurrentAdc');if(adcEl){adcEl.textContent=d.currentAdcFault?'Current ADC Fault':'Current ADC Ok';adcEl.className='pill '+(d.currentAdcFault?'active':'ok');}
   if(cur.CRANKCASE_CURRENT!==undefined){var ccVal=parseFloat(cur.CRANKCASE_CURRENT);setText('vCcAmps',ccVal<1?(ccVal*1000).toFixed(0)+' mA':ccVal.toFixed(2)+' A');}else{setText('vCcAmps','-- mA');}
   // Crankcase heater status: should be ON when compressor OFF, OFF when compressor ON
   var ccEl=document.getElementById('fCcHeater');

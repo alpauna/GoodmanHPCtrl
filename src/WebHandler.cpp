@@ -610,12 +610,19 @@ void WebHandler::setupRoutes() {
 
         // Current sensors
         JsonObject current = doc["current"].to<JsonObject>();
+        JsonObject powerFactor = doc["powerFactor"].to<JsonObject>();
         for (const auto& m : _hpController->getCurrentSensorMap()) {
-            if (m.second != nullptr && m.second->isValid())
+            if (m.second != nullptr && m.second->isValid()) {
                 current[m.first] = serialized(String(m.second->getRMSAmps(), 1));
+                if (m.second->isPowerFactorValid())
+                    powerFactor[m.first] = serialized(String(m.second->getPowerFactor(), 2));
+            }
         }
         doc["overcurrent"] = _hpController->isOvercurrentActive();
         doc["lockedRotor"] = _hpController->isLockedRotorActive();
+        if (_hpController->isLineFrequencyValid())
+            doc["lineFrequencyHz"] = serialized(String(_hpController->getLineFrequencyHz(), 2));
+        doc["currentAdcFault"] = _hpController->isCurrentADCFault();
 
         String json;
         serializeJson(doc, json);
@@ -764,13 +771,19 @@ void WebHandler::setupRoutes() {
             // Current sensors
             JsonObject currentObj = doc["current"].to<JsonObject>();
             JsonObject currentMvObj = doc["currentMv"].to<JsonObject>();
+            JsonObject powerFactorObj = doc["powerFactor"].to<JsonObject>();
             for (const auto& m : _hpController->getCurrentSensorMap()) {
                 if (m.second != nullptr && m.second->isValid()) {
                     currentObj[m.first] = serialized(String(m.second->getRMSAmps(), 1));
                     // Raw ADC RMS reading (pre-ctRatio) — for calibration/diagnostics on the Pins page
                     currentMvObj[m.first] = serialized(String(m.second->getRMSMillivolts(), 1));
+                    if (m.second->isPowerFactorValid())
+                        powerFactorObj[m.first] = serialized(String(m.second->getPowerFactor(), 2));
                 }
             }
+            if (_hpController->isLineFrequencyValid())
+                doc["lineFrequencyHz"] = serialized(String(_hpController->getLineFrequencyHz(), 2));
+            doc["currentAdcFault"] = _hpController->isCurrentADCFault();
 
             JsonArray inputs = doc["inputs"].to<JsonArray>();
             for (auto& pair : _hpController->getInputMap()) {
@@ -1162,6 +1175,7 @@ void WebHandler::setupRoutes() {
                 doc["fanBurdenOhms"] = proj->fanBurdenOhms;
                 doc["crankcaseBurdenOhms"] = proj->crankcaseBurdenOhms;
                 doc["crankcaseExpectedAmps"] = proj->crankcaseExpectedAmps;
+                doc["adcOsr"] = proj->adcOsr;
                 doc["compressorOvercurrentAmps"] = proj->compressorOvercurrentAmps;
                 doc["fanOvercurrentAmps"] = proj->fanOvercurrentAmps;
                 doc["overcurrentDelaySec"] = proj->overcurrentDelayMs / 1000;
@@ -1964,6 +1978,7 @@ void WebHandler::setupRoutes() {
         {
             CurrentSensor* compCur = _hpController->getCurrentSensor("COMPRESSOR_CURRENT");
             CurrentSensor* fanCur = _hpController->getCurrentSensor("FAN_CURRENT");
+            CurrentSensor* crankCur = _hpController->getCurrentSensor("CRANKCASE_CURRENT");
 
             if (data["compressorCtRatio"].is<float>() || data["compressorCtRatio"].is<int>()) {
                 float r = data["compressorCtRatio"] | proj->compressorCtRatio;
@@ -1981,7 +1996,10 @@ void WebHandler::setupRoutes() {
             }
             if (data["crankcaseCtRatio"].is<float>() || data["crankcaseCtRatio"].is<int>()) {
                 float r = data["crankcaseCtRatio"] | proj->crankcaseCtRatio;
-                if (r > 0.0f) proj->crankcaseCtRatio = r;  // no sensor object yet — channel not implemented
+                if (r > 0.0f && r != proj->crankcaseCtRatio) {
+                    proj->crankcaseCtRatio = r;
+                    if (crankCur) crankCur->setCtRatio(r);
+                }
             }
             if (data["compressorBurdenOhms"].is<float>() || data["compressorBurdenOhms"].is<int>()) {
                 proj->compressorBurdenOhms = data["compressorBurdenOhms"] | proj->compressorBurdenOhms;
@@ -1994,6 +2012,12 @@ void WebHandler::setupRoutes() {
             }
             if (data["crankcaseExpectedAmps"].is<float>() || data["crankcaseExpectedAmps"].is<int>()) {
                 proj->crankcaseExpectedAmps = data["crankcaseExpectedAmps"] | proj->crankcaseExpectedAmps;
+            }
+            // Takes effect on next boot only (register write on a live acquisition
+            // task is more complexity than a rarely-touched tuning knob is worth).
+            if (data["adcOsr"].is<int>()) {
+                int osr = data["adcOsr"] | (int)proj->adcOsr;
+                if (osr >= 0 && osr <= 7) proj->adcOsr = (uint8_t)osr;
             }
             if (data["compressorOvercurrentAmps"].is<float>() || data["compressorOvercurrentAmps"].is<int>()) {
                 float a = data["compressorOvercurrentAmps"] | proj->compressorOvercurrentAmps;

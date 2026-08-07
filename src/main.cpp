@@ -22,7 +22,7 @@
 #include "TempHistory.h"
 #include "DisplayManager.h"
 #include "OtaUtils.h"
-#include <Adafruit_ADS1X15.h>
+#include "SPICurrentADC.h"
 #include <HTTPClient.h>
 #include "CANBus.h"
 
@@ -194,9 +194,30 @@ OneWire oneWire(ONE_WIRE_BUS);
 // Pass our oneWire reference to Dallas Temperature.
 DallasTemperature sensors(&oneWire);
 
-// ADS1115 16-bit I2C ADC for CT clamp current sensing
-Adafruit_ADS1115 ads1115;
-bool ads1115Ready = false;
+// ADS131M04 4-channel simultaneous-sampling SPI ADC for CT clamp current
+// sensing (AIN0=compressor, AIN1=fan, AIN3=crankcase) + zero-cross line
+// frequency reference (AIN2/ZX). Pins confirmed off the schematic and
+// proven live via bringup/ads131m04/main.cpp -- see
+// docs/ads131m04-current-sensor-design.md "Main-board interconnect".
+// GPIO39 (RESET#/SYNC#) is a hand-soldered bodge wire onto the main board's
+// JTAG debug header (MTCK), not a proper H3 connector pin -- H3 is a fixed
+// 7-position part on the already-fabricated board with no 8th conductor
+// available. See "RESET# bodge wire" / "Next PCB revision requirements" in
+// the design doc.
+static const SPICurrentADC::Pins SPI_ADC_PINS = {
+  /*din*/   2,
+  /*dout*/  42,
+  /*sclk*/  1,
+  /*cs*/    45,
+  /*drdy*/  46,
+  /*reset*/ 39,
+};
+// Constructed with the compile-time default OSR -- proj (which may carry a
+// different OSR loaded from SD card config) isn't initialized yet at this
+// point in static init order. setup() calls spiCurrentAdc.setOsr(proj.adcOsr)
+// after config load and before begin() to apply the real configured value.
+SPICurrentADC spiCurrentAdc(SPI_ADC_PINS);
+bool spiAdcReady = false;
 
 
 typedef enum AC_STATE { OFF, COOL, HEAT, DEFROST, ERROR, LOW_TEMP } ACState;
@@ -248,7 +269,7 @@ ProjectInfo proj = {
   "goodman",          // mqttPrefix: default MQTT topic prefix
   0,                  // sessionTimeoutMinutes: disabled by default
   2,                  // pollIntervalSec: 2 second default
-  // Current monitoring (ADS1115 CT clamp)
+  // Current monitoring (ADS131M04 CT clamp, SPI, simultaneous 4-channel)
   0.0f,               // compressorOvercurrentAmps: disabled
   0.0f,               // fanOvercurrentAmps: disabled
   5000,               // overcurrentDelayMs: 5s default
@@ -262,6 +283,7 @@ ProjectInfo proj = {
   0.0f,               // compressorBurdenOhms: voltage-output CT (no burden)
   0.0f,               // fanBurdenOhms: voltage-output CT (no burden)
   0.0f,               // crankcaseBurdenOhms: voltage-output CT (no burden)
+  3,                  // adcOsr: 1024/4kSPS default
   // Weather ambient temperature fallback
   "none",              // weatherSource
   "",                  // weatherMqttTopic
@@ -320,10 +342,6 @@ void onLogTempsCSV();
 void cleanOldTempFiles(int maxAgeDays);
 Task tLogTempsCSV(2 * TASK_MINUTE, TASK_FOREVER, &onLogTempsCSV, &ts, false);
 static char _tempsCsvDate[12] = "";
-
-// Read current sensors every 1 second
-void onReadCurrent();
-Task tReadCurrent(TASK_SECOND, TASK_FOREVER, &onReadCurrent, &ts, false);
 
 // CPU load calculation every 1 second
 void onCalcCpuLoad();
@@ -616,26 +634,19 @@ void setup() {
   Wire.begin(_sdaPin, _sclPin);
   Wire.setTimeOut(1000);  // 1s I2C bus timeout
 
-  // Initialize ADS1115 ADC for CT clamp current sensing at 0x48
-  if (ads1115.begin(0x48)) {
-    ads1115Ready = true;
-    Serial.println("ADS1115 ADC initialized at 0x48");
-  } else {
-    Serial.println("ADS1115 not found at 0x48, current sensing unavailable");
-  }
+  // ADS131M04 init happens later, after config.loadTempConfig() below --
+  // its OSR setting comes from SD card config, which isn't loaded yet here.
 
-  // Scan I2C bus for devices — skip 0x48 (ADS1115) to avoid re-probing
-  uint8_t i2cCount = ads1115Ready ? 1 : 0;
+  // Scan I2C bus for devices
+  uint8_t i2cCount = 0;
   Serial.println("I2C scan starting...");
   for (uint8_t addr = 1; addr < 127; addr++) {
-    if (addr == 0x48) continue;  // ADS1115: already probed via driver
     Wire.beginTransmission(addr);
     if (Wire.endTransmission() == 0) {
       Serial.printf("I2C device found at 0x%02X\r\n", addr);
       i2cCount++;
     }
   }
-  if (ads1115Ready) Serial.println("I2C device found at 0x48 (ADS1115, probed via driver)");
   if (i2cCount == 0) {
     Serial.println("I2C scan: no devices found");
   } else {
@@ -1023,11 +1034,15 @@ void setup() {
         }
     }
 
-    // Add current sensors if ADS1115 found
-    if (ads1115Ready) {
-      hpController.setADS1115(&ads1115);
+    // Add current sensors if the ADS131M04 SPI ADC is present. OSR comes
+    // from config (loaded above) -- setOsr() must run before begin().
+    spiCurrentAdc.setOsr(proj.adcOsr);
+    spiAdcReady = spiCurrentAdc.begin();
+    if (spiAdcReady) {
+      hpController.setSPICurrentADC(&spiCurrentAdc);
       auto* compCurrent = new CurrentSensor("COMPRESSOR_CURRENT", 0, proj.compressorCtRatio);
       auto* fanCurrent = new CurrentSensor("FAN_CURRENT", 1, proj.fanCtRatio);
+      auto* crankCurrent = new CurrentSensor("CRANKCASE_CURRENT", 3, proj.crankcaseCtRatio);
       compCurrent->setOvercurrentThreshold(proj.compressorOvercurrentAmps);
       compCurrent->setOvercurrentDelayMs(proj.overcurrentDelayMs);
       compCurrent->setLockedRotorThreshold(proj.lockedRotorThreshold);
@@ -1036,14 +1051,19 @@ void setup() {
       fanCurrent->setOvercurrentDelayMs(proj.overcurrentDelayMs);
       hpController.addCurrentSensor("COMPRESSOR_CURRENT", compCurrent);
       hpController.addCurrentSensor("FAN_CURRENT", fanCurrent);
+      hpController.addCurrentSensor("CRANKCASE_CURRENT", crankCurrent);
+      spiCurrentAdc.attachChannel(0, compCurrent);
+      spiCurrentAdc.attachChannel(1, fanCurrent);
+      spiCurrentAdc.attachChannel(3, crankCurrent);
       // Restore latched locked rotor from config
       if (proj.lockedRotorFault) {
         compCurrent->notifyCntActivated();  // Set up tracking state
         // Force the latch — readRMS+checkProtections will confirm
         Log.warn("MAIN", "Restored latched locked rotor fault from config");
       }
-      tReadCurrent.enable();
-      Log.info("MAIN", "Current sensors added (ADS1115 at 0x48)");
+      Log.info("MAIN", "SPI current ADC initialized (ADS131M04)");
+    } else {
+      Log.warn("MAIN", "ADS131M04 not detected, current sensing unavailable");
     }
 
     tRuntime.enable();
@@ -1143,10 +1163,6 @@ void onCalcCpuLoad() {
   // EMA smoothing: 25% new + 75% old
   _cpuLoadCore0 = (_cpuLoadCore0 * 3 + raw0 + 2) / 4;
   _cpuLoadCore1 = (_cpuLoadCore1 * 3 + raw1 + 2) / 4;
-}
-
-void onReadCurrent() {
-  hpController.readCurrentSensors();
 }
 
 void onBackfillTempHistory() {
@@ -1502,10 +1518,10 @@ void loop() {
     _workLoopCount++;
   }
 
-  // Advance non-blocking current-sensor ADC sampling (see BUG-014) — must
-  // run every pass, not just once/sec, since each RMS read is now spread
-  // across many loop iterations instead of blocking in one call.
-  hpController.tickCurrentSensors();
+  // Drain queued ADS131M04 SPI ADC frames (pushed by the dedicated
+  // DRDY-driven acquisition task) — must run every pass, not just once/sec,
+  // so the consumer doesn't fall behind the ~4kHz sample stream.
+  hpController.tickCurrentAcquisition();
 
   _busyUsCore1 += (uint32_t)(esp_timer_get_time() - workStartUs);
   vTaskDelay(1); // Yield to FreeRTOS so core 0's idle hook can fire

@@ -10,6 +10,7 @@
 #include "OutPin.h"
 #include "TempSensor.h"
 #include "CurrentSensor.h"
+#include "SPICurrentADC.h"
 
 class GoodmanHP {
   public:
@@ -97,18 +98,21 @@ class GoodmanHP {
     TempSensorMap& getTempSensorMap();
     void clearTempSensors();
 
-    // Current sensor management
-    void setADS1115(Adafruit_ADS1115* ads) { _ads1115 = ads; }
+    // Current sensor management (ADS131M04, simultaneous 4-channel SPI)
+    void setSPICurrentADC(SPICurrentADC* adc) { _spiAdc = adc; }
     void addCurrentSensor(const String& name, CurrentSensor* sensor);
     CurrentSensor* getCurrentSensor(const String& name);
     CurrentSensorMap& getCurrentSensorMap();
-    void readCurrentSensors();
-    // Advance the non-blocking current-sensor round robin by one step.
-    // Call frequently (every loop pass) — readCurrentSensors() only starts
-    // a new round; this is what actually steps ADC conversions forward.
-    void tickCurrentSensors();
+    // Drains queued ADC samples and runs checkProtections() on any sensor
+    // whose accumulation window just completed. Call every loop pass — the
+    // ADC samples continuously (DRDY-driven), there's no "start a round"
+    // step like the old ADS1115 round-robin had.
+    void tickCurrentAcquisition();
     bool isOvercurrentActive() const;
     bool isLockedRotorActive() const;
+    float getLineFrequencyHz() const;
+    bool isLineFrequencyValid() const;
+    bool isCurrentADCFault() const;
 
     State getState();
     const char* getStateString();
@@ -251,13 +255,10 @@ class GoodmanHP {
     std::map<String, OutPin*> _outputMap;
     TempSensorMap _tempSensorMap;
 
-    // Current sensors (ADS1115 ADC)
-    Adafruit_ADS1115* _ads1115;
+    // Current sensors (ADS131M04 SPI ADC — simultaneous 4-channel sampling,
+    // no round-robin needed)
+    SPICurrentADC* _spiAdc;
     CurrentSensorMap _currentSensorMap;
-    // Non-blocking round-robin driver for tickCurrentSensors() — only one
-    // sensor can be mid-acquisition on the shared ADS1115 at a time.
-    CurrentSensorMap::iterator _currentSampleIt;
-    bool _currentSamplingActive;
 
     State _state;
     uint32_t _yActiveStartTick;

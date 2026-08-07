@@ -445,6 +445,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.compressorBurdenOhms = 0.0f;
         proj.fanBurdenOhms = 0.0f;
         proj.crankcaseBurdenOhms = 0.0f;
+        proj.adcOsr = 3;
         proj.hpTonnage = 3.0f;
         proj.scrollCompressor = true;
         Serial.println("Config migration: old lowTemp format detected, will migrate on next save");
@@ -509,6 +510,7 @@ bool Config::loadTempConfig(const char* filename, TempSensorMap& config, Project
         proj.compressorBurdenOhms = hpCurrent["compressorBurdenOhms"] | 0.0f;
         proj.fanBurdenOhms = hpCurrent["fanBurdenOhms"] | 0.0f;
         proj.crankcaseBurdenOhms = hpCurrent["crankcaseBurdenOhms"] | 0.0f;
+        proj.adcOsr = hpCurrent["adcOsr"] | 3;
         // HP unit info
         JsonObject hpUnit = heatpump["unit"];
         proj.hpTonnage = hpUnit["tonnage"] | 3.0f;
@@ -942,6 +944,7 @@ bool Config::updateConfig(const char* filename, TempSensorMap& config, ProjectIn
     hpCurrentUpd["compressorBurdenOhms"] = proj.compressorBurdenOhms;
     hpCurrentUpd["fanBurdenOhms"] = proj.fanBurdenOhms;
     hpCurrentUpd["crankcaseBurdenOhms"] = proj.crankcaseBurdenOhms;
+    hpCurrentUpd["adcOsr"] = proj.adcOsr;
     // HP unit info
     JsonObject hpUnitUpd = heatpump["unit"].to<JsonObject>();
     hpUnitUpd["tonnage"] = proj.hpTonnage;
