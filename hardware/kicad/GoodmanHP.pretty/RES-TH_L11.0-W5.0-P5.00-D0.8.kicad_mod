@@ -1,0 +1,103 @@
+(footprint "RES-TH_L11.0-W5.0-P5.00-D0.8"
+	(version 20260206)
+	(generator "pcbnew")
+	(generator_version "10.0")
+	(layer "F.Cu")
+	(property "Reference" ""
+		(at 0 -3.667005 0)
+		(layer "F.SilkS")
+		(uuid "6c132d8c-b177-449c-9fdc-f357416cf497")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+		)
+	)
+	(property "Value" ""
+		(at 0 3.667005 0)
+		(layer "F.Fab")
+		(uuid "20d609da-6a96-42a9-95c6-9b080ac3f761")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "0afa17f7-6a00-4640-9356-08e786448ef5")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "8275945e-d14a-477c-b372-c18fb3e4107d")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(attr through_hole)
+	(duplicate_pad_numbers_are_jumpers no)
+	(fp_rect
+		(start -3.600129 -1.09985)
+		(end 3.599857 1.100146)
+		(stroke
+			(width 0.05)
+			(type default)
+		)
+		(fill no)
+		(layer "F.CrtYd")
+		(uuid "686c7ba6-ecda-41cc-a527-28d1c8832abf")
+	)
+	(fp_rect
+		(start -5.20701 -2.667005)
+		(end 5.20701 2.667005)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "50637717-d9e1-4155-860d-87d0eaaa99f5")
+	)
+	(pad "1" thru_hole rect
+		(at -2.50013 0.000148)
+		(size 1.699996 1.699996)
+		(drill 0.999998)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(thermal_bridge_angle 45)
+		(uuid "ad38c1c5-0225-4629-8908-f7f5762ddf2e")
+	)
+	(pad "2" thru_hole circle
+		(at 2.499859 0.000148)
+		(size 1.699996 1.699996)
+		(drill 0.999998)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "da2a1cbd-e50e-4a04-9bd1-4171163304ff")
+	)
+	(embedded_fonts no)
+	(model "${KIPRJMOD}/GoodmanHP.3dshapes/RES-TH_L11.0-W5.0-P5.00-D0.8.step"
+		(offset
+			(xyz -0.0001355 -0.000148 0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+)

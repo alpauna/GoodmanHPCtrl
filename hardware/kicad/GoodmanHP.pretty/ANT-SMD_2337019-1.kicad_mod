@@ -1,0 +1,107 @@
+(footprint "ANT-SMD_2337019-1"
+	(version 20260206)
+	(generator "pcbnew")
+	(generator_version "10.0")
+	(layer "F.Cu")
+	(property "Reference" ""
+		(at 0 -2.790963 0)
+		(layer "F.SilkS")
+		(uuid "54d2df64-cc8f-4b8d-b24d-f836b16ee4b4")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+		)
+	)
+	(property "Value" ""
+		(at 0 2.790963 0)
+		(layer "F.Fab")
+		(uuid "fad11dc6-80d3-441c-9583-bedcb2357763")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "1a2efae5-9a1a-434c-8451-3994f842a418")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "f4411b81-c37c-4d56-88ce-73cff844a2d9")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(attr smd)
+	(duplicate_pad_numbers_are_jumpers no)
+	(fp_rect
+		(start -2.300127 -1.525117)
+		(end 2.300127 2.040963)
+		(stroke
+			(width 0.05)
+			(type default)
+		)
+		(fill no)
+		(layer "F.CrtYd")
+		(uuid "05827f3e-14be-4a2b-8623-36ee0fb7e11f")
+	)
+	(fp_rect
+		(start -2.050127 -1.790963)
+		(end 2.050127 1.790963)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "1d3f46f2-445b-4c70-811a-4601f7a69efe")
+	)
+	(pad "1" smd rect
+		(at -1.50021 0.749757 90)
+		(size 2.199995 1.099997)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(thermal_bridge_angle 45)
+		(uuid "09840f24-dad0-4980-8bde-8163239ed82c")
+	)
+	(pad "2" smd rect
+		(at -0.000086 -0.750112 90)
+		(size 1.05001 0.999998)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(thermal_bridge_angle 45)
+		(uuid "67755766-9dfb-49c8-928a-38cd5af3f47b")
+	)
+	(pad "3" smd rect
+		(at 1.500037 0.749757 90)
+		(size 2.199995 1.099997)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(thermal_bridge_angle 45)
+		(uuid "5b26a7b4-aa8d-4a98-a9ad-dc66e81273cf")
+	)
+	(embedded_fonts no)
+	(model "${KIPRJMOD}/GoodmanHP.3dshapes/ANT-SMD_2337019-1.step"
+		(offset
+			(xyz -0.0000863333333333 0.0001993333333 0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+)

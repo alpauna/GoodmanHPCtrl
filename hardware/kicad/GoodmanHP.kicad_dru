@@ -1,0 +1,8 @@
+(version 1)
+
+# 240 V fan circuit: keep 2.5 mm from every low-voltage net (functional
+# insulation for 240 VAC).
+(rule "HV to LV clearance"
+  (condition "A.NetClass == 'HV' && B.NetClass != 'HV' && B.NetClass != 'Earth'")
+  (constraint clearance (min 2.5mm)))
+

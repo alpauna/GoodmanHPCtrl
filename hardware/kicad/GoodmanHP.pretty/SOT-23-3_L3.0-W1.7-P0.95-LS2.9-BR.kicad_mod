@@ -1,0 +1,107 @@
+(footprint "SOT-23-3_L3.0-W1.7-P0.95-LS2.9-BR"
+	(version 20260206)
+	(generator "pcbnew")
+	(generator_version "10.0")
+	(layer "F.Cu")
+	(property "Reference" ""
+		(at 0 -2.602413 0)
+		(layer "F.SilkS")
+		(uuid "b5c46819-85d5-4d6a-a50b-45b897f8ac93")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+		)
+	)
+	(property "Value" ""
+		(at 0 2.602413 0)
+		(layer "F.Fab")
+		(uuid "dd52186a-6a13-439e-9d8b-bd2bcfa72fbb")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "9b2340cc-ce2a-487d-a76c-9b3eb1854f57")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "e972842d-12b5-4870-b990-d7d0b4a765d5")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(attr smd)
+	(duplicate_pad_numbers_are_jumpers no)
+	(fp_rect
+		(start -1.870091 -1.718564)
+		(end 1.870028 1.718844)
+		(stroke
+			(width 0.05)
+			(type default)
+		)
+		(fill no)
+		(layer "F.CrtYd")
+		(uuid "fd1e44dd-98d1-4bdf-b1ac-52fe5da5af4b")
+	)
+	(fp_rect
+		(start -1.620091 -1.602413)
+		(end 1.620091 1.602413)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "c4393769-fdf8-4b02-bb5d-c69782a0de39")
+	)
+	(pad "1" smd rect
+		(at 1.101284 0.950099)
+		(size 1.037488 0.532003)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(thermal_bridge_angle 45)
+		(uuid "e98d088d-ea20-4d04-b9fb-f1f74e1f6306")
+	)
+	(pad "2" smd rect
+		(at 1.101284 -0.94982)
+		(size 1.037488 0.532003)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(thermal_bridge_angle 45)
+		(uuid "bfba1f16-fa24-41a6-b775-ccde6aa6ee0d")
+	)
+	(pad "3" smd rect
+		(at -1.101403 0.000139)
+		(size 1.037488 0.532003)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(thermal_bridge_angle 45)
+		(uuid "b3ea9696-4289-4926-8209-9693fb10c400")
+	)
+	(embedded_fonts no)
+	(model "${KIPRJMOD}/GoodmanHP.3dshapes/SOT-23-3L_L2.9-W1.6-H1.1-LS2.8-P0.95.step"
+		(offset
+			(xyz 0.0005603333333 -0.0000603333333333 0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 270)
+		)
+	)
+)

@@ -1,0 +1,107 @@
+(footprint "TO-252-2_L6.6-W6.1-P4.57-LS10.1-BR-CW"
+	(version 20260206)
+	(generator "pcbnew")
+	(generator_version "10.0")
+	(layer "F.Cu")
+	(property "Reference" ""
+		(at 0 -4.422428 0)
+		(layer "F.SilkS")
+		(uuid "ae065c72-0823-406d-b375-b154d4b0b61f")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+		)
+	)
+	(property "Value" ""
+		(at 0 4.422428 0)
+		(layer "F.Fab")
+		(uuid "a233dea0-7a27-4834-8a7d-7fecbd77459f")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "4c035137-bede-4311-b34d-823ce90cb6dc")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "9a68236b-90ee-45e9-9ce9-9f885d88d293")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(attr smd)
+	(duplicate_pad_numbers_are_jumpers no)
+	(fp_rect
+		(start -5.974053 -3.672428)
+		(end 5.174153 3.672428)
+		(stroke
+			(width 0.05)
+			(type default)
+		)
+		(fill no)
+		(layer "F.CrtYd")
+		(uuid "6c62b1f3-f74a-4926-bc60-dd33dcbd4a90")
+	)
+	(fp_rect
+		(start -5.724053 -3.422428)
+		(end 5.724053 3.422428)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "4d1dca71-007b-40d3-a5b9-ba73ebe1033b")
+	)
+	(pad "1" smd rect
+		(at 3.42314 2.284835)
+		(size 2.999994 1.599996)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(thermal_bridge_angle 45)
+		(uuid "cf0272bf-a82b-462e-8da4-5a729786cbfb")
+	)
+	(pad "2" smd rect
+		(at -3.423937 -0.000148)
+		(size 6.199987 5.799988)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(thermal_bridge_angle 45)
+		(uuid "9d279f21-4c3b-4ad5-bb3a-6a0541573225")
+	)
+	(pad "3" smd rect
+		(at 3.424156 -2.285132)
+		(size 2.999994 1.599996)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(thermal_bridge_angle 45)
+		(uuid "3f6f915a-559c-497d-84d7-1b09cdada227")
+	)
+	(embedded_fonts no)
+	(model "${KIPRJMOD}/GoodmanHP.3dshapes/TO-252-2_L6.6-W6.1-P4.57-LS10.1-BR-CW.step"
+		(offset
+			(xyz 0.001119666667 0.0001483333333 0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 270)
+		)
+	)
+)

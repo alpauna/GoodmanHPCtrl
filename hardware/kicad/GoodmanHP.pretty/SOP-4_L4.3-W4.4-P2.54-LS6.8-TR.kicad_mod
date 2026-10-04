@@ -1,0 +1,114 @@
+(footprint "SOP-4_L4.3-W4.4-P2.54-LS6.8-TR"
+	(version 20260206)
+	(generator "pcbnew")
+	(generator_version "10.0")
+	(layer "F.Cu")
+	(property "Reference" ""
+		(at 0 -4.6 0)
+		(layer "F.SilkS")
+		(uuid "cdb79c30-76a4-420d-9181-e88ca23d30f7")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+		)
+	)
+	(property "Value" ""
+		(at 0 4.6 0)
+		(layer "F.Fab")
+		(uuid "3be255ae-ac99-421d-9a0e-379acc9f4dd7")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "cb62752e-9106-4d2b-ae8a-7a08e4b5adf0")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "ace64752-3453-498f-b4b0-531a4f414f2f")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(attr smd)
+	(duplicate_pad_numbers_are_jumpers no)
+	(fp_rect
+		(start -2.11992 -3.849919)
+		(end 2.120076 3.85)
+		(stroke
+			(width 0.05)
+			(type default)
+		)
+		(fill no)
+		(layer "F.CrtYd")
+		(uuid "bb685be1-e79e-4907-8409-ce0fa4e5eef5")
+	)
+	(fp_rect
+		(start -2.457994 -3.6)
+		(end 2.457994 3.6)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "e3703eab-26a8-4e9d-9287-721255521c43")
+	)
+	(pad "1" smd rect
+		(at 1.270078 -2.99992)
+		(size 0.799998 1.199997)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(thermal_bridge_angle 45)
+		(uuid "795e3603-2030-438a-8b9e-0f9abd5e7893")
+	)
+	(pad "2" smd rect
+		(at -1.269921 -2.99992)
+		(size 0.799998 1.199997)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(thermal_bridge_angle 45)
+		(uuid "e5a5b9c1-5812-4f78-8fdf-59d819e8114b")
+	)
+	(pad "3" smd rect
+		(at -1.269921 3.000067)
+		(size 0.799998 1.199997)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(thermal_bridge_angle 45)
+		(uuid "70418786-5b0a-443a-868e-192d5ff229c7")
+	)
+	(pad "4" smd rect
+		(at 1.270078 3.000067)
+		(size 0.799998 1.199997)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(thermal_bridge_angle 45)
+		(uuid "4ddbbf0b-b108-426b-a309-81298401e780")
+	)
+	(embedded_fonts no)
+	(model "${KIPRJMOD}/GoodmanHP.3dshapes/SOP-4_L4.3-W4.4-P2.54-LS6.8-TR.step"
+		(offset
+			(xyz 0.0000785 -0.0000735000000001 0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 180)
+		)
+	)
+)

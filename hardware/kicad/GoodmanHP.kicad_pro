@@ -1,0 +1,242 @@
+{
+  "board": {
+    "design_settings": {
+      "defaults": {},
+      "rules": {
+        "min_clearance": 0.1,
+        "min_track_width": 0.15,
+        "min_via_diameter": 0.45,
+        "min_through_hole_diameter": 0.25,
+        "min_copper_edge_clearance": 0.3,
+        "min_hole_to_hole": 0.25,
+        "min_hole_clearance": 0.25
+      }
+    }
+  },
+  "meta": {
+    "filename": "GoodmanHP.kicad_pro",
+    "version": 1
+  },
+  "net_settings": {
+    "classes": [
+      {
+        "clearance": 0.1,
+        "track_width": 0.2,
+        "via_diameter": 0.6,
+        "via_drill": 0.3,
+        "diff_pair_gap": 0.25,
+        "diff_pair_width": 0.2,
+        "diff_pair_via_gap": 0.25,
+        "microvia_diameter": 0.3,
+        "microvia_drill": 0.1,
+        "wire_width": 6,
+        "bus_width": 12,
+        "line_style": 0,
+        "pcb_color": "rgba(0, 0, 0, 0.000)",
+        "schematic_color": "rgba(0, 0, 0, 0.000)",
+        "name": "Default",
+        "priority": 2147483647
+      },
+      {
+        "clearance": 0.1,
+        "track_width": 0.6,
+        "via_diameter": 0.8,
+        "via_drill": 0.4,
+        "diff_pair_gap": 0.25,
+        "diff_pair_width": 0.2,
+        "diff_pair_via_gap": 0.25,
+        "microvia_diameter": 0.3,
+        "microvia_drill": 0.1,
+        "wire_width": 6,
+        "bus_width": 12,
+        "line_style": 0,
+        "pcb_color": "rgba(0, 0, 0, 0.000)",
+        "schematic_color": "rgba(0, 0, 0, 0.000)",
+        "name": "Power",
+        "priority": 1
+      },
+      {
+        "clearance": 0.1,
+        "track_width": 0.4,
+        "via_diameter": 0.6,
+        "via_drill": 0.3,
+        "diff_pair_gap": 0.25,
+        "diff_pair_width": 0.2,
+        "diff_pair_via_gap": 0.25,
+        "microvia_diameter": 0.3,
+        "microvia_drill": 0.1,
+        "wire_width": 6,
+        "bus_width": 12,
+        "line_style": 0,
+        "pcb_color": "rgba(0, 0, 0, 0.000)",
+        "schematic_color": "rgba(0, 0, 0, 0.000)",
+        "name": "Supply",
+        "priority": 2
+      },
+      {
+        "clearance": 0.1,
+        "track_width": 0.5,
+        "via_diameter": 0.6,
+        "via_drill": 0.3,
+        "diff_pair_gap": 0.25,
+        "diff_pair_width": 0.2,
+        "diff_pair_via_gap": 0.25,
+        "microvia_diameter": 0.3,
+        "microvia_drill": 0.1,
+        "wire_width": 6,
+        "bus_width": 12,
+        "line_style": 0,
+        "pcb_color": "rgba(0, 0, 0, 0.000)",
+        "schematic_color": "rgba(0, 0, 0, 0.000)",
+        "name": "Earth",
+        "priority": 3
+      },
+      {
+        "clearance": 0.4,
+        "track_width": 0.8,
+        "via_diameter": 1.0,
+        "via_drill": 0.5,
+        "diff_pair_gap": 0.25,
+        "diff_pair_width": 0.2,
+        "diff_pair_via_gap": 0.25,
+        "microvia_diameter": 0.3,
+        "microvia_drill": 0.1,
+        "wire_width": 6,
+        "bus_width": 12,
+        "line_style": 0,
+        "pcb_color": "rgba(0, 0, 0, 0.000)",
+        "schematic_color": "rgba(0, 0, 0, 0.000)",
+        "name": "HV",
+        "priority": 0
+      }
+    ],
+    "meta": {
+      "version": 4
+    },
+    "net_colors": null,
+    "netclass_assignments": null,
+    "netclass_patterns": [
+      {
+        "netclass": "HV",
+        "pattern": "$4N1700"
+      },
+      {
+        "netclass": "HV",
+        "pattern": "$4N2243"
+      },
+      {
+        "netclass": "HV",
+        "pattern": "$4N87499"
+      },
+      {
+        "netclass": "HV",
+        "pattern": "$4N92014"
+      },
+      {
+        "netclass": "HV",
+        "pattern": "$4N92181"
+      },
+      {
+        "netclass": "HV",
+        "pattern": "$4N92182"
+      },
+      {
+        "netclass": "HV",
+        "pattern": "FAN-OUT"
+      },
+      {
+        "netclass": "HV",
+        "pattern": "FAN-PWR"
+      },
+      {
+        "netclass": "HV",
+        "pattern": "NET_3"
+      },
+      {
+        "netclass": "Earth",
+        "pattern": "E-GND"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "$2N844"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "$2N846"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "$4N92173"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "$4N92179"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "$4N92203"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "$4N92214"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "24VAC"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "5V"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "5VPF"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "CNT"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "LT"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "O-RV"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "SW"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "VBUS"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "W"
+      },
+      {
+        "netclass": "Supply",
+        "pattern": "3.3V"
+      },
+      {
+        "netclass": "Supply",
+        "pattern": "AGND"
+      },
+      {
+        "netclass": "Supply",
+        "pattern": "GND"
+      }
+    ]
+  },
+  "pcbnew": {
+    "page_layout_descr_file": ""
+  },
+  "schematic": {
+    "legacy_lib_dir": "",
+    "legacy_lib_list": []
+  },
+  "sheets": [],
+  "text_variables": {}
+}

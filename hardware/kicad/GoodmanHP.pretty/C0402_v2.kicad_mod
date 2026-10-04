@@ -1,0 +1,100 @@
+(footprint "C0402_v2"
+	(version 20260206)
+	(generator "pcbnew")
+	(generator_version "10.0")
+	(layer "F.Cu")
+	(property "Reference" ""
+		(at 0 -1.574803 0)
+		(layer "F.SilkS")
+		(uuid "188c8eb7-f37d-4796-b3a8-72831c7dbc83")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+		)
+	)
+	(property "Value" ""
+		(at 0 1.574803 0)
+		(layer "F.Fab")
+		(uuid "d5b9f0e4-b641-4bdb-8946-3f619dd2ad82")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "f79b121c-34b6-4826-a714-6773bb40bdd6")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "04d1fb3b-8dc1-4fd6-beb5-5e93f7702119")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(attr smd)
+	(duplicate_pad_numbers_are_jumpers no)
+	(fp_rect
+		(start -0.940239 -0.520066)
+		(end 0.939996 0.519937)
+		(stroke
+			(width 0.05)
+			(type default)
+		)
+		(fill no)
+		(layer "F.CrtYd")
+		(uuid "e081a250-217f-4570-8b48-ea951433603e")
+	)
+	(fp_rect
+		(start -1.244907 -0.574803)
+		(end 1.244907 0.574803)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "5836b839-b520-46f7-ad7b-ad685f605054")
+	)
+	(pad "1" smd rect
+		(at -0.420237 -0.000064)
+		(size 0.499999 0.540004)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(thermal_bridge_angle 45)
+		(uuid "822fc725-127d-4fa3-930f-4357a164d665")
+	)
+	(pad "2" smd rect
+		(at 0.419994 -0.000064)
+		(size 0.499999 0.540004)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(thermal_bridge_angle 45)
+		(uuid "463bc8fe-a8eb-4404-a99f-eae8deb63879")
+	)
+	(embedded_fonts no)
+	(model "${KIPRJMOD}/GoodmanHP.3dshapes/C0402_L1.0-W0.5-H0.5.step"
+		(offset
+			(xyz -0.0001635 0.000087 0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+)

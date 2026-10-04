@@ -1,0 +1,111 @@
+(footprint "HDR-TH_3P-P2.54-V-M_PZ254V-11-03P"
+	(version 20260206)
+	(generator "pcbnew")
+	(generator_version "10.0")
+	(layer "F.Cu")
+	(property "Reference" ""
+		(at 0 -2.377 0)
+		(layer "F.SilkS")
+		(uuid "89607808-17b8-4d3f-96cb-484bfa73345a")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+		)
+	)
+	(property "Value" ""
+		(at 0 2.377 0)
+		(layer "F.Fab")
+		(uuid "fb13064d-d03f-45ff-8e6b-dc0b59f54367")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "965ed1dd-64fb-41b9-8875-bc017f40e119")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "2ff4c37d-5e5a-4e62-a242-ca4040f6e0d7")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(attr through_hole)
+	(duplicate_pad_numbers_are_jumpers no)
+	(fp_rect
+		(start -3.640009 -1.100092)
+		(end 3.639986 1.099904)
+		(stroke
+			(width 0.05)
+			(type default)
+		)
+		(fill no)
+		(layer "F.CrtYd")
+		(uuid "462ed32c-4f63-4e95-97e2-02bd1a3a7184")
+	)
+	(fp_rect
+		(start -3.937007 -1.377)
+		(end 3.937007 1.377)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "46a4b039-2cfc-45e4-8378-b609640113e0")
+	)
+	(pad "1" thru_hole rect
+		(at -2.540011 -0.000093)
+		(size 1.699996 1.699996)
+		(drill 1.020013)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(thermal_bridge_angle 45)
+		(uuid "1df823cd-11c4-451a-9950-efed44619edf")
+	)
+	(pad "2" thru_hole circle
+		(at -0.000011 -0.000093)
+		(size 1.699996 1.699996)
+		(drill 1.020013)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "38c20e85-30a4-4230-ad7e-ed93f673ba79")
+	)
+	(pad "3" thru_hole circle
+		(at 2.539988 -0.000093)
+		(size 1.699996 1.699996)
+		(drill 1.020013)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "0e449d69-c2f7-42d1-8fda-2f36b950e7cb")
+	)
+	(embedded_fonts no)
+	(model "${KIPRJMOD}/GoodmanHP.3dshapes/HDR-TH_3P-P2.54-V-M_PZ254V-11-03P.step"
+		(offset
+			(xyz -0.0000113333333332 0.000093 0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+)
